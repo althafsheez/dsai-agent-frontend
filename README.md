@@ -1,9 +1,9 @@
 # DSAI
 
-Production-quality frontend foundation for an agentic analytics workspace.
+Agentic analytics workspace with a production-quality frontend foundation and a minimal modular FastAPI backend.
 
 ## Current scope
-Phase 1 only: dark reference tokens, self-hosted Inter, responsive shared shell, compact navigation, search dialog, New Analysis draft, and placeholder routes. No agent, uploads, authentication, data persistence or backend is implemented yet. Disabled controls are intentional. No fake model responses.
+The frontend is still mock-backed and is not yet connected to HTTP. A backend foundation now persists demo users, workspaces, chats, ordered messages, text-only Gemini runs, and structured SSE events. Uploads, resource preview/download, Queue/Steer, Quick Assistant, Tavily, E2B, SQL, visualization tools, and frontend integration remain pending. Disabled controls are intentional.
 
 ## Local development
 Requires Node >=20.19 and npm.
@@ -15,6 +15,8 @@ npm run dev
 
 Open http://localhost:3000. Start in this directory:
 `/home/althafsheez/Desktop/Projects/dsai-agent-frontend`.
+
+Backend setup and run commands are documented in [backend/README.md](backend/README.md).
 
 ## Verification
 ```sh
@@ -52,4 +54,3 @@ The user's final decisions override reference-specific routes, fonts and framewo
 If Google Chrome is already installed, use `PLAYWRIGHT_CHANNEL=chrome npm run test:e2e` instead of downloading a browser.
 
 Dependency overrides pin Next's PostCSS to the patched 8.x release and TypeScript ESLint's minimatch to a compatible patched release. These keep Next.js 15 while resolving installation audit findings. Recheck these overrides when upgrading framework/tooling.
-

@@ -1,6 +1,11 @@
 # DSAI API contract — final decision baseline
 2026-11-09. This contract defines implementation, not already available endpoints. HTTP JSON uses snake_case, stable opaque IDs, UTC ISO timestamps. DTOs and fetch/SSE adapters live in src/lib/api. Backend serves /api, with an explicitly configured public base URL or same-origin proxy; secrets never use NEXT_PUBLIC variables.
 
+## Implemented backend foundation (2026-11-09)
+The first backend slice implements demo users, workspace/chat/message persistence, model discovery/validation, text-only Gemini runs, incremental execution events, cancellation checkpoints, retry, local byte storage, and Alembic initialization. The canonical execution endpoint is `POST /api/chats/{id}/messages/stream`. `POST /api/chats/{id}/runs` is a temporary compatibility path for the initial backend brief; it accepts the same `RunStart` body and emits the same envelopes. Neither path creates a user message: both require an existing `user_message_id`.
+
+Only events that occur are emitted. This slice emits `agent.started`, `message.created`, `message.delta`, `message.completed`, `agent.completed`, `agent.failed`, `agent.cancelled`, and `agent.interrupted` using the envelope documented below. Tool/resource, Queue/Steer, upload, History, Library, and Quick Assistant endpoints remain planned and are not claimed as implemented.
+
 ## Common responses and identity
 Lists: {items: T[], next_cursor: string|null}. Default 25, max 100; stable cursor includes sort key and ID. Errors: {error:{code,message,request_id,details?}}; details are sanitized.
 Demo GET /api/demo/users -> {items:[{id,name,initials}]}. Frontend useAuth selects a stable ID, sends X-Demo-User-Id; backend validates against predefined users. Seed demo-owned and explicitly accessible shared records to exercise All. This header is demo identity, not secure authentication. Central access checks apply to every resource/run, including user switching.
@@ -89,4 +94,3 @@ Only backend/storage contains durable bytes, under generated IDs. SQLite metadat
 Dedup registration by run_id + normalized output path + content hash. Repeated scan unchanged -> same record; changed bytes at same path -> preserved new version. Shared FileObject can back links without byte duplication.
 Register structured outputs as Datasets, other supported outputs as Artifacts; emit corresponding event after durable copy/metadata commit. Cleanup partial failed copies, never delete registered files on unstar/archive/soft delete.
 GET /api/health reports readiness; keys backend environment only. Configurable origins/limits; public deployment of demo identity is explicitly unsupported.
-

@@ -27,6 +27,7 @@ Updated 2026-11-09 from final user decisions. Implement and verify sequentially.
 - Gates: component tests for draft context, scope, panel modes and retry; Playwright new chat -> move -> History and file preview. Mock label visible.
 
 ## Phase 3 — Backend persistence and real files — PENDING
+- Verified partial foundation on `codex/backend-foundation`: FastAPI/SQLAlchemy/Alembic, demo ownership, workspaces, chats, ordered messages, Gemini provider boundary, text SSE runs, progressive events, cancellation checkpoints, retry identity, and safe local byte storage. This does not complete Phase 3: upload/preview/download, resource APIs, History, archive/delete lifecycle, Library, and frontend HTTP integration remain pending.
 - FastAPI + SQLAlchemy/SQLite; demo identities/access; typed routes and DTO parity.
 - Chats/workspaces lifecycle, independent archive, soft delete, pagination, title fallback.
 - Upload-on-Send orchestration, per-file idempotency and partial failures; CSV/Excel/Parquet inspection, image/PDF artifact registration, local file objects, preview/download.
@@ -69,4 +70,3 @@ Updated 2026-11-09 from final user decisions. Implement and verify sequentially.
 
 ## Known prerequisites
 No backend code, reusable runner, credentials or runtime state existed in the new project at inspection. Obtain runtime keys through backend environment during integration, never commit them. Phase 1 does not need provider keys. Real provider acceptance cannot pass with mocks alone. Demo auth is local/demo only; sharing/voice/external connectors/builders remain explicitly deferred.
-
