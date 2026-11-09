@@ -19,7 +19,7 @@ export function FilePreviewSidebar({ file, onBack, onClose }: FilePreviewSidebar
   return (
     <aside className="flex h-full min-h-0 w-full flex-col border-l bg-sidebar text-sidebar-foreground" aria-label={`Preview ${file.name}`}>
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
-        <button type="button" onClick={onBack} aria-label="Return to context" className="flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
+        <button type="button" onClick={onBack} aria-label="Back to context" className="flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
           <ArrowLeft className="size-4" />
           <span>Back</span>
         </button>

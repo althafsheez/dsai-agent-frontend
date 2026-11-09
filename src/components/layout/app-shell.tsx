@@ -16,6 +16,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const mobileOpen = useUiStore((state) => state.mobileSidebarOpen);
   const setMobileOpen = useUiStore((state) => state.setMobileSidebarOpen);
   const pathname = usePathname();
+  const isChat = pathname.startsWith("/chat/");
   const menuButton = useRef<HTMLButtonElement>(null);
   const title = pathname === "/" ? "New Analysis" : navigation.find((item) => pathname.startsWith(item.href))?.label ?? (pathname.startsWith("/chat/") ? "Conversation" : "Settings");
 
@@ -32,14 +33,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
     <div className="flex min-w-0 flex-1 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4 sm:px-6">
+      {!isChat && <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4 sm:px-6">
         <Button ref={menuButton} variant="ghost" size="icon" aria-label="Open navigation" aria-expanded={mobileOpen} className="md:hidden" onClick={() => setMobileOpen(true)}><Menu /></Button>
         <span className="text-xs text-muted-foreground">{title}</span>
         <span className="ml-auto rounded border px-2 py-1 text-[10px] text-muted-foreground">Frontend preview</span>
         <div className="md:hidden"><SearchDialog onNavigate={() => setMobileOpen(false)} /></div>
-      </header>
-      <main id="main-content" tabIndex={-1} className="flex min-h-0 flex-1 flex-col overflow-y-auto outline-none">{children}</main>
+      </header>}
+      <main id="main-content" tabIndex={-1} className={cn("flex min-h-0 flex-1 flex-col outline-none", isChat ? "overflow-hidden" : "overflow-y-auto")}>{children}</main>
     </div>
   </div>;
 }
-

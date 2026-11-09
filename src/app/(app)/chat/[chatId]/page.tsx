@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import { PlaceholderPage } from "@/components/layout/placeholder-page";
+import { ChatPage } from "@/features/chat/components/chat-page";
 export const metadata: Metadata = { title: "Conversation" };
-export default function Page() {
-  return <PlaceholderPage title="Conversation" description="Your questions, data and execution history in one place." next="The shared chat interface and agent streaming are planned for the next phases." />;
+export default async function Page({ params }: { params: Promise<{ chatId: string }> }) {
+  const { chatId } = await params;
+  return <ChatPage chatId={chatId} />;
 }
-

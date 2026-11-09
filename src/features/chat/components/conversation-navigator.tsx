@@ -11,7 +11,7 @@ export function ConversationNavigator({ messages, activeId, onNavigate }: { mess
     <div className="flex w-full flex-col items-center gap-3">{questions.map((question) => {
       const questionIndex = messages.findIndex((message) => message.id === question.id);
       const answer = messages.slice(questionIndex + 1).find((message) => message.role === "assistant");
-      const answerPreview = answer?.role === "assistant" && answer.blocks.find((block) => block.type === "markdown");
+      const answerPreview = answer?.role === "assistant" ? answer.blocks.find((block) => block.type === "markdown") : undefined;
       return <HoverCard.Root key={question.id} openDelay={180} closeDelay={80}>
         <HoverCard.Trigger asChild><button onClick={() => onNavigate(question.id)} aria-label={`Go to question: ${question.content}`} aria-current={activeId === question.id ? "location" : undefined} className={cn("h-1.5 w-4 rounded-full bg-border-strong transition-all hover:w-6 hover:bg-muted-foreground", activeId === question.id && "w-6 bg-sage")} /></HoverCard.Trigger>
         <HoverCard.Portal><HoverCard.Content side="right" sideOffset={12} className="z-50 w-64 rounded-lg border bg-surface p-3 shadow-xl">

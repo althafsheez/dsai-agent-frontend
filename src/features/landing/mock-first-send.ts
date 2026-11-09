@@ -1,3 +1,5 @@
+import { MOCK_STORAGE_KEY, readMockEnvelope, updateMockEnvelope } from "@/lib/mock/mock-store";
+
 export type LandingAttachmentKind = "dataset" | "artifact";
 
 export interface LandingAttachmentMetadata {
@@ -47,7 +49,6 @@ export interface CreateLandingChatInput {
   attachments: File[];
 }
 
-const STORAGE_KEY = "dsai:landing-mock-chats:v1";
 const DATASET_EXTENSIONS = new Set(["csv", "xls", "xlsx", "parquet"]);
 
 function createId(prefix: string) {
@@ -64,22 +65,8 @@ function attachmentKind(filename: string): LandingAttachmentKind {
 
 function readState(): LandingMockState {
   const empty: LandingMockState = { version: 1, chats: [] };
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return empty;
-    const parsed: unknown = JSON.parse(raw);
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      !("version" in parsed) ||
-      parsed.version !== 1 ||
-      !("chats" in parsed) ||
-      !Array.isArray(parsed.chats)
-    ) return empty;
-    return parsed as LandingMockState;
-  } catch {
-    return empty;
-  }
+  const envelope = readMockEnvelope();
+  return Array.isArray(envelope.chats) ? { version: 1, chats: envelope.chats as LandingMockChat[] } : empty;
 }
 
 function fallbackTitle(content: string) {
@@ -126,11 +113,11 @@ export function createLandingMockChat(input: CreateLandingChatInput): LandingMoc
   };
 
   const state = readState();
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, chats: [chat, ...state.chats] }));
+  updateMockEnvelope((envelope) => ({ ...envelope, chats: [chat, ...state.chats] }));
   return chat;
 }
 
 export const landingMockStorage = {
-  key: STORAGE_KEY,
+  key: MOCK_STORAGE_KEY,
   read: readState,
 };

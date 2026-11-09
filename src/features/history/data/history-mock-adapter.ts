@@ -1,12 +1,8 @@
 import { currentDemoUser, type HistoryFilterOptions, type HistoryRecord } from "../types";
+import { MOCK_STORAGE_KEY, readMockEnvelope, writeMockEnvelope } from "@/lib/mock/mock-store";
+import type { LandingMockChat } from "@/features/landing/mock-first-send";
 
-const STORAGE_KEY = "dsai.mock.data.v1";
-
-interface MockEnvelope {
-  version: 1;
-  history?: { records: HistoryRecord[] };
-  [key: string]: unknown;
-}
+interface HistoryEnvelope { records: HistoryRecord[] }
 
 function hoursAgo(hours: number): string {
   return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
@@ -36,30 +32,35 @@ function isRecord(value: unknown): value is HistoryRecord {
     && typeof record.author.name === "string";
 }
 
-function readEnvelope(): MockEnvelope {
-  if (typeof window === "undefined") return { version: 1, history: { records: seedRecords() } };
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { version: 1 };
-    const parsed = JSON.parse(raw) as MockEnvelope;
-    return parsed && parsed.version === 1 ? parsed : { version: 1 };
-  } catch {
-    return { version: 1 };
-  }
-}
-
 function readRecords(): HistoryRecord[] {
-  const envelope = readEnvelope();
-  const records = envelope.history?.records;
+  const envelope = readMockEnvelope();
+  const history = envelope.history as HistoryEnvelope | undefined;
+  const records = history?.records;
   if (Array.isArray(records) && records.every(isRecord)) return records;
   const seeded = seedRecords();
   writeRecords(seeded, envelope);
   return seeded;
 }
 
-function writeRecords(records: HistoryRecord[], base = readEnvelope()): void {
+function writeRecords(records: HistoryRecord[], base = readMockEnvelope()): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...base, version: 1, history: { records } } satisfies MockEnvelope));
+  writeMockEnvelope({ ...base, history: { records } });
+}
+
+function landingHistoryRecords(): HistoryRecord[] {
+  const envelope = readMockEnvelope();
+  if (!Array.isArray(envelope.chats)) return [];
+  return (envelope.chats as LandingMockChat[]).map((chat) => ({
+    kind: "chat",
+    id: chat.id,
+    name: chat.title,
+    workspace_id: chat.workspaceId,
+    workspace_name: chat.workspaceId === "workspace-revenue" ? "Revenue Planning" : chat.workspaceId === "workspace-research" ? "Customer Research" : null,
+    author: currentDemoUser,
+    updated_at: chat.updatedAt,
+    archived_at: chat.archivedAt,
+    deleted_at: chat.deletedAt,
+  }));
 }
 
 function visibleRecords(records: HistoryRecord[]): HistoryRecord[] {
@@ -68,10 +69,13 @@ function visibleRecords(records: HistoryRecord[]): HistoryRecord[] {
 }
 
 export const historyMockAdapter = {
-  storageKey: STORAGE_KEY,
+  storageKey: MOCK_STORAGE_KEY,
 
   async list(): Promise<HistoryRecord[]> {
-    return visibleRecords(readRecords());
+    const persisted = readRecords();
+    const landing = landingHistoryRecords();
+    const landingIds = new Set(landing.map((record) => record.id));
+    return visibleRecords([...landing, ...persisted.filter((record) => !landingIds.has(record.id))]);
   },
 
   async options(): Promise<HistoryFilterOptions> {
@@ -110,4 +114,3 @@ export const historyMockAdapter = {
       : record));
   },
 };
-
