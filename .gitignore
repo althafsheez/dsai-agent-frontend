@@ -1,0 +1,17 @@
+node_modules/
+.next/
+.next-dev/
+out/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+.env*
+!.env.example
+next-env.d.ts
+backend/.venv/
+backend/storage/
+backend/*.db*
+backend/**/__pycache__/
+.DS_Store
+
