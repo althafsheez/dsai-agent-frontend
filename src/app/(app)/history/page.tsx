@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import { PlaceholderPage } from "@/components/layout/placeholder-page";
+import { Suspense } from "react";
+import { HistoryPage } from "@/features/history/components/history-page";
 export const metadata: Metadata = { title: "History" };
 export default function Page() {
-  return <PlaceholderPage title="History" description="Revisit your analyses and workspaces." next="Search, ownership filters and archived items will live here." />;
+  return <Suspense fallback={<div className="mx-auto w-full max-w-6xl px-6 py-10 text-xs text-muted-foreground">Loading history…</div>}><HistoryPage /></Suspense>;
 }
-
