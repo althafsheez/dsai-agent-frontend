@@ -1,0 +1,45 @@
+import { AlertTriangle, RotateCcw, Sparkles } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import type { AssistantMessage as AssistantMessageType, MessageBlock } from "../types";
+import { AgentTrace } from "./agent-trace";
+import { ChartBlock } from "./chart-block";
+import { CodeBlock } from "./code-block";
+import { FileBlock } from "./file-block";
+import { TableBlock } from "./table-block";
+
+function InlineText({ text }: { text: string }) {
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  return <>{parts.map((part, index) => part.startsWith("**") && part.endsWith("**") ? <strong key={index} className="font-semibold text-foreground">{part.slice(2, -2)}</strong> : part.startsWith("`") && part.endsWith("`") ? <code key={index} className="rounded bg-raised px-1.5 py-0.5 font-mono text-[0.9em]">{part.slice(1, -1)}</code> : part)}</>;
+}
+
+function Markdown({ content }: { content: string }) {
+  return <div className="space-y-3 text-[13px] leading-6 text-foreground/90">{content.split("\n\n").map((paragraph, index) => {
+    if (paragraph.startsWith("## ")) return <h2 key={index} className="pt-1 text-base font-medium tracking-tight text-foreground"><InlineText text={paragraph.slice(3)} /></h2>;
+    if (paragraph.startsWith("- ")) return <ul key={index} className="list-disc space-y-1 pl-5">{paragraph.split("\n").map((item) => <li key={item}><InlineText text={item.replace(/^- /, "")} /></li>)}</ul>;
+    return <p key={index}><InlineText text={paragraph} /></p>;
+  })}</div>;
+}
+
+function MessageRenderer({ block }: { block: MessageBlock }) {
+  switch (block.type) {
+    case "markdown": return <Markdown content={block.content} />;
+    case "code": return <CodeBlock {...block} />;
+    case "table": return <TableBlock {...block} />;
+    case "chart": return <ChartBlock {...block} />;
+    case "image": return <figure className="my-4 overflow-hidden rounded-lg border bg-surface"><img src={block.src} alt={block.alt} className="max-h-[480px] w-full object-contain" />{block.caption && <figcaption className="border-t px-3 py-2 text-[11px] text-muted-foreground">{block.caption}</figcaption>}</figure>;
+    case "file": return <FileBlock {...block} />;
+  }
+}
+
+export function AssistantMessage({ message, onRetry }: { message: AssistantMessageType; onRetry?: (message: AssistantMessageType) => void }) {
+  return <div className="flex gap-3">
+    <div className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md border bg-surface text-sage"><Sparkles className="size-3.5" /></div>
+    <div className="min-w-0 max-w-3xl flex-1">
+      {message.trace?.length ? <AgentTrace steps={message.trace} /> : null}
+      <div aria-live={message.status === "running" ? "polite" : undefined}>{message.blocks.map((block, index) => <MessageRenderer key={`${message.id}-${index}`} block={block} />)}</div>
+      {message.status === "running" && <span className="mt-2 inline-block h-4 w-1 animate-pulse rounded bg-sage" aria-label="Response streaming" />}
+      {(message.status === "failed" || message.status === "interrupted") && <div role="alert" className="mt-4 flex items-start gap-3 rounded-lg border border-red-400/30 bg-red-400/5 p-3"><AlertTriangle className="mt-0.5 size-4 text-red-400" /><div className="flex-1"><p className="text-xs font-medium">{message.status === "failed" ? "The preview run failed" : "The preview run was interrupted"}</p><p className="mt-1 text-[11px] text-muted-foreground">Completed output is preserved. Retry creates a new attempt without duplicating your question.</p></div>{onRetry && <Button variant="outline" size="sm" onClick={() => onRetry(message)}><RotateCcw />Retry</Button>}</div>}
+      <time dateTime={message.createdAt} className="mt-3 block text-[10px] text-muted-foreground">{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
+    </div>
+  </div>;
+}
