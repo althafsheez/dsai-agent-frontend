@@ -5,7 +5,7 @@ import type { AssistantMessage as AssistantMessageType, ChatMessage } from "../t
 import { AssistantMessage } from "./assistant-message";
 import { UserMessage } from "./user-message";
 
-export function MessageList({ messages, onRetry, onFileSelect, registerSection }: { messages: ChatMessage[]; onRetry: (message: AssistantMessageType) => void; onFileSelect: (id: string) => void; registerSection: (id: string, node: HTMLElement | null) => void }) {
+export function MessageList({ messages, onRetry, onFileSelect, registerSection }: { messages: ChatMessage[]; onRetry?: (message: AssistantMessageType) => void; onFileSelect: (id: string) => void; registerSection: (id: string, node: HTMLElement | null) => void }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const runningContent = useMemo(() => {
     const running = messages.find((message): message is AssistantMessageType => message.role === "assistant" && message.status === "running");

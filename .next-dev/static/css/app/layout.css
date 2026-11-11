@@ -988,6 +988,9 @@ video {
 .min-h-0 {
   min-height: 0px;
 }
+.min-h-4 {
+  min-height: 1rem;
+}
 .min-h-48 {
   min-height: 12rem;
 }
@@ -1104,6 +1107,9 @@ video {
 }
 .max-w-\[128px\] {
   max-width: 128px;
+}
+.max-w-\[180px\] {
+  max-width: 180px;
 }
 .max-w-\[240px\] {
   max-width: 240px;
@@ -1632,6 +1638,9 @@ video {
 .uppercase {
   text-transform: uppercase;
 }
+.capitalize {
+  text-transform: capitalize;
+}
 .normal-case {
   text-transform: none;
 }
@@ -1677,6 +1686,10 @@ video {
 }
 .tracking-wide {
   letter-spacing: 0.025em;
+}
+.text-amber-200 {
+  --tw-text-opacity: 1;
+  color: rgb(253 230 138 / var(--tw-text-opacity, 1));
 }
 .text-foreground {
   color: var(--foreground);
@@ -1758,75 +1771,97 @@ video {
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   transition-duration: 150ms;
 }
+
 .placeholder\:text-muted-foreground::-moz-placeholder {
   color: var(--muted-foreground);
 }
+
 .placeholder\:text-muted-foreground::placeholder {
   color: var(--muted-foreground);
 }
+
 .after\:absolute::after {
   content: var(--tw-content);
   position: absolute;
 }
+
 .after\:inset-x-3::after {
   content: var(--tw-content);
   left: 0.75rem;
   right: 0.75rem;
 }
+
 .after\:bottom-0::after {
   content: var(--tw-content);
   bottom: 0px;
 }
+
 .after\:h-px::after {
   content: var(--tw-content);
   height: 1px;
 }
+
 .after\:bg-foreground::after {
   content: var(--tw-content);
   background-color: var(--foreground);
 }
+
 .last\:mb-0:last-child {
   margin-bottom: 0px;
 }
+
 .last\:border-0:last-child {
   border-width: 0px;
 }
+
 .last\:border-b-0:last-child {
   border-bottom-width: 0px;
 }
+
 .last\:border-r-0:last-child {
   border-right-width: 0px;
 }
+
 .focus-within\:border-border-strong:focus-within {
   border-color: var(--border-strong);
 }
+
 .focus-within\:border-ring:focus-within {
   border-color: var(--ring);
 }
+
 .hover\:w-6:hover {
   width: 1.5rem;
 }
+
 .hover\:border-border-strong:hover {
   border-color: var(--border-strong);
 }
+
 .hover\:bg-muted-foreground:hover {
   background-color: var(--muted-foreground);
 }
+
 .hover\:bg-raised:hover {
   background-color: var(--surface-raised);
 }
+
 .hover\:bg-sidebar-accent:hover {
   background-color: var(--sidebar-accent);
 }
+
 .hover\:bg-surface:hover {
   background-color: var(--surface);
 }
+
 .hover\:text-foreground:hover {
   color: var(--foreground);
 }
+
 .hover\:opacity-90:hover {
   opacity: 0.9;
 }
+
 .focus\:not-sr-only:focus {
   position: static;
   width: auto;
@@ -1837,40 +1872,64 @@ video {
   clip: auto;
   white-space: normal;
 }
+
 .focus\:absolute:focus {
   position: absolute;
 }
+
 .focus\:left-4:focus {
   left: 1rem;
 }
+
 .focus\:top-4:focus {
   top: 1rem;
 }
+
 .focus\:border-border-strong:focus {
   border-color: var(--border-strong);
 }
+
+.focus\:border-ring:focus {
+  border-color: var(--ring);
+}
+
 .focus\:opacity-100:focus {
   opacity: 1;
 }
+
 .focus-visible\:bg-raised:focus-visible {
   background-color: var(--surface-raised);
 }
+
 .disabled\:cursor-not-allowed:disabled {
   cursor: not-allowed;
 }
+
 .disabled\:opacity-30:disabled {
   opacity: 0.3;
 }
+
 .disabled\:opacity-40:disabled {
   opacity: 0.4;
 }
+
+.disabled\:opacity-50:disabled {
+  opacity: 0.5;
+}
+
+.disabled\:opacity-60:disabled {
+  opacity: 0.6;
+}
+
 .group:hover .group-hover\:opacity-100 {
   opacity: 1;
 }
+
 .group[data-state="closed"] .group-data-\[state\=closed\]\:-rotate-90 {
   --tw-rotate: -90deg;
   transform: translate(var(--tw-translate-x), var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y));
 }
+
 @media (min-width: 640px) {
 
   .sm\:mx-1 {
@@ -1977,6 +2036,7 @@ video {
     font-size: 34px;
   }
 }
+
 @media (min-width: 768px) {
 
   .md\:block {
@@ -1987,6 +2047,7 @@ video {
     display: none;
   }
 }
+
 @media (min-width: 1024px) {
 
   .lg\:px-8 {
@@ -1999,6 +2060,7 @@ video {
     padding-bottom: 2.5rem;
   }
 }
+
 @media (min-width: 1280px) {
 
   .xl\:static {
@@ -2027,10 +2089,12 @@ video {
     box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
   }
 }
+
 .\[\&_svg\]\:size-4 svg {
   width: 1rem;
   height: 1rem;
 }
+
 .\[\&_svg\]\:shrink-0 svg {
   flex-shrink: 0;
 }

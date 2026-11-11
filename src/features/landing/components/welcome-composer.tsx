@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import Image from "next/image";
 import {
   ArrowUp,
@@ -22,30 +23,14 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { createChat, getModels, getWorkspaces } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { createLandingMockChat } from "../mock-first-send";
+import { savePendingRun } from "@/features/chat/pending-run";
 
 const suggestions = [
   { icon: ChartNoAxesCombined, label: "Explore trends", prompt: "Help me explore trends in my data." },
   { icon: Search, label: "Find what changed", prompt: "What changed in my data, and what might explain it?" },
   { icon: FileText, label: "Create a report", prompt: "Create a concise report with the key findings from my data." },
-] as const;
-
-const workspaces = [
-  { id: null, label: "Standalone" },
-  { id: "workspace-revenue", label: "Revenue Planning" },
-  { id: "workspace-research", label: "Customer Research" },
-] as const;
-
-const models = [
-  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-  { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-] as const;
-
-const efforts = [
-  { id: "low", label: "Low" },
-  { id: "medium", label: "Medium" },
-  { id: "high", label: "High" },
 ] as const;
 
 type OpenMenu = "add" | "workspace" | "model" | "effort" | null;
@@ -74,11 +59,13 @@ function shortFileType(file: File) {
 
 export function WelcomeComposer() {
   const router = useRouter();
+  const modelsQuery = useQuery({ queryKey: ["models"], queryFn: getModels });
+  const workspacesQuery = useQuery({ queryKey: ["workspaces"], queryFn: getWorkspaces });
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
-  const [modelId, setModelId] = useState<string>(models[0].id);
-  const [effort, setEffort] = useState<string>(efforts[1].id);
+  const [modelId, setModelId] = useState("");
+  const [effort, setEffort] = useState("");
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,10 +76,33 @@ export function WelcomeComposer() {
   const openerRef = useRef<HTMLElement | null>(null);
   const attachmentsRef = useRef<DraftAttachment[]>([]);
 
+  const workspaces = [
+    { id: null, label: "Standalone" },
+    ...(workspacesQuery.data?.items.map((workspace) => ({ id: workspace.id, label: workspace.name })) ?? []),
+  ];
+  const models = useMemo(() => modelsQuery.data?.models ?? [], [modelsQuery.data?.models]);
   const selectedWorkspace = workspaces.find((workspace) => workspace.id === workspaceId) ?? workspaces[0];
   const selectedModel = models.find((model) => model.id === modelId) ?? models[0];
-  const selectedEffort = efforts.find((option) => option.id === effort) ?? efforts[1];
-  const canSend = draft.trim().length > 0 && !submitting;
+  const efforts = selectedModel?.supported_efforts.map((id) => ({
+    id,
+    label: id.charAt(0).toUpperCase() + id.slice(1),
+  })) ?? [];
+  const selectedEffort = efforts.find((option) => option.id === effort) ?? efforts[0];
+  const canSend = draft.trim().length > 0 && !submitting && Boolean(selectedModel) && attachments.length === 0;
+
+  useEffect(() => {
+    if (!models.length) return;
+    if (!models.some((model) => model.id === modelId)) {
+      setModelId(modelsQuery.data?.default_model_id ?? models[0].id);
+    }
+  }, [modelId, models, modelsQuery.data?.default_model_id]);
+
+  useEffect(() => {
+    if (!selectedModel) return;
+    if (!selectedModel.supported_efforts.includes(effort)) {
+      setEffort(selectedModel.default_effort ?? selectedModel.supported_efforts[0] ?? "");
+    }
+  }, [effort, selectedModel]);
 
   useLayoutEffect(() => {
     const input = inputRef.current;
@@ -156,19 +166,25 @@ export function WelcomeComposer() {
     });
   }
 
-  function submit() {
+  async function submit() {
     if (!canSend) return;
     setSubmitting(true);
     setError(null);
     try {
-      const chat = createLandingMockChat({
+      const createRequestId = crypto.randomUUID();
+      const result = await createChat({
         content: draft,
-        workspaceId,
-        modelId,
-        effort,
-        attachments: attachments.map((attachment) => attachment.file),
+        workspace_id: workspaceId,
+        client_request_id: createRequestId,
       });
-      router.push(`/chat/${chat.id}`);
+      savePendingRun({
+        chatId: result.chat.id,
+        userMessageId: result.message.id,
+        modelId: selectedModel.id,
+        effort: selectedEffort?.id ?? null,
+        clientRequestId: crypto.randomUUID(),
+      });
+      router.push(`/chat/${result.chat.id}`);
     } catch (caught) {
       setSubmitting(false);
       setError(caught instanceof Error ? caught.message : "Could not start this analysis. Try again.");
@@ -242,11 +258,12 @@ export function WelcomeComposer() {
         <span className="mx-0.5 h-4 w-px bg-border sm:mx-1" aria-hidden="true" />
 
         <div className="relative">
-          <Button type="button" variant="ghost" size="sm" aria-label={`Model: ${selectedModel.label}`} aria-haspopup="menu" aria-expanded={openMenu === "model"}
+          <Button type="button" variant="ghost" size="sm" disabled={!selectedModel} aria-label={`Model: ${selectedModel?.label ?? "Unavailable"}`} aria-haspopup="menu" aria-expanded={openMenu === "model"}
             onClick={(event) => toggleMenu("model", event.currentTarget)} className="max-w-[58px] px-1.5 sm:max-w-none sm:px-2.5">
-            <span className="truncate sm:hidden">{selectedModel.label.replace("Gemini 2.5 ", "")}</span><span className="hidden sm:inline">{selectedModel.label}</span><ChevronDown className="!size-3" />
+            <span className="truncate sm:hidden">{selectedModel?.label.split(" ").at(-1) ?? "Model"}</span><span className="hidden sm:inline">{selectedModel?.label ?? "No models"}</span><ChevronDown className="!size-3" />
           </Button>
           {openMenu === "model" && <div role="menu" aria-label="Select model" className="absolute bottom-10 left-0 z-20 w-52 rounded-lg border border-border-strong bg-raised p-1.5 shadow-2xl">
+            {!models.length && <p className="px-2.5 py-2 text-xs text-muted-foreground">No configured models</p>}
             {models.map((model) => <button key={model.id} type="button" role="menuitemradio" aria-checked={model.id === modelId} onClick={() => { setModelId(model.id); setOpenMenu(null); }} className="flex w-full items-center rounded-md px-2.5 py-2 text-left text-xs hover:bg-surface">
               <span>{model.label}</span>{model.id === modelId && <Check className="ml-auto size-3.5 text-sage" />}
             </button>)}
@@ -254,8 +271,8 @@ export function WelcomeComposer() {
         </div>
 
         <div className="relative">
-          <Button type="button" variant="ghost" size="sm" aria-label={`Reasoning effort: ${selectedEffort.label}`} aria-haspopup="menu" aria-expanded={openMenu === "effort"}
-            onClick={(event) => toggleMenu("effort", event.currentTarget)} className="px-1.5 sm:px-2.5"><CircleGauge /><span className="hidden sm:inline">{selectedEffort.label}</span><ChevronDown className="!size-3" /></Button>
+          <Button type="button" variant="ghost" size="sm" disabled={!selectedEffort} aria-label={`Reasoning effort: ${selectedEffort?.label ?? "Default"}`} aria-haspopup="menu" aria-expanded={openMenu === "effort"}
+            onClick={(event) => toggleMenu("effort", event.currentTarget)} className="px-1.5 sm:px-2.5"><CircleGauge /><span className="hidden sm:inline">{selectedEffort?.label ?? "Default"}</span><ChevronDown className="!size-3" /></Button>
           {openMenu === "effort" && <div role="menu" aria-label="Select reasoning effort" className="absolute bottom-10 left-0 z-20 w-40 rounded-lg border border-border-strong bg-raised p-1.5 shadow-2xl">
             {efforts.map((option) => <button key={option.id} type="button" role="menuitemradio" aria-checked={option.id === effort} onClick={() => { setEffort(option.id); setOpenMenu(null); }} className="flex w-full items-center rounded-md px-2.5 py-2 text-left text-xs hover:bg-surface">
               <span>{option.label}</span>{option.id === effort && <Check className="ml-auto size-3.5 text-sage" />}
@@ -279,6 +296,12 @@ export function WelcomeComposer() {
     <div id="composer-status" className="mt-2 min-h-5 text-center text-[11px] leading-relaxed text-muted-foreground" aria-live="polite">
       {error
         ? <p role="alert" className="text-red-300">{error}</p>
+        : attachments.length > 0
+          ? <p role="alert" className="text-amber-200">File upload is not connected yet. Remove attachments to start this chat.</p>
+          : modelsQuery.isError
+            ? <p role="alert" className="text-red-300">Could not load Gemini models. Is the backend running on port 8000?</p>
+            : modelsQuery.data && !models.length
+              ? <p role="alert" className="text-amber-200">{modelsQuery.data.configuration_status}</p>
         : <p id="composer-hint"><span className="hidden sm:inline">Enter to send · Shift + Enter for a new line</span><span className="sm:hidden">Add files, choose a workspace, then send</span></p>}
     </div>
 

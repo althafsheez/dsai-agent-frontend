@@ -5,12 +5,13 @@ type AppRoutes = "/" | "/chat/[chatId]" | "/connectors" | "/dashboards" | "/hist
 type PageRoutes = never
 type LayoutRoutes = "/"
 type RedirectRoutes = never
-type RewriteRoutes = never
+type RewriteRoutes = "/api/backend/[[...path]]"
 type Routes = AppRoutes | PageRoutes | LayoutRoutes | RedirectRoutes | RewriteRoutes
 
 
 interface ParamMap {
   "/": {}
+  "/api/backend/[[...path]]": { "path"?: string[]; }
   "/chat/[chatId]": { "chatId": string; }
   "/connectors": {}
   "/dashboards": {}

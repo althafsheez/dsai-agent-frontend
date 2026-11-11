@@ -1,4 +1,5 @@
 import { AlertTriangle, RotateCcw, Sparkles } from "lucide-react";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import type { AssistantMessage as AssistantMessageType, MessageBlock } from "../types";
 import { AgentTrace } from "./agent-trace";
@@ -26,7 +27,7 @@ function MessageRenderer({ block, onFileSelect }: { block: MessageBlock; onFileS
     case "code": return <CodeBlock {...block} />;
     case "table": return <TableBlock {...block} />;
     case "chart": return <ChartBlock {...block} />;
-    case "image": return <figure className="my-4 overflow-hidden rounded-lg border bg-surface"><img src={block.src} alt={block.alt} className="max-h-[480px] w-full object-contain" />{block.caption && <figcaption className="border-t px-3 py-2 text-[11px] text-muted-foreground">{block.caption}</figcaption>}</figure>;
+    case "image": return <figure className="my-4 overflow-hidden rounded-lg border bg-surface"><Image src={block.src} alt={block.alt} width={1200} height={800} unoptimized className="max-h-[480px] w-full object-contain" />{block.caption && <figcaption className="border-t px-3 py-2 text-[11px] text-muted-foreground">{block.caption}</figcaption>}</figure>;
     case "file": return <FileBlock {...block} onPreview={onFileSelect} />;
   }
 }
@@ -38,7 +39,7 @@ export function AssistantMessage({ message, onRetry, onFileSelect }: { message: 
       {message.trace?.length ? <AgentTrace steps={message.trace} /> : null}
       <div aria-live={message.status === "running" ? "polite" : undefined}>{message.blocks.map((block, index) => <MessageRenderer key={`${message.id}-${index}`} block={block} onFileSelect={onFileSelect} />)}</div>
       {message.status === "running" && <span className="mt-2 inline-block h-4 w-1 animate-pulse rounded bg-sage" aria-label="Response streaming" />}
-      {(message.status === "failed" || message.status === "interrupted") && <div role="alert" className="mt-4 flex items-start gap-3 rounded-lg border border-red-400/30 bg-red-400/5 p-3"><AlertTriangle className="mt-0.5 size-4 text-red-400" /><div className="flex-1"><p className="text-xs font-medium">{message.status === "failed" ? "The preview run failed" : "The preview run was interrupted"}</p><p className="mt-1 text-[11px] text-muted-foreground">Completed output is preserved. Retry creates a new attempt without duplicating your question.</p></div>{onRetry && <Button variant="outline" size="sm" onClick={() => onRetry(message)}><RotateCcw />Retry</Button>}</div>}
+      {(message.status === "failed" || message.status === "interrupted") && <div role="alert" className="mt-4 flex items-start gap-3 rounded-lg border border-red-400/30 bg-red-400/5 p-3"><AlertTriangle className="mt-0.5 size-4 text-red-400" /><div className="flex-1"><p className="text-xs font-medium">{message.status === "failed" ? "The Gemini response failed" : "The Gemini response was interrupted"}</p><p className="mt-1 text-[11px] text-muted-foreground">Any completed output remains saved in this conversation.</p></div>{onRetry && <Button variant="outline" size="sm" onClick={() => onRetry(message)}><RotateCcw />Retry</Button>}</div>}
       <time dateTime={message.createdAt} className="mt-3 block text-[10px] text-muted-foreground">{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
     </div>
   </div>;

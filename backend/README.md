@@ -9,7 +9,7 @@ From the repository root:
 ```bash
 python3 -m venv backend/.venv
 backend/.venv/bin/pip install -r backend/requirements.txt
-cp backend/.env.example backend/.env
+cp -n backend/.env.example backend/.env
 # Add DSAI_GEMINI_API_KEY to backend/.env for live generation.
 backend/.venv/bin/alembic -c backend/alembic.ini upgrade head
 backend/.venv/bin/uvicorn backend.app.main:app --reload --port 8000
@@ -23,9 +23,9 @@ Run tests:
 backend/.venv/bin/pytest -c backend/pytest.ini backend/tests
 ```
 
-## Frontend migration path
+## Frontend integration
 
-The current frontend mock records already resemble the API's snake_case DTOs, but its presentation types use camelCase and rendered message blocks. Add the HTTP adapter later under `src/lib/api`; map API `Chat`, `Message`, and SSE envelopes into those presentation types there. Do not fetch inside components or mirror API records into Zustand. The canonical stream endpoint is `POST /api/chats/{chat_id}/messages/stream` using `fetch`, not `EventSource`, because it has a JSON request body.
+The main frontend chat is connected through the typed adapter under `src/lib/api`. It uses TanStack Query for persisted records and `fetch` for the canonical `POST /api/chats/{chat_id}/messages/stream` endpoint because the stream request has a JSON body. The incremental SSE parser updates active assistant text while completed messages and events remain backend-owned and reloadable.
 
 ## Future tools without restructuring
 

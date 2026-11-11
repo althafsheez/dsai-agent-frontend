@@ -27,7 +27,7 @@ Updated 2026-11-09 from final user decisions. Implement and verify sequentially.
 - Gates: component tests for draft context, scope, panel modes and retry; Playwright new chat -> move -> History and file preview. Mock label visible.
 
 ## Phase 3 — Backend persistence and real files — PENDING
-- Verified partial foundation on `codex/backend-foundation`: FastAPI/SQLAlchemy/Alembic, demo ownership, workspaces, chats, ordered messages, Gemini provider boundary, text SSE runs, progressive events, cancellation checkpoints, retry identity, and safe local byte storage. This does not complete Phase 3: upload/preview/download, resource APIs, History, archive/delete lifecycle, Library, and frontend HTTP integration remain pending.
+- Verified partial foundation on `codex/backend-foundation`: FastAPI/SQLAlchemy/Alembic, demo ownership, workspaces, chats, ordered messages, Gemini provider boundary, text SSE runs, progressive events, cancellation checkpoints, retry identity, safe local byte storage, and frontend HTTP integration for text chat. This does not complete Phase 3: upload/preview/download, resource APIs, History, archive/delete lifecycle, and Library remain pending.
 - FastAPI + SQLAlchemy/SQLite; demo identities/access; typed routes and DTO parity.
 - Chats/workspaces lifecycle, independent archive, soft delete, pagination, title fallback.
 - Upload-on-Send orchestration, per-file idempotency and partial failures; CSV/Excel/Parquet inspection, image/PDF artifact registration, local file objects, preview/download.
@@ -35,6 +35,7 @@ Updated 2026-11-09 from final user decisions. Implement and verify sequentially.
 - Gates: API tests for no pre-send record, partial upload retry, scope after move, 100-row cap, favorite no copies, independent archive/soft delete, access failures and refresh persistence.
 
 ## Phase 4 — Gemini runs, queue and steering — PENDING
+- Verified partial text-chat slice: backend model discovery, functional model/effort selection, first and follow-up POST-SSE runs, progressive rendering, persisted reload, deterministic SSE parsing, and credential-backed Gemini/browser checks. Queue, steering, title generation, Quick Assistant, and the remaining lifecycle gates are not implemented.
 - Single Gemini runner, allowlisted model/effort metadata, title generation with manual-rename protection.
 - Incremental fetch SSE + progressive DB events/text; tool/summary/error renderers.
 - Per-chat run coordination, durable queue ordering, safe-checkpoint steering and received/applied/unapplied statuses.
