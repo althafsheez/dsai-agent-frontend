@@ -51,4 +51,4 @@ backend/*.db*
 backend/**/__pycache__/
 .DS_Store
 
-.worktrees/
+.worktrees//.next-dev/
