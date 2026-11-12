@@ -89,3 +89,25 @@ export interface RunStartInput {
   effort?: string;
   client_request_id: string;
 }
+
+export interface QueueRunInput {
+  content: string;
+  model_id: string;
+  effort?: string;
+  client_request_id: string;
+}
+
+export interface QueueRunResponse {
+  message: MessageDto;
+  run: AgentRunDto;
+  position: number;
+}
+
+export interface SteeringInstructionDto {
+  id: string;
+  run_id: string;
+  message_id: string;
+  status: "received" | "applied" | "unapplied";
+  checkpoint: string | null;
+  created_at: string;
+}

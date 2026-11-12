@@ -68,7 +68,7 @@ describe("welcome composer", () => {
     expect(input).toHaveValue("What changed in my data, and what might explain it?");
   });
 
-  it("keeps attachment previews but blocks unsupported upload-on-send", async () => {
+  it("keeps attachment previews ready for upload-on-send", async () => {
     const user = userEvent.setup();
     renderComposer();
     const csv = new File(["a,b"], "sales.csv", { type: "text/csv" });
@@ -78,7 +78,7 @@ describe("welcome composer", () => {
     const previews = screen.getByLabelText("Selected attachments");
     expect(within(previews).getByText("sales.csv")).toBeVisible();
     expect(within(previews).getByText("summary.pdf")).toBeVisible();
-    expect(screen.getByText(/File upload is not connected yet/)).toBeVisible();
+    expect(screen.getByText(/Files will upload securely when you send/)).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Remove sales.csv" }));
     expect(screen.queryByText("sales.csv")).not.toBeInTheDocument();
   });

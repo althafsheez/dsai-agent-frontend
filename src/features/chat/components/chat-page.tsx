@@ -1,16 +1,40 @@
 "use client";
 
-import { ArrowUp, LoaderCircle, Plus } from "lucide-react";
+import Image from "next/image";
+import {
+  ArrowUp,
+  ChevronRight,
+  CirclePause,
+  CornerDownRight,
+  Database,
+  FileText,
+  ListPlus,
+  LoaderCircle,
+  Mail,
+  Paperclip,
+  Plus,
+  Search,
+  Snowflake,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ContextSidebar, type ContextFile } from "@/features/context-sidebar";
 import {
   createMessage,
+  cancelQueuedRun,
+  getArtifacts,
   getChat,
+  getDatasets,
   getMessages,
   getModels,
   getWorkspaces,
+  queueRun,
+  resumeChatQueue,
+  steerRun,
   streamChatRun,
+  uploadResource,
   type ExecutionEvent,
   type MessageDto,
 } from "@/lib/api";
@@ -45,6 +69,43 @@ function eventString(event: ExecutionEvent, key: string): string | null {
   return typeof value === "string" ? value : null;
 }
 
+function toolLabel(name: string): string {
+  return name.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+}
+
+interface QueuedQuestion {
+  runId: string;
+  content: string;
+  position: number;
+  removing: boolean;
+  paused: boolean;
+}
+
+interface DraftAttachment {
+  id: string;
+  file: File;
+  previewUrl: string | null;
+}
+
+type ConnectorCategory = "all" | "skills" | "data" | "apps";
+
+const connectorItems = [
+  { name: "Data Cleaning", category: "skills" as const, icon: Sparkles },
+  { name: "Snowflake", category: "data" as const, icon: Snowflake },
+  { name: "PostgreSQL", category: "data" as const, icon: Database },
+  { name: "Gmail", category: "apps" as const, icon: Mail },
+];
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fileType(file: File) {
+  return file.name.split(".").pop()?.toUpperCase() || "FILE";
+}
+
 export function ChatPage({ chatId }: { chatId: string }) {
   const queryClient = useQueryClient();
   const chatQuery = useQuery({ queryKey: ["chat", chatId], queryFn: () => getChat(chatId) });
@@ -55,25 +116,55 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<ContextFile | null>(null);
   const [draft, setDraft] = useState("");
+  const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const [connectorCategory, setConnectorCategory] = useState<ConnectorCategory>("all");
+  const [connectorQuery, setConnectorQuery] = useState("");
   const [modelId, setModelId] = useState("");
   const [effort, setEffort] = useState("");
   const [running, setRunning] = useState(false);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [queuedQuestions, setQueuedQuestions] = useState<QueuedQuestion[]>([]);
+  const [composerPending, setComposerPending] = useState<"queue" | "steer" | null>(null);
+  const [composerStatus, setComposerStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<string>();
+  const datasetsQuery = useQuery({
+    queryKey: ["chat", chatId, "datasets"],
+    queryFn: () => getDatasets(chatId),
+    enabled: panelOpen,
+  });
+  const artifactsQuery = useQuery({
+    queryKey: ["chat", chatId, "artifacts"],
+    queryFn: () => getArtifacts(chatId),
+    enabled: panelOpen,
+  });
   const sections = useRef(new Map<string, HTMLElement>());
+  const composerRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentsRef = useRef<DraftAttachment[]>([]);
   const initialRunChecked = useRef(false);
   const streamController = useRef<AbortController | null>(null);
+  const queuedQuestionsRef = useRef<QueuedQuestion[]>([]);
   const models = useMemo(() => modelsQuery.data?.models ?? [], [modelsQuery.data?.models]);
   const selectedModel = models.find((model) => model.id === modelId) ?? models[0];
   const supportedEfforts = selectedModel?.supported_efforts ?? [];
   const workspaceName = workspacesQuery.data?.items.find(
     (workspace) => workspace.id === chatQuery.data?.workspace_id,
   )?.name;
+  const visibleConnectors = connectorItems.filter((connector) => (
+    (connectorCategory === "all" || connector.category === connectorCategory)
+    && connector.name.toLowerCase().includes(connectorQuery.trim().toLowerCase())
+  ));
 
   useEffect(() => {
     if (!messagesQuery.data) return;
     const next = messagesQuery.data.items.map(toMessage);
-    setMessages(next);
+    setMessages((current) => next.map((message) => {
+      if (message.role !== "assistant") return message;
+      const existing = current.find((item): item is AssistantMessage => item.role === "assistant" && item.id === message.id);
+      return existing?.trace?.length ? { ...message, trace: existing.trace } : message;
+    }));
     setActiveSection((current) => current ?? next.find((message) => message.role === "user")?.id);
   }, [messagesQuery.data]);
 
@@ -93,28 +184,59 @@ export function ChatPage({ chatId }: { chatId: string }) {
 
   useEffect(() => () => streamController.current?.abort(), []);
 
-  const runMessage = useCallback(async (input: {
-    userMessageId: string;
-    modelId: string;
-    effort: string | null;
-    clientRequestId: string;
-  }) => {
-    const placeholderId = `assistant-pending-${input.clientRequestId}`;
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+
+  useEffect(() => () => {
+    attachmentsRef.current.forEach((attachment) => {
+      if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!attachmentMenuOpen) return;
+    const close = (event: PointerEvent) => {
+      if (!composerRef.current?.contains(event.target as Node)) setAttachmentMenuOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAttachmentMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [attachmentMenuOpen]);
+
+  useEffect(() => {
+    queuedQuestionsRef.current = queuedQuestions;
+  }, [queuedQuestions]);
+
+  const runMessage = useCallback(async (input:
+    | { type: "message"; userMessageId: string; modelId: string; effort: string | null; clientRequestId: string }
+    | { type: "resume-queue" }
+  ) => {
+    const placeholderId = input.type === "message" ? `assistant-pending-${input.clientRequestId}` : "";
     let assistantId = placeholderId;
+    let streamRunId: string | null = null;
     const controller = new AbortController();
     streamController.current = controller;
     setRunning(true);
     setError(null);
-    setMessages((current) => [
-      ...current,
-      {
-        id: placeholderId,
-        role: "assistant",
-        status: "running",
-        createdAt: new Date().toISOString(),
-        blocks: [{ type: "markdown", content: "" }],
-      },
-    ]);
+    if (input.type === "message") {
+      setMessages((current) => [
+        ...current,
+        {
+          id: placeholderId,
+          role: "assistant",
+          status: "running",
+          createdAt: new Date().toISOString(),
+          blocks: [{ type: "markdown", content: "" }],
+        },
+      ]);
+    }
 
     function updateAssistant(update: (message: AssistantMessage) => AssistantMessage) {
       setMessages((current) => current.map((message) => (
@@ -127,12 +249,34 @@ export function ChatPage({ chatId }: { chatId: string }) {
     function onEvent(event: ExecutionEvent) {
       if (event.type === "agent.started") {
         const run = event.data.run;
-        if (run && typeof run === "object" && "assistant_message_id" in run) {
-          const id = (run as { assistant_message_id?: unknown }).assistant_message_id;
-          if (typeof id === "string") {
+        if (run && typeof run === "object") {
+          const runData = run as { id?: unknown; assistant_message_id?: unknown };
+          const nextRunId = typeof runData.id === "string" ? runData.id : null;
+          const id = runData.assistant_message_id;
+          if (nextRunId) setActiveRunId(nextRunId);
+          const startsQueuedRun = nextRunId && typeof id === "string" && (
+            (streamRunId !== null && nextRunId !== streamRunId) || input.type === "resume-queue"
+          );
+          if (startsQueuedRun) {
+            const queued = queuedQuestionsRef.current.find((item) => item.runId === nextRunId);
+            setQueuedQuestions((current) => {
+              const next = current.filter((item) => item.runId !== nextRunId);
+              queuedQuestionsRef.current = next;
+              return next;
+            });
+            assistantId = id;
+            if (queued) {
+              setMessages((current) => [
+                ...current,
+                { id: `queued-user-${nextRunId}`, role: "user", content: queued.content, createdAt: new Date().toISOString() },
+                { id, role: "assistant", status: "running", createdAt: new Date().toISOString(), blocks: [{ type: "markdown", content: "" }] },
+              ]);
+            }
+          } else if (typeof id === "string") {
             assistantId = id;
             updateAssistant((message) => ({ ...message, id }));
           }
+          if (nextRunId) streamRunId = nextRunId;
         }
         return;
       }
@@ -153,6 +297,28 @@ export function ChatPage({ chatId }: { chatId: string }) {
         });
         return;
       }
+      if (event.type === "tool.started") {
+        const id = eventString(event, "tool_call_id");
+        const name = eventString(event, "name");
+        if (!id || !name) return;
+        updateAssistant((message) => ({
+          ...message,
+          trace: [...(message.trace ?? []), { id, label: toolLabel(name), detail: "Tool is running", status: "running" }],
+        }));
+        return;
+      }
+      if (event.type === "tool.completed" || event.type === "tool.failed") {
+        const id = eventString(event, "tool_call_id");
+        if (!id) return;
+        const failed = event.type === "tool.failed";
+        updateAssistant((message) => ({
+          ...message,
+          trace: (message.trace ?? []).map((step) => step.id === id
+            ? { ...step, detail: failed ? eventString(event, "error") ?? "Tool failed" : "Completed", status: failed ? "failed" : "completed" }
+            : step),
+        }));
+        return;
+      }
       if (event.type === "message.completed") {
         const content = eventString(event, "content") ?? "";
         updateAssistant((message) => ({
@@ -162,12 +328,21 @@ export function ChatPage({ chatId }: { chatId: string }) {
         }));
         return;
       }
+      if (event.type === "steer.applied") {
+        setComposerStatus("Steering instruction applied to the active run.");
+        return;
+      }
+      if (event.type === "steer.unapplied") {
+        setComposerStatus("The response finished before the steering instruction could be applied.");
+        return;
+      }
       if (event.type === "agent.failed") {
         const failure = event.data.error;
         const message = failure && typeof failure === "object" && "message" in failure
           ? String((failure as { message: unknown }).message)
           : "Gemini could not complete this response.";
         setError(message);
+        setQueuedQuestions((current) => current.map((item) => ({ ...item, paused: true })));
         updateAssistant((assistant) => ({ ...assistant, status: "failed" }));
         return;
       }
@@ -177,12 +352,16 @@ export function ChatPage({ chatId }: { chatId: string }) {
     }
 
     try {
-      await streamChatRun(chatId, {
-        user_message_id: input.userMessageId,
-        model_id: input.modelId,
-        effort: input.effort ?? undefined,
-        client_request_id: input.clientRequestId,
-      }, onEvent, controller.signal);
+      if (input.type === "message") {
+        await streamChatRun(chatId, {
+          user_message_id: input.userMessageId,
+          model_id: input.modelId,
+          effort: input.effort ?? undefined,
+          client_request_id: input.clientRequestId,
+        }, onEvent, controller.signal);
+      } else {
+        await resumeChatQueue(chatId, onEvent, controller.signal);
+      }
     } catch (caught) {
       if (controller.signal.aborted) {
         updateAssistant((message) => ({ ...message, status: "interrupted" }));
@@ -193,6 +372,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
       }
     } finally {
       if (streamController.current === controller) streamController.current = null;
+      setActiveRunId(null);
       setRunning(false);
       await queryClient.invalidateQueries({ queryKey: ["chat", chatId, "messages"] });
       await queryClient.invalidateQueries({ queryKey: ["chat", chatId] });
@@ -207,6 +387,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
     setModelId(pending.modelId);
     setEffort(pending.effort ?? "");
     void runMessage({
+      type: "message",
       userMessageId: pending.userMessageId,
       modelId: pending.modelId,
       effort: pending.effort,
@@ -226,6 +407,28 @@ export function ChatPage({ chatId }: { chatId: string }) {
     });
   }
 
+  function addFiles(fileList: FileList | null) {
+    if (!fileList?.length) return;
+    const next = Array.from(fileList).map<DraftAttachment>((file) => ({
+      id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+      file,
+      previewUrl: file.type.startsWith("image/") && typeof URL.createObjectURL === "function"
+        ? URL.createObjectURL(file)
+        : null,
+    }));
+    setAttachments((current) => [...current, ...next]);
+    setError(null);
+    setAttachmentMenuOpen(false);
+  }
+
+  function removeAttachment(id: string) {
+    setAttachments((current) => {
+      const removed = current.find((attachment) => attachment.id === id);
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      return current.filter((attachment) => attachment.id !== id);
+    });
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = draft.trim();
@@ -237,9 +440,32 @@ export function ChatPage({ chatId }: { chatId: string }) {
         content,
         client_request_id: crypto.randomUUID(),
       });
+      for (const attachment of attachments) {
+        await uploadResource({
+          file: attachment.file,
+          scopeType: "chat",
+          scopeId: chatId,
+          messageId: userMessage.id,
+          clientUploadId: attachment.id,
+        });
+      }
       setMessages((current) => [...current, toMessage(userMessage)]);
       setDraft("");
+      setAttachments((current) => {
+        current.forEach((attachment) => {
+          if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+        });
+        return [];
+      });
+      if (attachments.length) {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["chat", chatId, "datasets"] }),
+          queryClient.invalidateQueries({ queryKey: ["chat", chatId, "artifacts"] }),
+        ]);
+        setPanelOpen(true);
+      }
       await runMessage({
+        type: "message",
         userMessageId: userMessage.id,
         modelId: selectedModel.id,
         effort: effort || null,
@@ -249,6 +475,79 @@ export function ChatPage({ chatId }: { chatId: string }) {
       setRunning(false);
       setError(caught instanceof Error ? caught.message : "Could not send this message.");
     }
+  }
+
+  async function queueDraft() {
+    const content = draft.trim();
+    if (!content || !activeRunId || !selectedModel || composerPending) return;
+    setComposerPending("queue");
+    setComposerStatus(null);
+    setError(null);
+    try {
+      const result = await queueRun(activeRunId, {
+        content,
+        model_id: selectedModel.id,
+        effort: effort || undefined,
+        client_request_id: crypto.randomUUID(),
+      });
+      const queuedQuestion = {
+        runId: result.run.id,
+        content: result.message.content,
+        position: result.position,
+        removing: false,
+        paused: false,
+      };
+      setQueuedQuestions((current) => {
+        const next = [...current, queuedQuestion];
+        queuedQuestionsRef.current = next;
+        return next;
+      });
+      setDraft("");
+      setComposerStatus("Question added to the queue.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not queue this question.");
+    } finally {
+      setComposerPending(null);
+    }
+  }
+
+  async function steerDraft() {
+    const content = draft.trim();
+    if (!content || !activeRunId || composerPending) return;
+    setComposerPending("steer");
+    setComposerStatus(null);
+    setError(null);
+    try {
+      await steerRun(activeRunId, { content, client_request_id: crypto.randomUUID() });
+      setDraft("");
+      setComposerStatus("Steering instruction sent to the active run.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not steer the active run.");
+    } finally {
+      setComposerPending(null);
+    }
+  }
+
+  async function removeQueuedQuestion(runId: string) {
+    setQueuedQuestions((current) => current.map((item) => item.runId === runId ? { ...item, removing: true } : item));
+    setError(null);
+    try {
+      await cancelQueuedRun(runId);
+      setQueuedQuestions((current) => {
+        const next = current.filter((item) => item.runId !== runId);
+        queuedQuestionsRef.current = next;
+        return next;
+      });
+      setComposerStatus("Queued question removed.");
+    } catch (caught) {
+      setQueuedQuestions((current) => current.map((item) => item.runId === runId ? { ...item, removing: false } : item));
+      setError(caught instanceof Error ? caught.message : "Could not remove the queued question.");
+    }
+  }
+
+  function resumePausedQueue() {
+    if (running || !queuedQuestions.some((item) => item.paused)) return;
+    void runMessage({ type: "resume-queue" });
   }
 
   return (
@@ -287,15 +586,94 @@ export function ChatPage({ chatId }: { chatId: string }) {
           )}
         </div>
         <form className="col-start-2 row-start-3 bg-background p-3 sm:p-4" onSubmit={submit}>
-          <div className="mx-auto max-w-3xl rounded-lg border border-border-strong bg-surface p-2 focus-within:border-ring">
+          {queuedQuestions.length ? (
+            <div className="mx-auto mb-2 max-w-3xl space-y-1.5" aria-label="Queued questions">
+              {queuedQuestions.map((item) => (
+                <div key={item.runId} className="flex items-center gap-2 rounded-md border border-border bg-raised px-3 py-2 text-xs">
+                  {item.paused ? <CirclePause className="size-3.5 shrink-0 text-amber-300" aria-hidden="true" /> : <LoaderCircle className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />}
+                  <span className="shrink-0 font-medium text-foreground">{item.paused ? "Paused" : `Queued${item.position > 1 ? ` · ${item.position}` : ""}`}</span>
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">{item.content}</span>
+                  {item.paused ? (
+                    <button type="button" onClick={resumePausedQueue} aria-label="Resume queued questions" className="rounded px-1.5 py-1 text-[11px] font-medium text-amber-200 hover:bg-surface hover:text-amber-100">
+                      Resume
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => void removeQueuedQuestion(item.runId)}
+                    disabled={item.removing}
+                    aria-label={`Remove queued question: ${item.content}`}
+                    className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-surface hover:text-foreground disabled:opacity-50"
+                  >
+                    {item.removing ? <LoaderCircle className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {running && activeRunId && draft.trim() ? (
+            <div className="mx-auto mb-2 flex max-w-3xl items-center gap-2" aria-label="Active run actions">
+              <button type="button" onClick={() => void queueDraft()} disabled={Boolean(composerPending)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border-strong bg-raised px-3 text-xs font-medium text-foreground hover:bg-surface disabled:opacity-40">
+                {composerPending === "queue" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ListPlus className="size-3.5" />}
+                Queue
+              </button>
+              <button type="button" onClick={() => void steerDraft()} disabled={Boolean(composerPending)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40">
+                {composerPending === "steer" ? <LoaderCircle className="size-3.5 animate-spin" /> : <CornerDownRight className="size-3.5" />}
+                Steer
+              </button>
+            </div>
+          ) : null}
+          <div ref={composerRef} className="relative mx-auto max-w-3xl rounded-lg border border-border-strong bg-surface p-2 focus-within:border-ring">
+            {attachments.length ? (
+              <div aria-label="Selected chat attachments" className="mb-2 flex gap-2 overflow-x-auto pb-1">
+                {attachments.map((attachment) => (
+                  <div key={attachment.id} className="relative flex min-w-[180px] max-w-[240px] items-center gap-2 rounded-lg border bg-raised p-2 pr-8">
+                    <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md border bg-surface text-muted-foreground">
+                      {attachment.previewUrl ? (
+                        <Image src={attachment.previewUrl} alt="" width={36} height={36} unoptimized className="size-full object-cover" />
+                      ) : <FileText className="size-4" />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-[11px] font-medium text-foreground">{attachment.file.name}</span>
+                      <span className="mt-0.5 block text-[10px] text-muted-foreground">{fileType(attachment.file)} · {formatFileSize(attachment.file.size)}</span>
+                    </span>
+                    <button type="button" onClick={() => removeAttachment(attachment.id)} aria-label={`Remove ${attachment.file.name}`} className="absolute right-1 top-1 grid size-6 place-items-center rounded text-muted-foreground hover:bg-surface hover:text-foreground"><X className="size-3.5" /></button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <div className="flex items-end gap-2">
-              <button type="button" aria-label="Add attachment unavailable" disabled className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground opacity-50"><Plus className="size-4" /></button>
+              <div className="relative">
+                <button type="button" aria-label="Add files or connectors" aria-haspopup="dialog" aria-expanded={attachmentMenuOpen} disabled={running || messagesQuery.isError} onClick={() => setAttachmentMenuOpen((open) => !open)} className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40"><Plus className="size-4" /></button>
+                {attachmentMenuOpen ? (
+                  <div role="dialog" aria-label="Add files and connectors" className="absolute bottom-11 left-0 z-50 w-[min(430px,calc(100vw-2rem))] rounded-xl border border-border-strong bg-[#191b1e] p-3 shadow-[0_22px_70px_rgba(0,0,0,0.55)]">
+                    <button type="button" onClick={() => fileInputRef.current?.click()} className="flex w-full items-center gap-3 rounded-xl border border-border-strong bg-[linear-gradient(110deg,#303744,#242a33)] p-3 text-left hover:border-slate/70">
+                      <span className="grid size-12 shrink-0 place-items-center rounded-xl bg-[#b8cef0] text-[#172033]"><Paperclip className="size-6" /></span>
+                      <span><span className="block text-sm font-semibold text-foreground">Add files</span><span className="mt-0.5 block text-xs text-foreground/65">From your device</span></span>
+                      <ChevronRight className="ml-auto size-5 text-foreground" />
+                    </button>
+                    <label className="relative mt-3 block"><span className="sr-only">Find a connector</span><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><input value={connectorQuery} onChange={(event) => setConnectorQuery(event.target.value)} placeholder="Find a connector…" className="h-10 w-full rounded-lg border bg-transparent pl-9 pr-3 text-xs outline-none placeholder:text-muted-foreground focus:border-ring" /></label>
+                    <div role="tablist" aria-label="Connector categories" className="mt-2 grid grid-cols-4 gap-1 border-b pb-2">
+                      {([['all', 'All'], ['skills', 'Skills'], ['data', 'Data Sources'], ['apps', 'Apps & Tools']] as const).map(([value, label]) => (
+                        <button key={value} type="button" role="tab" aria-selected={connectorCategory === value} onClick={() => setConnectorCategory(value)} className={`rounded-md px-2 py-1.5 text-[11px] ${connectorCategory === value ? "bg-raised text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>
+                      ))}
+                    </div>
+                    <div className="max-h-44 overflow-y-auto py-1">
+                      {visibleConnectors.map(({ name, icon: Icon }) => (
+                        <button key={name} type="button" disabled title={`${name} is coming soon`} className="flex w-full cursor-not-allowed items-center gap-3 rounded-md px-3 py-2 text-left text-xs text-foreground opacity-70"><Icon className="size-4" /><span>{name}</span><span className="ml-auto text-[9px] uppercase tracking-wide text-muted-foreground">Soon</span></button>
+                      ))}
+                      {!visibleConnectors.length ? <p className="px-3 py-5 text-center text-xs text-muted-foreground">No matching connectors.</p> : null}
+                    </div>
+                    <p className="border-t px-2 pt-2 text-[10px] text-muted-foreground">Local files are available now. External connectors are coming soon.</p>
+                  </div>
+                ) : null}
+              </div>
               <label htmlFor="chat-message" className="sr-only">Ask anything about your data</label>
               <textarea
                 id="chat-message"
                 value={draft}
-                disabled={running || messagesQuery.isError}
-                onChange={(event) => { setDraft(event.target.value); setError(null); }}
+                disabled={messagesQuery.isError}
+                onChange={(event) => { setDraft(event.target.value); setError(null); setComposerStatus(null); }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
@@ -303,13 +681,14 @@ export function ChatPage({ chatId }: { chatId: string }) {
                   }
                 }}
                 rows={1}
-                placeholder={running ? "Gemini is responding…" : "Ask anything about your data…"}
+                placeholder={running ? "Type a follow-up to queue or steer…" : "Ask anything about your data…"}
                 className="max-h-32 min-h-8 min-w-0 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-60"
               />
               <button type="submit" disabled={!draft.trim() || running || !selectedModel} aria-label="Send message" className="grid size-8 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground disabled:opacity-30">
                 {running ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
               </button>
             </div>
+            <input ref={fileInputRef} type="file" multiple accept=".csv,.xls,.xlsx,.parquet,.png,.jpg,.jpeg,.pdf,.txt,.md,.json" className="sr-only" aria-label="Add files to chat" onChange={(event) => { addFiles(event.target.files); event.currentTarget.value = ""; }} />
             <div className="mt-1.5 flex items-center justify-end gap-2 border-t px-1 pt-2">
               <label htmlFor="chat-model" className="text-[10px] text-muted-foreground">Model</label>
               <select id="chat-model" aria-label="Model" value={selectedModel?.id ?? ""} disabled={running || !models.length} onChange={(event) => setModelId(event.target.value)} className="max-w-[180px] rounded border bg-raised px-2 py-1 text-[11px] outline-none focus:border-ring disabled:opacity-50">
@@ -323,6 +702,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
           </div>
           <div className="mx-auto mt-1.5 min-h-4 max-w-3xl text-[11px] text-muted-foreground" aria-live="polite">
             {error ? <p role="alert" className="text-red-300">{error}</p> : null}
+            {!error && composerStatus ? <p>{composerStatus}</p> : null}
           </div>
         </form>
       </div>
@@ -332,8 +712,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
           <ContextSidebar
             chatId={chatId}
             workspaceId={chatQuery.data?.workspace_id ?? null}
-            datasets={[]}
-            artifacts={[]}
+            datasets={datasetsQuery.data?.items ?? []}
+            artifacts={artifactsQuery.data?.items ?? []}
             selectedFile={selectedFile}
             onClose={() => { setSelectedFile(null); setPanelOpen(false); }}
             onFileSelect={selectFile}

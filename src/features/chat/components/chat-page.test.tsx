@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -68,10 +68,15 @@ function renderChat() {
 describe("live chat page", () => {
   let persistedMessages: MessageDto[];
   let fetchMock: ReturnType<typeof vi.fn>;
+  let holdStreamOpen: boolean;
+  let openStreamController: ReadableStreamDefaultController<Uint8Array> | null;
 
   beforeEach(() => {
     window.sessionStorage.clear();
+    Element.prototype.scrollIntoView = vi.fn();
     persistedMessages = [{ ...initialMessage }];
+    holdStreamOpen = false;
+    openStreamController = null;
     let nextUser = 1;
     fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
@@ -93,6 +98,29 @@ describe("live chat page", () => {
         persistedMessages.push(message);
         return json(message, 201);
       }
+      if (url.endsWith("/resources/upload") && init?.method === "POST") {
+        const body = init.body as FormData;
+        const file = body.get("file") as File;
+        const resourceType = file.name.endsWith(".csv") ? "dataset" : "artifact";
+        return json({ resource: { id: `resource-${resourceType}`, resource_type: resourceType, name: file.name }, link_id: `link-${resourceType}` }, 201);
+      }
+      if (url.includes(`/datasets?chat_id=${chat.id}`)) return json({
+        items: [{
+          id: "resource-dataset", name: "sales.csv", mime_type: "text/csv", size_bytes: 12,
+          origin: "uploaded", preview_url: "/api/resources/resource-dataset/preview",
+          download_url: "/api/resources/resource-dataset/download", created_by: "user-you",
+          created_at: "2026-11-09T00:01:00Z", row_count: null, column_count: null,
+          columns: [], preview_rows: [], scope_type: "chat", run_id: null,
+        }], next_cursor: null,
+      });
+      if (url.includes(`/artifacts?chat_id=${chat.id}`)) return json({
+        items: [{
+          id: "resource-artifact", name: "summary.pdf", mime_type: "application/pdf", size_bytes: 20,
+          origin: "uploaded", preview_url: "/api/resources/resource-artifact/preview",
+          download_url: "/api/resources/resource-artifact/download", kind: "pdf", created_by: "user-you",
+          created_at: "2026-11-09T00:01:00Z", run_id: null, saved: false,
+        }], next_cursor: null,
+      });
       if (url.endsWith(`/chats/${chat.id}/messages/stream`) && init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as { user_message_id: string };
         const assistantId = `assistant-${body.user_message_id}`;
@@ -107,12 +135,53 @@ describe("live chat page", () => {
         const frames = [
           event("agent.started", 1, { run: { id: "run-real", assistant_message_id: assistantId } }),
           event("message.created", 2, { message_id: assistantId, role: "assistant" }),
-          event("message.delta", 3, { message_id: assistantId, text: "Streamed " }),
-          event("message.delta", 4, { message_id: assistantId, text: "answer" }),
-          event("message.completed", 5, { message_id: assistantId, content: "Streamed answer", status: "completed" }),
-          event("agent.completed", 6, { run_id: "run-real" }),
+          event("tool.started", 3, { tool_call_id: "tool-1", name: "execute_python", arguments: { code: "print(1)" } }),
+          event("tool.completed", 4, { tool_call_id: "tool-1", name: "execute_python", output: { success: true } }),
+          event("message.delta", 5, { message_id: assistantId, text: "Streamed " }),
+          event("message.delta", 6, { message_id: assistantId, text: "answer" }),
+          event("message.completed", 7, { message_id: assistantId, content: "Streamed answer", status: "completed" }),
+          event("agent.completed", 8, { run_id: "run-real" }),
         ].join("");
+        if (holdStreamOpen) {
+          const encoder = new TextEncoder();
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              openStreamController = controller;
+              controller.enqueue(encoder.encode(frames.slice(0, frames.indexOf("id: event-2"))));
+            },
+          });
+          return new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+        }
         return new Response(frames, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+      }
+      if (url.endsWith("/runs/run-real/queue") && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { content: string };
+        return json({
+          message: { ...initialMessage, id: "message-queued", content: body.content, status: "queued" },
+          run: {
+            id: "run-queued",
+            chat_id: chat.id,
+            user_message_id: "message-queued",
+            assistant_message_id: "assistant-queued",
+            status: "queued",
+            model_id: "gemini-fast",
+            effort: "medium",
+            client_request_id: "queue-request",
+            previous_run_id: null,
+            created_at: "2026-11-09T00:03:00Z",
+            started_at: null,
+            finished_at: null,
+            error_code: null,
+            error_detail: null,
+          },
+          position: 1,
+        }, 201);
+      }
+      if (url.endsWith("/runs/run-real/steer") && init?.method === "POST") {
+        return json({ instruction: { id: "steer-1", run_id: "run-real", message_id: "steer-message", status: "received", checkpoint: null, created_at: "2026-11-09T00:03:00Z" } }, 201);
+      }
+      if (url.endsWith("/runs/run-queued/queue") && init?.method === "DELETE") {
+        return new Response(null, { status: 204 });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -132,12 +201,40 @@ describe("live chat page", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(await screen.findByText("Streamed answer")).toBeInTheDocument();
+    expect(screen.getByText("Execute Python")).toBeVisible();
+    expect(screen.getByText("Completed")).toBeVisible();
     const streamCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/messages/stream"));
     expect(JSON.parse(String(streamCall?.[1]?.body))).toMatchObject({
       model_id: "gemini-pro",
       effort: "low",
     });
     expect(screen.getByText("Follow up")).toBeInTheDocument();
+  });
+
+  it("adds multiple files, uploads them before the run, and catalogs datasets and artifacts", async () => {
+    const user = userEvent.setup();
+    renderChat();
+    await screen.findByText("Stored question");
+
+    await user.click(screen.getByRole("button", { name: "Add files or connectors" }));
+    expect(screen.getByRole("dialog", { name: "Add files and connectors" })).toBeVisible();
+    expect(screen.getByText("Snowflake")).toBeVisible();
+    await user.upload(screen.getByLabelText("Add files to chat"), [
+      new File(["month,revenue"], "sales.csv", { type: "text/csv" }),
+      new File(["report"], "summary.pdf", { type: "application/pdf" }),
+    ]);
+
+    const attachments = screen.getByLabelText("Selected chat attachments");
+    expect(within(attachments).getByText("sales.csv")).toBeVisible();
+    expect(within(attachments).getByText("summary.pdf")).toBeVisible();
+    await user.type(screen.getByRole("textbox", { name: "Ask anything about your data" }), "Analyze these files");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByRole("complementary", { name: "Analysis context" })).toBeVisible();
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/resources/upload"))).toHaveLength(2));
+    expect(await screen.findByText("sales.csv")).toBeVisible();
+    await user.click(screen.getByRole("tab", { name: "Artifacts" }));
+    expect(await screen.findByText("summary.pdf")).toBeVisible();
   });
 
   it("starts the first pending backend run after navigation from New Analysis", async () => {
@@ -159,5 +256,35 @@ describe("live chat page", () => {
       effort: "medium",
       client_request_id: "initial-run-request",
     });
+  });
+
+  it("keeps the composer editable during a run and supports queue, remove, and steer", async () => {
+    holdStreamOpen = true;
+    const user = userEvent.setup();
+    renderChat();
+    const composer = await screen.findByRole("textbox", { name: "Ask anything about your data" });
+
+    await user.type(composer, "Start a long analysis");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(composer).toHaveAttribute("placeholder", "Type a follow-up to queue or steer…"));
+
+    await user.type(composer, "Compare this with last quarter");
+    expect(composer).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Queue" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Steer" })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Queue" }));
+    expect(await screen.findByText("Compare this with last quarter")).toBeVisible();
+    expect(screen.getByText("Queued")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Remove queued question: Compare this with last quarter" }));
+    await waitFor(() => expect(screen.queryByText("Compare this with last quarter")).not.toBeInTheDocument());
+
+    await user.type(composer, "Focus only on enterprise customers");
+    await user.click(screen.getByRole("button", { name: "Steer" }));
+    expect(await screen.findByText("Steering instruction sent to the active run.")).toBeVisible();
+    const steerCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/runs/run-real/steer"));
+    expect(JSON.parse(String(steerCall?.[1]?.body))).toMatchObject({ content: "Focus only on enterprise customers" });
+
+    openStreamController?.close();
   });
 });

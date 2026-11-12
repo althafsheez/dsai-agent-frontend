@@ -92,3 +92,52 @@ async def test_chat_can_be_renamed_archived_and_soft_deleted(
         item["id"] for item in (await client.get("/api/chats", headers=demo_headers)).json()["items"]
     }
     assert chat_id not in listed_ids
+
+
+async def test_chat_resource_upload_is_classified_and_idempotent(
+    client: AsyncClient, demo_headers: dict[str, str]
+) -> None:
+    created = await create_chat(client, demo_headers)
+    data = {
+        "scope_type": "chat",
+        "scope_id": created["chat"]["id"],
+        "message_id": created["message"]["id"],
+        "client_upload_id": "upload-sales-1",
+    }
+    first = await client.post(
+        "/api/resources/upload",
+        headers=demo_headers,
+        data=data,
+        files={"file": ("sales.csv", b"month,revenue\nJan,10\n", "text/csv")},
+    )
+    assert first.status_code == 201, first.text
+    assert first.json()["resource"]["resource_type"] == "dataset"
+
+    repeated = await client.post(
+        "/api/resources/upload",
+        headers=demo_headers,
+        data=data,
+        files={"file": ("sales.csv", b"month,revenue\nJan,10\n", "text/csv")},
+    )
+    assert repeated.status_code == 201
+    assert repeated.json()["resource"]["id"] == first.json()["resource"]["id"]
+
+    artifact = await client.post(
+        "/api/resources/upload",
+        headers=demo_headers,
+        data={**data, "client_upload_id": "upload-report-1"},
+        files={"file": ("summary.pdf", b"%PDF-1.4 report", "application/pdf")},
+    )
+    assert artifact.status_code == 201
+    assert artifact.json()["resource"]["resource_type"] == "artifact"
+
+    datasets = await client.get(
+        "/api/datasets", headers=demo_headers, params={"chat_id": created["chat"]["id"]}
+    )
+    artifacts = await client.get(
+        "/api/artifacts", headers=demo_headers, params={"chat_id": created["chat"]["id"]}
+    )
+    assert [item["name"] for item in datasets.json()["items"]] == ["sales.csv"]
+    assert datasets.json()["items"][0]["scope_type"] == "chat"
+    assert [item["name"] for item in artifacts.json()["items"]] == ["summary.pdf"]
+    assert artifacts.json()["items"][0]["kind"] == "pdf"

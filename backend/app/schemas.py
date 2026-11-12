@@ -116,6 +116,18 @@ class RetryStart(BaseModel):
     effort: str | None = None
 
 
+class QueueStart(BaseModel):
+    content: str = Field(min_length=1, max_length=100_000)
+    model_id: str
+    effort: str | None = None
+    client_request_id: str = Field(min_length=1, max_length=100)
+
+
+class SteerStart(BaseModel):
+    content: str = Field(min_length=1, max_length=100_000)
+    client_request_id: str = Field(min_length=1, max_length=100)
+
+
 class RunResponse(APIModel):
     id: str
     chat_id: str
@@ -131,6 +143,25 @@ class RunResponse(APIModel):
     finished_at: datetime | None
     error_code: str | None
     error_detail: str | None
+
+
+class QueueResponse(BaseModel):
+    message: MessageResponse
+    run: RunResponse
+    position: int
+
+
+class SteeringInstructionResponse(APIModel):
+    id: str
+    run_id: str
+    message_id: str
+    status: Literal["received", "applied", "unapplied"]
+    checkpoint: str | None
+    created_at: datetime
+
+
+class SteerResponse(BaseModel):
+    instruction: SteeringInstructionResponse
 
 
 class CancelRun(BaseModel):

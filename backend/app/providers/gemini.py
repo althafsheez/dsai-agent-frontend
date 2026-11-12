@@ -6,7 +6,7 @@ from google import genai
 from google.genai import types
 
 from ..config import Settings
-from .types import ChatTurn, ModelInfo, ProviderError
+from .types import ChatTurn, ModelInfo, ProviderError, ProviderEvent, ProviderTool, ToolExecutor
 
 
 class GeminiProvider:
@@ -96,3 +96,66 @@ class GeminiProvider:
             raise
         except Exception as exc:
             raise ProviderError("provider_error", "Gemini generation failed.") from exc
+
+    async def stream_with_tools(
+        self,
+        messages: list[ChatTurn],
+        model_id: str,
+        effort: str | None,
+        tools: tuple[ProviderTool, ...],
+        execute_tool: ToolExecutor,
+        max_steps: int,
+    ) -> AsyncIterator[ProviderEvent]:
+        self.validate_selection(model_id, effort)
+        if self._client is None:
+            raise ProviderError("provider_not_configured", "GEMINI_API_KEY is not configured.")
+        contents = [
+            types.Content(role="model" if message.role == "assistant" else "user", parts=[types.Part.from_text(text=message.content)])
+            for message in messages
+        ]
+        declarations = [
+            types.FunctionDeclaration(name=tool.name, description=tool.description, parameters_json_schema=tool.parameters)
+            for tool in tools
+        ]
+        config = types.GenerateContentConfig(
+            temperature=0,
+            tools=[types.Tool(function_declarations=declarations)],
+            system_instruction=(
+                "You are a data analysis agent. Use tools when they materially help. "
+                "Never invent tool results. Files may only be read from /home/user/inputs and written under /home/user/outputs. "
+                "Use lookup_data for read-only CSV/Parquet SQL, execute_python for analysis, and generate_visualization for chart files."
+            ),
+            thinking_config=types.ThinkingConfig(thinking_level=effort) if effort else None,
+        )
+        try:
+            for step in range(max_steps):
+                response = await self._client.aio.models.generate_content(model=model_id, contents=contents, config=config)
+                if not response.candidates or response.candidates[0].content is None:
+                    raise ProviderError("empty_provider_response", "Gemini returned no response.")
+                model_content = response.candidates[0].content
+                contents.append(model_content)
+                calls = [part.function_call for part in (model_content.parts or []) if part.function_call is not None]
+                if not calls:
+                    text = response.text or ""
+                    if text:
+                        yield ProviderEvent("message.delta", {"text": text})
+                    return
+                response_parts: list[types.Part] = []
+                for index, call in enumerate(calls):
+                    name = str(call.name or "")
+                    arguments = dict(call.args or {})
+                    tool_call_id = call.id or f"step-{step + 1}-call-{index + 1}"
+                    yield ProviderEvent("tool.started", {"tool_call_id": tool_call_id, "name": name, "arguments": arguments})
+                    result = await execute_tool(name, arguments)
+                    failed = bool(result.get("error")) or result.get("success") is False
+                    yield ProviderEvent(
+                        "tool.failed" if failed else "tool.completed",
+                        {"tool_call_id": tool_call_id, "name": name, "error": result.get("error")} if failed else {"tool_call_id": tool_call_id, "name": name, "output": result},
+                    )
+                    response_parts.append(types.Part.from_function_response(name=name, response=result))
+                contents.append(types.Content(role="user", parts=response_parts))
+            raise ProviderError("max_tool_steps", "The agent reached the maximum number of tool steps.")
+        except ProviderError:
+            raise
+        except Exception as exc:
+            raise ProviderError("provider_error", "Gemini tool execution failed.") from exc

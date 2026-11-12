@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from app.agent import AgentRunner, RunnerCancelled
-from app.providers import ChatTurn, ProviderError
+from app.agent.tools import ToolContext, ToolDefinition, ToolRegistry
+from app.models import AgentRun, SteeringInstruction
+from app.providers import ChatTurn, ProviderError, ProviderEvent
 from conftest import FakeProvider, create_chat, parse_sse
 
 
@@ -164,3 +169,183 @@ async def test_runner_honors_cancellation_checkpoint() -> None:
     cancelled = True
     with pytest.raises(RunnerCancelled):
         await anext(stream)
+
+
+@pytest.mark.asyncio
+async def test_runner_executes_registered_tools_and_forwards_public_events() -> None:
+    class ToolProvider(FakeProvider):
+        async def stream_with_tools(self, messages, model_id, effort, tools, execute_tool, max_steps):
+            assert tools[0].name == "echo"
+            yield ProviderEvent("tool.started", {"tool_call_id": "call-1", "name": "echo", "arguments": {"value": "hello"}})
+            result = await execute_tool("echo", {"value": "hello"})
+            yield ProviderEvent("tool.completed", {"tool_call_id": "call-1", "name": "echo", "output": result})
+            yield ProviderEvent("message.delta", {"text": result["value"]})
+
+    async def echo(arguments, context):
+        assert context.run_id == "run-tools"
+        return {"value": arguments["value"]}
+
+    registry = ToolRegistry()
+    registry.register(ToolDefinition("echo", "Echo a value", {"type": "object"}, echo))
+    runner = AgentRunner(ToolProvider(), registry)
+    events = [event async for event in runner.run(
+        [ChatTurn("user", "echo hello")],
+        "gemini-test",
+        "low",
+        lambda: False,
+        ToolContext("run-tools", "chat-tools", "user-you"),
+    )]
+    assert [event.type for event in events] == ["tool.started", "tool.completed", "message.delta"]
+    assert events[-1].data == {"text": "hello"}
+
+
+async def test_queue_runs_next_and_late_steer_is_marked_unapplied(tmp_path, demo_headers: dict[str, str]) -> None:
+    from app.config import Settings
+    from app.main import create_app
+
+    class BlockingProvider(FakeProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def stream_text(self, messages, model_id, effort):
+            self.validate_selection(model_id, effort)
+            self.calls.append((messages, model_id, effort))
+            call_number = len(self.calls)
+            if call_number == 1:
+                self.started.set()
+                await self.release.wait()
+                yield "Initial response."
+            else:
+                assert messages[-1] == ChatTurn(role="user", content="Compare last quarter")
+                yield "Queued response."
+
+    provider = BlockingProvider()
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path / 'queue-steer.db'}",
+        storage_root=tmp_path / "storage",
+    )
+    app = create_app(settings=settings, provider=provider)
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            created = await create_chat(client, demo_headers)
+            stream_task = asyncio.create_task(client.post(
+                f"/api/chats/{created['chat']['id']}/messages/stream",
+                headers=demo_headers,
+                json={
+                    "user_message_id": created["message"]["id"],
+                    "model_id": "gemini-test",
+                    "effort": "high",
+                    "client_request_id": "active-run",
+                },
+            ))
+            await asyncio.wait_for(provider.started.wait(), timeout=2)
+            with app.state.session_factory() as session:
+                active_run = session.scalar(select(AgentRun).where(AgentRun.status == "running"))
+                assert active_run is not None
+                active_run_id = active_run.id
+
+            queued = await client.post(
+                f"/api/runs/{active_run_id}/queue",
+                headers=demo_headers,
+                json={
+                    "content": "Compare last quarter",
+                    "model_id": "gemini-test",
+                    "effort": "medium",
+                    "client_request_id": "queued-run",
+                },
+            )
+            assert queued.status_code == 201, queued.text
+            assert queued.json()["message"]["status"] == "queued"
+
+            steered = await client.post(
+                f"/api/runs/{active_run_id}/steer",
+                headers=demo_headers,
+                json={"content": "Focus on enterprise", "client_request_id": "steer-run"},
+            )
+            assert steered.status_code == 201, steered.text
+            assert steered.json()["instruction"]["status"] == "received"
+
+            provider.release.set()
+            response = await asyncio.wait_for(stream_task, timeout=3)
+            assert response.status_code == 200
+            events = parse_sse(response.text)
+            assert "steer.unapplied" in [event["type"] for event in events]
+            assert [event["type"] for event in events].count("agent.completed") == 2
+            assert len({event["run_id"] for event in events if event["type"] == "agent.started"}) == 2
+            with app.state.session_factory() as session:
+                runs = list(session.scalars(select(AgentRun).order_by(AgentRun.created_at)))
+                instruction = session.scalar(select(SteeringInstruction))
+                assert [run.status for run in runs] == ["completed", "completed"]
+                assert instruction is not None
+                assert instruction.status == "unapplied"
+
+
+async def test_paused_queue_can_be_resumed_after_a_failed_run(tmp_path, demo_headers: dict[str, str]) -> None:
+    from app.config import Settings
+    from app.main import create_app
+
+    class FailingThenSuccessfulProvider(FakeProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def stream_text(self, messages, model_id, effort):
+            self.validate_selection(model_id, effort)
+            self.calls.append((messages, model_id, effort))
+            if len(self.calls) == 1:
+                self.started.set()
+                await self.release.wait()
+                raise ProviderError("provider_error", "The provider failed.")
+            yield "Recovered queued response."
+
+    provider = FailingThenSuccessfulProvider()
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path / 'resume-queue.db'}",
+        storage_root=tmp_path / "storage",
+    )
+    app = create_app(settings=settings, provider=provider)
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            created = await create_chat(client, demo_headers)
+            stream_task = asyncio.create_task(client.post(
+                f"/api/chats/{created['chat']['id']}/messages/stream",
+                headers=demo_headers,
+                json={
+                    "user_message_id": created["message"]["id"],
+                    "model_id": "gemini-test",
+                    "effort": "high",
+                    "client_request_id": "failing-run",
+                },
+            ))
+            await asyncio.wait_for(provider.started.wait(), timeout=2)
+            with app.state.session_factory() as session:
+                active_run = session.scalar(select(AgentRun).where(AgentRun.status == "running"))
+                assert active_run is not None
+                active_run_id = active_run.id
+            queued = await client.post(
+                f"/api/runs/{active_run_id}/queue",
+                headers=demo_headers,
+                json={
+                    "content": "Try this after the failure",
+                    "model_id": "gemini-test",
+                    "effort": "medium",
+                    "client_request_id": "paused-queue",
+                },
+            )
+            assert queued.status_code == 201
+            provider.release.set()
+            failed = await asyncio.wait_for(stream_task, timeout=3)
+            assert "agent.failed" in [event["type"] for event in parse_sse(failed.text)]
+
+            resumed = await client.post(
+                f"/api/chats/{created['chat']['id']}/queue/resume/stream",
+                headers=demo_headers,
+            )
+            assert resumed.status_code == 200
+            assert "agent.completed" in [event["type"] for event in parse_sse(resumed.text)]
+            with app.state.session_factory() as session:
+                statuses = list(session.scalars(select(AgentRun.status).order_by(AgentRun.created_at)))
+                assert statuses == ["failed", "completed"]

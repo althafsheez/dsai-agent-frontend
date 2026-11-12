@@ -1,16 +1,28 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_current_user, get_db
 from ..errors import APIError
-from ..models import AgentRun, ExecutionEvent, User
-from ..schemas import CancelRun, EventEnvelope, RetryStart, RunResponse, RunStart
+from ..models import AgentRun, ExecutionEvent, Message, User, utc_now
+from ..schemas import (
+    CancelRun,
+    EventEnvelope,
+    MessageResponse,
+    QueueResponse,
+    QueueStart,
+    RetryStart,
+    RunResponse,
+    RunStart,
+    SteerResponse,
+    SteerStart,
+    SteeringInstructionResponse,
+)
 from ..services.records import require_chat
-from ..services.runs import prepare_retry, prepare_run, stream_run
+from ..services.runs import prepare_queued_run, prepare_retry, prepare_run, prepare_steering, stream_run
 
 
 router = APIRouter(tags=["runs"])
@@ -61,6 +73,24 @@ async def stream_compatibility_run(
 ) -> StreamingResponse:
     """Compatibility path for the initial brief; payload/SSE follow the final contract."""
     return _prepare(chat_id, data, request, session, user)
+
+
+@router.post("/api/chats/{chat_id}/queue/resume/stream")
+async def resume_queue(
+    chat_id: str,
+    request: Request,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    require_chat(session, user, chat_id)
+    queued_run = session.scalar(
+        select(AgentRun)
+        .where(AgentRun.chat_id == chat_id, AgentRun.status == "queued")
+        .order_by(AgentRun.created_at, AgentRun.id)
+    )
+    if queued_run is None:
+        raise APIError(409, "queue_empty", "There are no queued questions to resume.")
+    return _stream_response(request, queued_run)
 
 
 @router.get("/api/runs/{run_id}", response_model=RunResponse)
@@ -121,6 +151,63 @@ async def retry_run(
         raise APIError(404, "run_not_found", "Run not found.")
     run = prepare_retry(session, user, old_run, data, request.app.state.provider)
     return _stream_response(request, run)
+
+
+@router.post("/api/runs/{run_id}/queue", response_model=QueueResponse, status_code=status.HTTP_201_CREATED)
+async def queue_run(
+    run_id: str,
+    data: QueueStart,
+    request: Request,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> QueueResponse:
+    active_run = session.get(AgentRun, run_id)
+    if active_run is None:
+        raise APIError(404, "run_not_found", "Run not found.")
+    message, queued_run, position = prepare_queued_run(
+        session, user, active_run, data, request.app.state.provider
+    )
+    return QueueResponse(
+        message=MessageResponse.model_validate(message),
+        run=RunResponse.model_validate(queued_run),
+        position=position,
+    )
+
+
+@router.delete("/api/runs/{run_id}/queue", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_queued_run(
+    run_id: str,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    run = session.get(AgentRun, run_id)
+    if run is None:
+        raise APIError(404, "run_not_found", "Run not found.")
+    require_chat(session, user, run.chat_id)
+    if run.status != "queued":
+        raise APIError(409, "run_not_queued", "Only a queued run can be removed from the queue.")
+    run.status = "cancelled"
+    run.finished_at = utc_now()
+    for message_id in (run.user_message_id, run.assistant_message_id):
+        message = session.get(Message, message_id)
+        if message is not None:
+            message.status = "cancelled"
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/api/runs/{run_id}/steer", response_model=SteerResponse, status_code=status.HTTP_201_CREATED)
+async def steer_run(
+    run_id: str,
+    data: SteerStart,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> SteerResponse:
+    active_run = session.get(AgentRun, run_id)
+    if active_run is None:
+        raise APIError(404, "run_not_found", "Run not found.")
+    instruction = prepare_steering(session, user, active_run, data)
+    return SteerResponse(instruction=SteeringInstructionResponse.model_validate(instruction))
 
 
 @router.post("/api/runs/{run_id}/cancel", status_code=status.HTTP_202_ACCEPTED)

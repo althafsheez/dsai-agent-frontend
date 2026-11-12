@@ -112,6 +112,17 @@ class ExecutionEvent(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class SteeringInstruction(Base):
+    __tablename__ = "steering_instructions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id"), index=True)
+    message_id: Mapped[str] = mapped_column(ForeignKey("messages.id"), unique=True)
+    status: Mapped[str] = mapped_column(String(24), default="received", index=True)
+    checkpoint: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class FileObject(Base):
     __tablename__ = "file_objects"
 
@@ -159,3 +170,13 @@ class Favorite(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
     artifact_id: Mapped[str] = mapped_column(ForeignKey("resources.id"), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AgentMemory(TimestampMixin, Base):
+    __tablename__ = "agent_memories"
+    __table_args__ = (UniqueConstraint("user_id", "key", name="uq_agent_memory_user_key"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    key: Mapped[str] = mapped_column(String(100))
+    value: Mapped[str] = mapped_column(Text)

@@ -41,4 +41,33 @@ describe("HistoryTable", () => {
 
     expect(onDelete).toHaveBeenCalledWith(chat);
   });
+
+  it("keeps only one row actions menu open", async () => {
+    const user = userEvent.setup();
+    render(<HistoryTable records={[chat, workspace]} loading={false} hasFilters={false} onClearFilters={vi.fn()} onRename={vi.fn()} onArchive={vi.fn()} onDelete={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Actions for Revenue" }));
+    expect(screen.getByRole("menu", { name: "Actions for Revenue" })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Actions for Research" }));
+    expect(screen.queryByRole("menu", { name: "Actions for Revenue" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menu", { name: "Actions for Research" })).toBeVisible();
+  });
+
+  it("selects all visible records and bulk deletes after confirmation", async () => {
+    const user = userEvent.setup();
+    const onDeleteMany = vi.fn().mockResolvedValue(undefined);
+    render(<HistoryTable records={[chat, workspace]} loading={false} hasFilters={false} onClearFilters={vi.fn()} onRename={vi.fn()} onArchive={vi.fn()} onDelete={vi.fn()} onDeleteMany={onDeleteMany} />);
+
+    await user.click(screen.getByRole("checkbox", { name: "Select all history" }));
+    expect(screen.getByText("2 selected")).toBeVisible();
+    expect(screen.getByRole("checkbox", { name: "Select Revenue" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Select Research" })).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Delete selected" }));
+    expect(screen.getByRole("dialog", { name: "Delete 2 selected items?" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Delete selected" }));
+
+    expect(onDeleteMany).toHaveBeenCalledWith([chat, workspace]);
+  });
 });

@@ -35,7 +35,7 @@ Updated 2026-11-09 from final user decisions. Implement and verify sequentially.
 - Gates: API tests for no pre-send record, partial upload retry, scope after move, 100-row cap, favorite no copies, independent archive/soft delete, access failures and refresh persistence.
 
 ## Phase 4 — Gemini runs, queue and steering — PENDING
-- Verified partial text-chat slice: backend model discovery, functional model/effort selection, first and follow-up POST-SSE runs, progressive rendering, persisted reload, deterministic SSE parsing, and credential-backed Gemini/browser checks. Queue, steering, title generation, Quick Assistant, and the remaining lifecycle gates are not implemented.
+- Verified partial text-chat slice: backend model discovery, functional model/effort selection, first and follow-up POST-SSE runs, progressive rendering, persisted reload, deterministic SSE parsing, durable queued follow-ups with automatic same-stream execution, and persisted steering applied by restarting generation at a safe event checkpoint. Queue removal is implemented. Title generation, Quick Assistant, queue resume-after-failure, and the remaining lifecycle gates are not implemented.
 - Single Gemini runner, allowlisted model/effort metadata, title generation with manual-rename protection.
 - Incremental fetch SSE + progressive DB events/text; tool/summary/error renderers.
 - Per-chat run coordination, durable queue ordering, safe-checkpoint steering and received/applied/unapplied statuses.

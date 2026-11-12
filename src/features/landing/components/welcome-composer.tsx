@@ -23,7 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { createChat, getModels, getWorkspaces } from "@/lib/api";
+import { createChat, getModels, getWorkspaces, uploadResource } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { savePendingRun } from "@/features/chat/pending-run";
 
@@ -88,7 +88,7 @@ export function WelcomeComposer() {
     label: id.charAt(0).toUpperCase() + id.slice(1),
   })) ?? [];
   const selectedEffort = efforts.find((option) => option.id === effort) ?? efforts[0];
-  const canSend = draft.trim().length > 0 && !submitting && Boolean(selectedModel) && attachments.length === 0;
+  const canSend = draft.trim().length > 0 && !submitting && Boolean(selectedModel);
 
   useEffect(() => {
     if (!models.length) return;
@@ -177,6 +177,15 @@ export function WelcomeComposer() {
         workspace_id: workspaceId,
         client_request_id: createRequestId,
       });
+      for (const attachment of attachments) {
+        await uploadResource({
+          file: attachment.file,
+          scopeType: "chat",
+          scopeId: result.chat.id,
+          messageId: result.message.id,
+          clientUploadId: attachment.id,
+        });
+      }
       savePendingRun({
         chatId: result.chat.id,
         userMessageId: result.message.id,
@@ -297,7 +306,7 @@ export function WelcomeComposer() {
       {error
         ? <p role="alert" className="text-red-300">{error}</p>
         : attachments.length > 0
-          ? <p role="alert" className="text-amber-200">File upload is not connected yet. Remove attachments to start this chat.</p>
+          ? <p className="text-sage">Files will upload securely when you send.</p>
           : modelsQuery.isError
             ? <p role="alert" className="text-red-300">Could not load Gemini models. Is the backend running on port 8000?</p>
             : modelsQuery.data && !models.length

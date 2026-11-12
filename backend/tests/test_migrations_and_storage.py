@@ -49,3 +49,27 @@ def test_local_storage_generates_paths_and_rejects_escape(tmp_path) -> None:
 def test_comma_separated_cors_origins(monkeypatch) -> None:
     monkeypatch.setenv("DSAI_CORS_ORIGINS", "http://localhost:3000,https://example.test")
     assert Settings().cors_origins == ["http://localhost:3000", "https://example.test"]
+
+
+def test_settings_accept_conventional_tool_api_key_names(monkeypatch) -> None:
+    monkeypatch.delenv("DSAI_TAVILY_API_KEY", raising=False)
+    monkeypatch.delenv("DSAI_E2B_API_KEY", raising=False)
+    monkeypatch.setenv("TAVILY_API_KEY", "tavily-test-key")
+    monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.tavily_api_key == "tavily-test-key"
+    assert settings.e2b_api_key == "e2b-test-key"
+
+
+def test_prefixed_tool_api_key_names_take_precedence(monkeypatch) -> None:
+    monkeypatch.setenv("DSAI_TAVILY_API_KEY", "prefixed-tavily")
+    monkeypatch.setenv("TAVILY_API_KEY", "conventional-tavily")
+    monkeypatch.setenv("DSAI_E2B_API_KEY", "prefixed-e2b")
+    monkeypatch.setenv("E2B_API_KEY", "conventional-e2b")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.tavily_api_key == "prefixed-tavily"
+    assert settings.e2b_api_key == "prefixed-e2b"

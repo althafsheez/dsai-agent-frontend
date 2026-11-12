@@ -119,6 +119,9 @@ export function HistoryPage() {
         if (record.kind === "chat") await deleteChat(record.id);
         else await deleteWorkspace(record.id);
       })}
+      onDeleteMany={(selectedRecords) => mutate(async () => {
+        await Promise.all(selectedRecords.map((record) => record.kind === "chat" ? deleteChat(record.id) : deleteWorkspace(record.id)));
+      })}
     />
   </section>;
 }

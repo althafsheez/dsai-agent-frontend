@@ -5,9 +5,13 @@ import type {
   ExecutionEvent,
   MessageDto,
   ModelsResponse,
+  QueueRunInput,
+  QueueRunResponse,
   RunStartInput,
+  SteeringInstructionDto,
   WorkspaceDto,
 } from "./types";
+import type { ArtifactResource, DatasetResource } from "@/features/context-sidebar/types";
 
 const API_ROOT = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api").replace(/\/$/, "");
 const DEMO_USER_ID = "user-you";
@@ -116,6 +120,32 @@ export async function deleteChat(chatId: string): Promise<void> {
   if (!response.ok) throw await apiError(response);
 }
 
+export async function uploadResource(input: {
+  file: File;
+  scopeType: "chat" | "workspace";
+  scopeId: string;
+  messageId?: string;
+  clientUploadId: string;
+}): Promise<{ resource: { id: string; resource_type: "dataset" | "artifact"; name: string }; link_id: string }> {
+  const body = new FormData();
+  body.set("file", input.file);
+  body.set("scope_type", input.scopeType);
+  body.set("scope_id", input.scopeId);
+  body.set("client_upload_id", input.clientUploadId);
+  if (input.messageId) body.set("message_id", input.messageId);
+  const response = await fetch(`${API_ROOT}/resources/upload`, { method: "POST", headers: requestHeaders(), body });
+  if (!response.ok) throw await apiError(response);
+  return response.json();
+}
+
+export function getDatasets(chatId: string): Promise<ApiList<DatasetResource>> {
+  return requestJson<ApiList<DatasetResource>>(`/datasets?chat_id=${encodeURIComponent(chatId)}`);
+}
+
+export function getArtifacts(chatId: string): Promise<ApiList<ArtifactResource>> {
+  return requestJson<ApiList<ArtifactResource>>(`/artifacts?chat_id=${encodeURIComponent(chatId)}`);
+}
+
 export function getChat(chatId: string): Promise<ChatDto> {
   return requestJson<ChatDto>(`/chats/${encodeURIComponent(chatId)}`);
 }
@@ -132,6 +162,31 @@ export function createMessage(chatId: string, input: {
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+export function queueRun(runId: string, input: QueueRunInput): Promise<QueueRunResponse> {
+  return requestJson<QueueRunResponse>(`/runs/${encodeURIComponent(runId)}/queue`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function steerRun(runId: string, input: {
+  content: string;
+  client_request_id: string;
+}): Promise<{ instruction: SteeringInstructionDto }> {
+  return requestJson<{ instruction: SteeringInstructionDto }>(`/runs/${encodeURIComponent(runId)}/steer`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function cancelQueuedRun(runId: string): Promise<void> {
+  const response = await fetch(`${API_ROOT}/runs/${encodeURIComponent(runId)}/queue`, {
+    method: "DELETE",
+    headers: requestHeaders(),
+  });
+  if (!response.ok) throw await apiError(response);
 }
 
 export function createSseParser(onEvent: (event: ExecutionEvent) => void) {
@@ -189,6 +244,30 @@ export async function streamChatRun(
       body: JSON.stringify(input),
       signal,
     },
+  );
+  if (!response.ok) throw await apiError(response);
+  if (!response.body) throw new ApiError("The streaming response had no body.", 502, "empty_stream");
+
+  const parser = createSseParser(onEvent);
+  const decoder = new TextDecoder();
+  const reader = response.body.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parser.push(decoder.decode(value, { stream: true }));
+  }
+  parser.push(decoder.decode());
+  parser.finish();
+}
+
+export async function resumeChatQueue(
+  chatId: string,
+  onEvent: (event: ExecutionEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(
+    `${API_ROOT}/chats/${encodeURIComponent(chatId)}/queue/resume/stream`,
+    { method: "POST", headers: requestHeaders(), signal },
   );
   if (!response.ok) throw await apiError(response);
   if (!response.body) throw new ApiError("The streaming response had no body.", 502, "empty_stream");

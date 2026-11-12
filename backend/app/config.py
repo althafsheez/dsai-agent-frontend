@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -16,6 +16,7 @@ class Settings(BaseSettings):
         env_file=BACKEND_ROOT / ".env",
         env_prefix="DSAI_",
         extra="ignore",
+        populate_by_name=True,
     )
 
     app_name: str = "DSAI API"
@@ -29,6 +30,15 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     gemini_models: str = ""
     default_model_id: str | None = None
+    tavily_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("DSAI_TAVILY_API_KEY", "TAVILY_API_KEY"),
+    )
+    e2b_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("DSAI_E2B_API_KEY", "E2B_API_KEY"),
+    )
+    max_agent_steps: int = 8
 
     @field_validator("cors_origins", mode="before")
     @classmethod

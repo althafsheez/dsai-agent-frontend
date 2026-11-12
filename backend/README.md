@@ -27,8 +27,10 @@ backend/.venv/bin/pytest -c backend/pytest.ini backend/tests
 
 The main frontend chat is connected through the typed adapter under `src/lib/api`. It uses TanStack Query for persisted records and `fetch` for the canonical `POST /api/chats/{chat_id}/messages/stream` endpoint because the stream request has a JSON body. The incremental SSE parser updates active assistant text while completed messages and events remain backend-owned and reloadable.
 
-## Future tools without restructuring
+## Agent tools
 
-The empty `ToolRegistry` is the extension seam. A Tavily tool will validate a query, call Tavily with a backend-only key, and return a bounded public result. An E2B tool will own one sandbox per run, stage authorized resource bytes under `/home/user/inputs`, execute code, and pass discovered `/home/user/outputs` bytes through `LocalFileStorage` plus the resource service. The `AgentRunner` can then add provider tool declarations and repeat provider/tool iterations while routes, SSE serialization, run persistence, and ownership checks stay unchanged.
+The single Gemini agent now has an allowlisted tool loop with persisted public `tool.started`, `tool.completed`, and `tool.failed` events. Available tools cover Tavily web search, E2B Python execution, bounded sandbox file operations, read-only CSV/Parquet SQL lookup, visualization execution, and user-scoped SQLite memory.
 
-No Tavily, E2B, SQL, visualization, Langfuse, evaluation, queue, or steering implementation is included in this slice.
+Configure `DSAI_TAVILY_API_KEY` and `DSAI_E2B_API_KEY` in `backend/.env` to enable the external tools. E2B uses one sandbox per active run, restricts writes to `/home/user/outputs/`, rejects hidden/escaping paths, bounds output, closes the sandbox after the run, and registers supported generated files as chat-scoped resources in local storage. Gemini remains the only agent/model coordinator; the tools do not create a second agent framework.
+
+Upload/preview/download APIs and automatic staging of uploaded chat resources into `/home/user/inputs/` remain part of the unfinished resource phase. Until that phase is connected, dataset lookup can operate only on files already present in the active sandbox.

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,22 @@ class ChatTurn:
     content: str
 
 
+@dataclass(frozen=True)
+class ProviderTool:
+    name: str
+    description: str
+    parameters: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ProviderEvent:
+    type: str
+    data: dict[str, Any]
+
+
+ToolExecutor = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+
+
 class ProviderError(Exception):
     def __init__(self, code: str, message: str):
         self.code = code
@@ -33,3 +49,13 @@ class LLMProvider(Protocol):
     async def stream_text(
         self, messages: list[ChatTurn], model_id: str, effort: str | None
     ) -> AsyncIterator[str]: ...
+
+    async def stream_with_tools(
+        self,
+        messages: list[ChatTurn],
+        model_id: str,
+        effort: str | None,
+        tools: tuple[ProviderTool, ...],
+        execute_tool: ToolExecutor,
+        max_steps: int,
+    ) -> AsyncIterator[ProviderEvent]: ...
