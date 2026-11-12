@@ -9,15 +9,18 @@ from ..schemas import (
     ChatCreate,
     ChatCreateResponse,
     ChatResponse,
+    ChatUpdate,
     MessageCreate,
     MessageResponse,
 )
 from ..services.records import (
     create_chat,
     create_message,
+    delete_chat,
     list_chats,
     list_messages,
     require_chat,
+    update_chat,
 )
 
 
@@ -52,6 +55,25 @@ async def get_chat(
     user: User = Depends(get_current_user),
 ) -> ChatResponse:
     return ChatResponse.model_validate(require_chat(session, user, chat_id))
+
+
+@router.patch("/{chat_id}", response_model=ChatResponse)
+async def patch_chat(
+    chat_id: str,
+    data: ChatUpdate,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ChatResponse:
+    return ChatResponse.model_validate(update_chat(session, user, chat_id, data))
+
+
+@router.delete("/{chat_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_chat(
+    chat_id: str,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    delete_chat(session, user, chat_id)
 
 
 @router.get("/{chat_id}/messages")

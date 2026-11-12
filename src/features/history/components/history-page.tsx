@@ -3,14 +3,13 @@
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { historyMockAdapter } from "../data/history-mock-adapter";
+import { deleteChat, deleteWorkspace, getChats, getWorkspaces, updateChat, updateWorkspace } from "@/lib/api";
 import { filterHistory } from "../logic/filter-history";
-import type { HistoryFilters, HistoryOwnership, HistoryRecord, HistorySort, HistoryStatus, HistoryTime } from "../types";
+import { currentDemoUser, type HistoryFilters, type HistoryOwnership, type HistoryRecord, type HistorySort, type HistoryStatus, type HistoryTime } from "../types";
 import { HistoryTable } from "./history-table";
 import { HistoryToolbar } from "./history-toolbar";
 
-const historyKey = ["mock", "history"] as const;
-const optionKey = ["mock", "history", "options"] as const;
+const historyKey = ["history"] as const;
 
 function readFilters(params: URLSearchParams): HistoryFilters {
   const ownership = params.get("ownership");
@@ -34,17 +33,49 @@ export function HistoryPage() {
   const pathname = usePathname();
   const queryClient = useQueryClient();
   const filters = useMemo(() => readFilters(new URLSearchParams(params.toString())), [params]);
-  const historyQuery = useQuery({ queryKey: historyKey, queryFn: () => historyMockAdapter.list() });
-  const optionsQuery = useQuery({ queryKey: optionKey, queryFn: () => historyMockAdapter.options() });
+  const historyQuery = useQuery({
+    queryKey: historyKey,
+    queryFn: async () => {
+      const [chatList, workspaceList] = await Promise.all([getChats(), getWorkspaces()]);
+      const workspaceNames = new Map(workspaceList.items.map((workspace) => [workspace.id, workspace.name]));
+      const workspaceRecords: HistoryRecord[] = workspaceList.items.map((workspace) => ({
+        kind: "workspace",
+        id: workspace.id,
+        name: workspace.name,
+        workspace_id: null,
+        workspace_name: null,
+        author: currentDemoUser,
+        updated_at: workspace.updated_at,
+        archived_at: workspace.archived_at,
+        deleted_at: workspace.deleted_at,
+      }));
+      const chatRecords: HistoryRecord[] = chatList.items.map((chat) => ({
+        kind: "chat",
+        id: chat.id,
+        name: chat.title,
+        workspace_id: chat.workspace_id,
+        workspace_name: chat.workspace_id ? workspaceNames.get(chat.workspace_id) ?? "Unavailable workspace" : null,
+        author: currentDemoUser,
+        updated_at: chat.updated_at,
+        archived_at: chat.archived_at,
+        deleted_at: chat.deleted_at,
+      }));
+      return [...chatRecords, ...workspaceRecords];
+    },
+  });
   const records = useMemo(() => filterHistory(historyQuery.data ?? [], filters), [filters, historyQuery.data]);
+  const options = useMemo(() => ({
+    authors: historyQuery.data?.length ? [currentDemoUser] : [],
+    workspaces: (historyQuery.data ?? [])
+      .filter((record) => record.kind === "workspace")
+      .map((record) => ({ id: record.id, name: record.name }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  }), [historyQuery.data]);
 
   const mutation = useMutation({
     mutationFn: async (operation: () => Promise<void>) => operation(),
     onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: historyKey }),
-        queryClient.invalidateQueries({ queryKey: optionKey }),
-      ]);
+      await queryClient.invalidateQueries({ queryKey: historyKey });
     },
   });
 
@@ -70,16 +101,24 @@ export function HistoryPage() {
       <h1 className="text-xl font-semibold tracking-tight">History</h1>
       <p className="mt-1 text-xs text-muted-foreground">View and manage your chats and workspaces</p>
     </header>
-    <HistoryToolbar filters={filters} options={optionsQuery.data ?? { authors: [], workspaces: [] }} onChange={updateFilters} />
+    <HistoryToolbar filters={filters} options={options} onChange={updateFilters} />
     <HistoryTable
       records={records}
       loading={historyQuery.isLoading}
       hasFilters={hasFilters}
       onClearFilters={() => updateFilters({ ownership: "owned", status: "active", search: "", time: "any", authorId: "all", workspaceId: "all", sort: "updated_desc" })}
-      onRename={(record: HistoryRecord, name) => mutate(() => historyMockAdapter.rename(record.id, record.kind, name))}
-      onArchive={(record: HistoryRecord, archived) => mutate(() => historyMockAdapter.setArchived(record.id, record.kind, archived))}
-      onDelete={(record: HistoryRecord) => mutate(() => historyMockAdapter.softDelete(record.id, record.kind))}
+      onRename={(record: HistoryRecord, name) => mutate(async () => {
+        if (record.kind === "chat") await updateChat(record.id, { title: name });
+        else await updateWorkspace(record.id, { name });
+      })}
+      onArchive={(record: HistoryRecord, archived) => mutate(async () => {
+        if (record.kind === "chat") await updateChat(record.id, { archived });
+        else await updateWorkspace(record.id, { archived });
+      })}
+      onDelete={(record: HistoryRecord) => mutate(async () => {
+        if (record.kind === "chat") await deleteChat(record.id);
+        else await deleteWorkspace(record.id);
+      })}
     />
   </section>;
 }
-

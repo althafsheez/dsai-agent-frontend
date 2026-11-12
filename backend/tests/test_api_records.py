@@ -67,3 +67,28 @@ async def test_chat_ownership_is_enforced(client: AsyncClient, demo_headers: dic
         headers={"X-Demo-User-Id": "user-shared"},
     )
     assert response.status_code == 403
+
+
+async def test_chat_can_be_renamed_archived_and_soft_deleted(
+    client: AsyncClient, demo_headers: dict[str, str]
+) -> None:
+    created = await create_chat(client, demo_headers)
+    chat_id = created["chat"]["id"]
+
+    updated = await client.patch(
+        f"/api/chats/{chat_id}",
+        headers=demo_headers,
+        json={"title": "Updated analysis", "archived": True},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["title"] == "Updated analysis"
+    assert updated.json()["title_source"] == "manual"
+    assert updated.json()["archived_at"] is not None
+
+    deleted = await client.delete(f"/api/chats/{chat_id}", headers=demo_headers)
+    assert deleted.status_code == 204
+    assert (await client.get(f"/api/chats/{chat_id}", headers=demo_headers)).status_code == 404
+    listed_ids = {
+        item["id"] for item in (await client.get("/api/chats", headers=demo_headers)).json()["items"]
+    }
+    assert chat_id not in listed_ids

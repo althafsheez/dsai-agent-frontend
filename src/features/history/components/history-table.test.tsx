@@ -28,5 +28,17 @@ describe("HistoryTable", () => {
     await user.click(screen.getByRole("menuitem", { name: "Restore" }));
     expect(onArchive).toHaveBeenLastCalledWith(archived, false);
   });
-});
 
+  it("confirms before deleting a chat", async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn().mockResolvedValue(undefined);
+    render(<HistoryTable records={[chat]} loading={false} hasFilters={false} onClearFilters={vi.fn()} onRename={vi.fn()} onArchive={vi.fn()} onDelete={onDelete} />);
+
+    await user.click(screen.getByRole("button", { name: "Actions for Revenue" }));
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(screen.getByRole("dialog", { name: "Delete Revenue?" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(onDelete).toHaveBeenCalledWith(chat);
+  });
+});

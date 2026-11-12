@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     database_url: str = f"sqlite:///{BACKEND_ROOT / 'dsai.db'}"
     storage_root: Path = BACKEND_ROOT / "storage"
     cors_origins: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["http://localhost:3000"]
+        default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
     )
     auto_create_schema: bool = True
     gemini_api_key: str | None = None

@@ -19,7 +19,7 @@ export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
 
   return <div className="flex h-full flex-col bg-sidebar">
     <div className={compact ? "flex h-16 items-center justify-center" : "flex h-16 items-center gap-1 px-4"}>
-      {!compact && <Link href="/" onClick={closeMobile} aria-label="DSAI home" className="mr-auto rounded"><Brand /></Link>}
+      {!compact && <Link href="/" onClick={closeMobile} aria-label="Atelier AI home" className="mr-auto rounded"><Brand /></Link>}
       {!compact && !mobile && <SearchDialog />}
       <Button variant="ghost" size="icon" onClick={mobile ? closeMobile : toggleSidebar} aria-label={mobile ? "Close navigation" : compact ? "Expand sidebar" : "Collapse sidebar"}>
         {mobile ? <X /> : compact ? <PanelLeftOpen /> : <PanelLeftClose />}
@@ -48,4 +48,3 @@ export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
     </div>
   </div>;
 }
-

@@ -108,8 +108,8 @@ export function WelcomeComposer() {
     const input = inputRef.current;
     if (!input) return;
     input.style.height = "0px";
-    input.style.height = `${Math.min(Math.max(input.scrollHeight, 76), 208)}px`;
-    input.style.overflowY = input.scrollHeight > 208 ? "auto" : "hidden";
+    input.style.height = `${Math.min(Math.max(input.scrollHeight, 146), 260)}px`;
+    input.style.overflowY = input.scrollHeight > 260 ? "auto" : "hidden";
   }, [draft]);
 
   useEffect(() => {
@@ -192,7 +192,7 @@ export function WelcomeComposer() {
   }
 
   return <div className="w-full" ref={composerRef}>
-    <div className="relative rounded-xl border border-border-strong bg-surface transition-colors focus-within:border-ring">
+    <div className="relative overflow-visible rounded-[14px] border border-border-strong bg-[#181a1d] shadow-[0_18px_55px_rgba(0,0,0,0.12)] transition-colors focus-within:border-ring">
       {attachments.length > 0 && <div aria-label="Selected attachments" className="flex gap-2 overflow-x-auto px-3 pt-3 sm:flex-wrap sm:overflow-visible">
         {attachments.map((attachment) => <div key={attachment.id} className="group relative flex min-w-[180px] max-w-[240px] items-center gap-2.5 rounded-lg border bg-raised p-2 pr-8">
           <div className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md border bg-surface text-[9px] font-medium text-muted-foreground">
@@ -225,11 +225,11 @@ export function WelcomeComposer() {
         }}
         rows={1}
         placeholder="Ask anything about your data…"
-        className="block min-h-[108px] w-full resize-none bg-transparent px-4 pb-3 pt-4 text-sm leading-relaxed outline-none placeholder:text-muted-foreground sm:px-5 sm:pt-5"
+        className="block min-h-[146px] w-full resize-none bg-transparent px-4 pb-4 pt-5 text-[13px] leading-relaxed outline-none placeholder:text-muted-foreground sm:px-5 sm:pt-5"
         aria-describedby="composer-hint composer-status"
       />
 
-      <div className="flex items-center gap-1 px-2.5 pb-2.5 sm:px-3 sm:pb-3">
+      <div className="flex min-h-12 items-center gap-1 border-t px-2.5 py-2 sm:px-3">
         <div className="relative">
           <Button type="button" variant="ghost" size="icon" aria-label="Add to analysis" aria-haspopup="menu" aria-expanded={openMenu === "add"}
             onClick={(event) => toggleMenu("add", event.currentTarget)}><Plus /></Button>
@@ -293,7 +293,7 @@ export function WelcomeComposer() {
     <input ref={fileInputRef} className="sr-only" type="file" multiple onChange={(event) => { addFiles(event.target.files); event.currentTarget.value = ""; }} aria-label="Upload files" />
     <input ref={datasetInputRef} className="sr-only" type="file" multiple accept=".csv,.xls,.xlsx,.parquet" onChange={(event) => { addFiles(event.target.files); event.currentTarget.value = ""; }} aria-label="Add datasets" />
 
-    <div id="composer-status" className="mt-2 min-h-5 text-center text-[11px] leading-relaxed text-muted-foreground" aria-live="polite">
+    <div id="composer-status" className="mt-2 min-h-4 text-center text-[10px] leading-relaxed text-muted-foreground" aria-live="polite">
       {error
         ? <p role="alert" className="text-red-300">{error}</p>
         : attachments.length > 0
@@ -305,9 +305,9 @@ export function WelcomeComposer() {
         : <p id="composer-hint"><span className="hidden sm:inline">Enter to send · Shift + Enter for a new line</span><span className="sm:hidden">Add files, choose a workspace, then send</span></p>}
     </div>
 
-    <div className="mt-5 flex flex-wrap justify-center gap-2 sm:mt-7">
+    <div className="mt-3 flex flex-wrap justify-center gap-2">
       {suggestions.map(({ icon: Icon, label, prompt }) => <button key={label} type="button" onClick={() => { setDraft(prompt); setError(null); inputRef.current?.focus(); }}
-        className={cn("flex items-center gap-2 rounded-md border px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-border-strong hover:bg-surface hover:text-foreground", submitting && "pointer-events-none opacity-50")}>
+        className={cn("flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[10px] text-muted-foreground transition-colors hover:bg-surface hover:text-foreground", submitting && "pointer-events-none opacity-50")}>
         <Icon className="size-3.5" strokeWidth={1.5} />{label}
       </button>)}
     </div>

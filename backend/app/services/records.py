@@ -4,8 +4,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..errors import APIError
-from ..models import Chat, Message, User, Workspace
-from ..schemas import ChatCreate, WorkspaceCreate
+from ..models import Chat, Message, User, Workspace, utc_now
+from ..schemas import ChatCreate, ChatUpdate, WorkspaceCreate, WorkspaceUpdate
 
 
 def list_workspaces(session: Session, user: User) -> list[Workspace]:
@@ -27,6 +27,28 @@ def create_workspace(session: Session, user: User, data: WorkspaceCreate) -> Wor
     session.commit()
     session.refresh(workspace)
     return workspace
+
+
+def update_workspace(session: Session, user: User, workspace_id: str, data: WorkspaceUpdate) -> Workspace:
+    workspace = require_workspace(session, user, workspace_id)
+    if data.name is not None:
+        name = data.name.strip()
+        if not name:
+            raise APIError(422, "empty_workspace_name", "Workspace name cannot be blank.")
+        workspace.name = name
+    if "description" in data.model_fields_set:
+        workspace.description = data.description
+    if data.archived is not None:
+        workspace.archived_at = utc_now() if data.archived else None
+    session.commit()
+    session.refresh(workspace)
+    return workspace
+
+
+def delete_workspace(session: Session, user: User, workspace_id: str) -> None:
+    workspace = require_workspace(session, user, workspace_id)
+    workspace.deleted_at = utc_now()
+    session.commit()
 
 
 def require_workspace(session: Session, user: User, workspace_id: str) -> Workspace:
@@ -93,6 +115,31 @@ def create_chat(session: Session, user: User, data: ChatCreate) -> tuple[Chat, M
     session.refresh(chat)
     session.refresh(message)
     return chat, message
+
+
+def update_chat(session: Session, user: User, chat_id: str, data: ChatUpdate) -> Chat:
+    chat = require_chat(session, user, chat_id)
+    if data.title is not None:
+        title = data.title.strip()
+        if not title:
+            raise APIError(422, "empty_chat_title", "Chat title cannot be blank.")
+        chat.title = title
+        chat.title_source = "manual"
+    if "workspace_id" in data.model_fields_set:
+        if data.workspace_id is not None:
+            require_workspace(session, user, data.workspace_id)
+        chat.workspace_id = data.workspace_id
+    if data.archived is not None:
+        chat.archived_at = utc_now() if data.archived else None
+    session.commit()
+    session.refresh(chat)
+    return chat
+
+
+def delete_chat(session: Session, user: User, chat_id: str) -> None:
+    chat = require_chat(session, user, chat_id)
+    chat.deleted_at = utc_now()
+    session.commit()
 
 
 def require_chat(session: Session, user: User, chat_id: str) -> Chat:

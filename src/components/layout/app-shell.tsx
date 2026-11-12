@@ -17,6 +17,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const setMobileOpen = useUiStore((state) => state.setMobileSidebarOpen);
   const pathname = usePathname();
   const isChat = pathname.startsWith("/chat/");
+  const isLanding = pathname === "/";
   const menuButton = useRef<HTMLButtonElement>(null);
   const title = pathname === "/" ? "New Analysis" : navigation.find((item) => pathname.startsWith(item.href))?.label ?? (pathname.startsWith("/chat/") ? "Conversation" : "Settings");
 
@@ -33,7 +34,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
     <div className="flex min-w-0 flex-1 flex-col">
-      {!isChat && <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4 sm:px-6">
+      {!isChat && <header className={cn("h-14 shrink-0 items-center gap-3 border-b px-4 sm:px-6", isLanding ? "flex md:hidden" : "flex")}>
         <Button ref={menuButton} variant="ghost" size="icon" aria-label="Open navigation" aria-expanded={mobileOpen} className="md:hidden" onClick={() => setMobileOpen(true)}><Menu /></Button>
         <span className="text-xs text-muted-foreground">{title}</span>
         <span className="ml-auto rounded border px-2 py-1 text-[10px] text-muted-foreground">Frontend preview</span>

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("welcome draft and sidebar navigation", async ({ page, isMobile }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "What would you like to understand?" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Good morning, Yusuf." })).toBeVisible();
   await page.getByRole("button", { name: "Explore trends" }).click();
   await expect(page.getByRole("textbox", { name: "Analysis question" })).toHaveValue("Help me explore trends in my data.");
   if (isMobile) await page.getByRole("button", { name: "Open navigation" }).click();
@@ -22,4 +22,3 @@ test("search navigates to a placeholder", async ({ page }) => {
   await page.getByRole("link", { name: /Library Open library/ }).click();
   await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
 });
-

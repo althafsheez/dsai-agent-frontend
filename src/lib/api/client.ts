@@ -64,6 +64,28 @@ export function getWorkspaces(): Promise<ApiList<WorkspaceDto>> {
   return requestJson<ApiList<WorkspaceDto>>("/workspaces");
 }
 
+export function updateWorkspace(workspaceId: string, input: { name?: string; archived?: boolean }): Promise<WorkspaceDto> {
+  return requestJson<WorkspaceDto>(`/workspaces/${encodeURIComponent(workspaceId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteWorkspace(workspaceId: string): Promise<void> {
+  const response = await fetch(`${API_ROOT}/workspaces/${encodeURIComponent(workspaceId)}`, {
+    method: "DELETE",
+    headers: requestHeaders(),
+  });
+  if (!response.ok) throw await apiError(response);
+}
+
+export function createWorkspace(input: { name: string; description?: string | null }): Promise<WorkspaceDto> {
+  return requestJson<WorkspaceDto>("/workspaces", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export function createChat(input: {
   workspace_id: string | null;
   content: string;
@@ -73,6 +95,25 @@ export function createChat(input: {
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+export function getChats(): Promise<ApiList<ChatDto>> {
+  return requestJson<ApiList<ChatDto>>("/chats");
+}
+
+export function updateChat(chatId: string, input: { title?: string; archived?: boolean }): Promise<ChatDto> {
+  return requestJson<ChatDto>(`/chats/${encodeURIComponent(chatId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteChat(chatId: string): Promise<void> {
+  const response = await fetch(`${API_ROOT}/chats/${encodeURIComponent(chatId)}`, {
+    method: "DELETE",
+    headers: requestHeaders(),
+  });
+  if (!response.ok) throw await apiError(response);
 }
 
 export function getChat(chatId: string): Promise<ChatDto> {

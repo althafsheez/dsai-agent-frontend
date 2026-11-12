@@ -26,6 +26,6 @@ test("a persisted backend chat keeps the responsive context-panel mode", async (
     await page.getByRole("button", { name: "Open navigation" }).click();
   }
   await page.getByRole("link", { name: "New Analysis" }).click();
-  await expect(page.getByRole("heading", { name: "What would you like to understand?" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Good morning, Yusuf." })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

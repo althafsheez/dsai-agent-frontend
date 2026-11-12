@@ -253,22 +253,24 @@ export function ChatPage({ chatId }: { chatId: string }) {
 
   return (
     <section className="relative flex min-h-0 flex-1 overflow-hidden">
-      <ConversationNavigator
-        messages={messages}
-        activeId={activeSection}
-        onNavigate={(id) => {
-          setActiveSection(id);
-          sections.current.get(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-        }}
-      />
-      <div className="flex min-w-0 flex-1 flex-col bg-background">
-        <ChatHeader
-          title={chatQuery.data?.title ?? "Loading conversation…"}
-          workspaceName={workspaceName}
-          panelOpen={panelOpen}
-          onToggleRightPanel={togglePanel}
+      <div className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] bg-background">
+        <div className="col-span-2 row-start-1">
+          <ChatHeader
+            title={chatQuery.data?.title ?? "Loading conversation…"}
+            workspaceName={workspaceName}
+            panelOpen={panelOpen}
+            onToggleRightPanel={togglePanel}
+          />
+        </div>
+        <ConversationNavigator
+          messages={messages}
+          activeId={activeSection}
+          onNavigate={(id) => {
+            setActiveSection(id);
+            sections.current.get(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
         />
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="col-start-2 row-start-2 min-h-0 overflow-y-auto">
           {messagesQuery.isError ? (
             <div role="alert" className="mx-auto max-w-3xl px-5 py-10 text-sm text-red-300">
               Could not load this conversation. Is the backend running on port 8000?
@@ -284,7 +286,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
             />
           )}
         </div>
-        <form className="shrink-0 border-t bg-background p-3 sm:p-4" onSubmit={submit}>
+        <form className="col-start-2 row-start-3 bg-background p-3 sm:p-4" onSubmit={submit}>
           <div className="mx-auto max-w-3xl rounded-lg border border-border-strong bg-surface p-2 focus-within:border-ring">
             <div className="flex items-end gap-2">
               <button type="button" aria-label="Add attachment unavailable" disabled className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground opacity-50"><Plus className="size-4" /></button>
