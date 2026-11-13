@@ -111,6 +111,7 @@ class GeminiProvider:
         execute_tool: ToolExecutor,
         max_steps: int,
         is_cancelled: Callable[[], bool] | None = None,
+        poll_steering: Callable[[str], list[str]] | None = None,
     ) -> AsyncIterator[ProviderEvent]:
         self.validate_selection(model_id, effort)
         if self._client is None:
@@ -126,46 +127,89 @@ class GeminiProvider:
         config = types.GenerateContentConfig(
             temperature=0,
             tools=[types.Tool(function_declarations=declarations)],
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             system_instruction=(
-                "You are a data analysis agent. Use tools when they materially help. "
-                "Never invent tool results. Files may only be read from /home/user/inputs and written under /home/user/outputs. "
-                "Use lookup_data for read-only CSV/Parquet SQL, execute_python for analysis, and generate_visualization for chart files."
+                "You are a data analysis agent. Inspect the provided file paths and actual columns before analysis. "
+                "Use execute_python for calculations and analysis, lookup_data for read-only CSV/Parquet SQL, "
+                "and generate_visualization for charts. Python variables persist across tool calls in this run. "
+                "Read inputs from /home/user/inputs and generated files from /home/user/outputs. "
+                "Save charts and downloadable tables under /home/user/outputs. "
+                "Use stdout and text results as evidence. Correct tool errors when possible; never invent results "
+                "or claim that a failed tool succeeded. Incorporate steering instructions into the remaining work."
             ),
             thinking_config=types.ThinkingConfig(thinking_level=effort) if effort else None,
         )
-        try:
-            for step in range(max_steps):
+        def pending_steering(checkpoint: str) -> list[str]:
+            return poll_steering(checkpoint) if poll_steering is not None else []
+
+        def apply_steering(instructions: list[str]) -> ProviderEvent:
+            contents.append(types.Content(role="user", parts=[types.Part.from_text(
+                text="High-priority steering instruction: " + "\n".join(instructions)
+            )]))
+            return ProviderEvent("progress", {"label": "Direction updated", "detail": "Continuing with your steering instruction."})
+
+        for step in range(max_steps):
+            if is_cancelled is not None and is_cancelled():
+                return
+            instructions = pending_steering("before.model")
+            if instructions:
+                yield apply_steering(instructions)
+            if is_cancelled is not None and is_cancelled():
+                return
+            # Only SDK failures become provider errors. Runner control signals
+            # and tool errors must not be disguised as Gemini transport errors.
+            try:
+                response = await self._client.aio.models.generate_content(model=model_id, contents=contents, config=config)
+            except Exception as exc:
+                raise ProviderError("provider_error", "Gemini generation failed.") from exc
+            if is_cancelled is not None and is_cancelled():
+                return
+            if not response.candidates or response.candidates[0].content is None:
+                raise ProviderError("empty_provider_response", "Gemini returned no response.")
+            model_content = response.candidates[0].content
+            # Keep complete original Parts, including Gemini thought signatures.
+            contents.append(model_content)
+            calls = [part.function_call for part in (model_content.parts or []) if part.function_call is not None]
+            if not calls:
+                instructions = pending_steering("before.final")
+                if instructions:
+                    yield apply_steering(instructions)
+                    continue
+                text = response.text or ""
+                if text:
+                    yield ProviderEvent("message.delta", {"text": text})
+                return
+
+            response_parts: list[types.Part] = []
+            instructions = []
+            for index, call in enumerate(calls):
                 if is_cancelled is not None and is_cancelled():
                     return
-                response = await self._client.aio.models.generate_content(model=model_id, contents=contents, config=config)
-                if not response.candidates or response.candidates[0].content is None:
-                    raise ProviderError("empty_provider_response", "Gemini returned no response.")
-                model_content = response.candidates[0].content
-                contents.append(model_content)
-                calls = [part.function_call for part in (model_content.parts or []) if part.function_call is not None]
-                if not calls:
-                    text = response.text or ""
-                    if text:
-                        yield ProviderEvent("message.delta", {"text": text})
-                    return
-                response_parts: list[types.Part] = []
-                for index, call in enumerate(calls):
+                instructions.extend(pending_steering("before.tool"))
+                name = str(call.name or "")
+                arguments = dict(call.args or {})
+                tool_call_id = call.id or f"step-{step + 1}-call-{index + 1}"
+                if not instructions:
+                    yield ProviderEvent("tool.started", {"tool_call_id": tool_call_id, "name": name, "arguments": arguments})
                     if is_cancelled is not None and is_cancelled():
                         return
-                    name = str(call.name or "")
-                    arguments = dict(call.args or {})
-                    tool_call_id = call.id or f"step-{step + 1}-call-{index + 1}"
-                    yield ProviderEvent("tool.started", {"tool_call_id": tool_call_id, "name": name, "arguments": arguments})
+                    instructions.extend(pending_steering("before.tool"))
+                if instructions:
+                    # Complete every pending function response before appending
+                    # a new user turn; do not execute work from the superseded plan.
+                    result = {"success": False, "error": "Tool skipped because the user changed the analysis direction.", "skipped": True}
+                else:
                     result = await execute_tool(name, arguments)
-                    failed = bool(result.get("error")) or result.get("success") is False
-                    yield ProviderEvent(
-                        "tool.failed" if failed else "tool.completed",
-                        {"tool_call_id": tool_call_id, "name": name, "error": result.get("error")} if failed else {"tool_call_id": tool_call_id, "name": name, "output": result},
-                    )
-                    response_parts.append(types.Part.from_function_response(name=name, response=result))
-                contents.append(types.Content(role="user", parts=response_parts))
-            raise ProviderError("max_tool_steps", "The agent reached the maximum number of tool steps.")
-        except ProviderError:
-            raise
-        except Exception as exc:
-            raise ProviderError("provider_error", "Gemini tool execution failed.") from exc
+                response_parts.append(types.Part(function_response=types.FunctionResponse(
+                    id=call.id, name=name, response=result,
+                )))
+                failed = bool(result.get("error")) or result.get("success") is False
+                event_data = {"tool_call_id": tool_call_id, "name": name, "output": result}
+                if failed:
+                    event_data["error"] = result.get("error")
+                yield ProviderEvent("tool.failed" if failed else "tool.completed", event_data)
+                instructions.extend(pending_steering("after.tool"))
+            contents.append(types.Content(role="user", parts=response_parts))
+            if instructions:
+                yield apply_steering(instructions)
+        raise ProviderError("max_tool_steps", "The agent reached the maximum number of tool steps.")

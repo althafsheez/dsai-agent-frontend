@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import logging
 import mimetypes
 import re
 from pathlib import PurePosixPath
 from typing import Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import Settings
 from ..models import AgentMemory, Chat, FileObject, Resource, ResourceLink
 from ..storage import LocalFileStorage
-from .sandbox import E2BSandboxPool, SandboxUnavailable
+from .sandbox import E2BSandboxPool, MAX_OUTPUT_BYTES, OUTPUT_EXTENSIONS, SandboxUnavailable
 from .tools import ToolContext, ToolDefinition, ToolRegistry
+
+
+logger = logging.getLogger(__name__)
 
 
 def _object_schema(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
@@ -30,17 +35,15 @@ def build_tool_registry(
     async def prepare(context: ToolContext) -> dict[str, Any]:
         with session_factory() as session:
             chat = session.get(Chat, context.chat_id)
-            scope_ids = [("chat", context.chat_id)]
+            scope_filters = [(ResourceLink.scope_type == "chat") & (ResourceLink.scope_id == context.chat_id)]
             if chat and chat.workspace_id:
-                scope_ids.append(("workspace", chat.workspace_id))
-            links = list(session.scalars(select(ResourceLink).where(
-                ResourceLink.scope_type.in_([scope[0] for scope in scope_ids]),
-                ResourceLink.scope_id.in_([scope[1] for scope in scope_ids]),
-            )))
+                scope_filters.append((ResourceLink.scope_type == "workspace") & (ResourceLink.scope_id == chat.workspace_id))
+            links = list(session.scalars(select(ResourceLink).where(or_(*scope_filters))))
             staged: list[dict[str, Any]] = []
+            seen: set[str] = set()
             for link in links:
                 resource = session.get(Resource, link.resource_id)
-                if resource is None or resource.created_by != context.user_id:
+                if resource is None or resource.created_by != context.user_id or resource.id in seen:
                     continue
                 file_object = session.get(FileObject, resource.file_object_id)
                 if file_object is None:
@@ -48,58 +51,68 @@ def build_tool_registry(
                 content = storage.read_bytes(file_object.relative_storage_path)
                 try:
                     path = await sandbox_pool.upload_input(context.run_id, f"{resource.id}-{resource.name}", content)
-                except SandboxUnavailable:
-                    return {"files": [], "warning": "E2B is not configured, so attached files are not available to tools."}
+                except SandboxUnavailable as exc:
+                    return {"files": staged, "warning": str(exc)}
                 staged.append({"resource_id": resource.id, "name": resource.name, "type": resource.resource_type, "path": path})
+                seen.add(resource.id)
             return {"files": staged} if staged else {}
 
     registry = ToolRegistry(prepare=prepare, cleanup=lambda context: sandbox_pool.close(context.run_id))
 
+    def register_output(path: str, content: bytes, context: ToolContext) -> dict[str, Any]:
+        name = PurePosixPath(path).name
+        digest = hashlib.sha256(content).hexdigest()
+        resource_type = "dataset" if PurePosixPath(name).suffix.lower() in {".csv", ".parquet", ".xlsx", ".xls"} else "artifact"
+        with session_factory() as session:
+            duplicate = next((item for item in session.scalars(select(Resource).where(Resource.run_id == context.run_id)) if item.metadata_json.get("sandbox_path") == path and item.metadata_json.get("sha256") == digest), None)
+            if duplicate is not None:
+                resource = duplicate
+            else:
+                file_object = session.scalar(select(FileObject).where(FileObject.content_hash == digest))
+                if file_object is None:
+                    stored = storage.store_bytes(content)
+                    file_object = FileObject(
+                        content_hash=stored.content_hash,
+                        relative_storage_path=stored.relative_path,
+                        mime_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
+                        size_bytes=stored.size_bytes,
+                    )
+                    session.add(file_object)
+                    session.flush()
+                resource = Resource(
+                    resource_type=resource_type,
+                    file_object_id=file_object.id,
+                    name=name,
+                    origin="generated",
+                    created_by=context.user_id,
+                    run_id=context.run_id,
+                    metadata_json={"sandbox_path": path, "sha256": digest, "size_bytes": len(content)},
+                )
+                session.add(resource)
+                session.flush()
+                session.add(ResourceLink(resource_id=resource.id, scope_type="chat", scope_id=context.chat_id))
+                session.commit()
+                session.refresh(resource)
+            summary = {"id": resource.id, "resource_type": resource.resource_type, "name": resource.name, "size_bytes": len(content), "origin": resource.origin}
+        sandbox_pool.acknowledge_output(context.run_id, path, digest)
+        return summary
+
     async def persist_generated(result: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         resources: list[dict[str, Any]] = []
+        warnings = list(result.get("warnings", []))
         for generated in result.get("generated_files", []):
             path = str(generated.get("path", ""))
-            name = PurePosixPath(path).name
-            extension = PurePosixPath(name).suffix.lower()
-            if extension not in {".csv", ".parquet", ".xlsx", ".xls", ".png", ".jpg", ".jpeg", ".pdf", ".txt", ".md", ".json"}:
+            if PurePosixPath(path).suffix.lower() not in OUTPUT_EXTENSIONS:
                 continue
-            content = await sandbox_pool.read_output_bytes(context.run_id, path)
-            if len(content) > 25 * 1024 * 1024:
-                continue
-            digest = str(generated.get("sha256", ""))
-            resource_type = "dataset" if extension in {".csv", ".parquet", ".xlsx", ".xls"} else "artifact"
-            with session_factory() as session:
-                duplicate = next((item for item in session.scalars(select(Resource).where(Resource.run_id == context.run_id)) if item.metadata_json.get("sandbox_path") == path and item.metadata_json.get("sha256") == digest), None)
-                if duplicate is not None:
-                    resource = duplicate
-                else:
-                    file_object = session.scalar(select(FileObject).where(FileObject.content_hash == digest))
-                    if file_object is None:
-                        stored = storage.store_bytes(content)
-                        file_object = FileObject(
-                            content_hash=stored.content_hash,
-                            relative_storage_path=stored.relative_path,
-                            mime_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
-                            size_bytes=stored.size_bytes,
-                        )
-                        session.add(file_object)
-                        session.flush()
-                    resource = Resource(
-                        resource_type=resource_type,
-                        file_object_id=file_object.id,
-                        name=name,
-                        origin="generated",
-                        created_by=context.user_id,
-                        run_id=context.run_id,
-                        metadata_json={"sandbox_path": path, "sha256": digest, "size_bytes": len(content)},
-                    )
-                    session.add(resource)
-                    session.flush()
-                    session.add(ResourceLink(resource_id=resource.id, scope_type="chat", scope_id=context.chat_id))
-                    session.commit()
-                    session.refresh(resource)
-                resources.append({"id": resource.id, "resource_type": resource.resource_type, "name": resource.name, "size_bytes": len(content), "origin": resource.origin})
-        return {**result, "resources": resources}
+            try:
+                content = await sandbox_pool.read_output_bytes(context.run_id, path)
+                if len(content) > MAX_OUTPUT_BYTES:
+                    continue
+                resources.append(register_output(path, content, context))
+            except Exception:
+                logger.exception("Could not persist output for run %s", context.run_id)
+                warnings.append(f"Could not save {PurePosixPath(path).name}. Retry a tool call to collect this output again.")
+        return {**result, "resources": resources, "warnings": warnings}
 
     async def web_search(arguments: dict[str, Any], _: ToolContext) -> dict[str, Any]:
         query = str(arguments.get("query", "")).strip()
@@ -133,7 +146,8 @@ def build_tool_registry(
             str(arguments.get("code", "")),
             int(arguments.get("timeout_seconds", 30)),
         )
-        if result.get("success"):
+        # A script can save useful results and then fail on a later line.
+        if result.get("success") or result.get("generated_files"):
             return await persist_generated(result, context)
         return result
 
@@ -144,7 +158,11 @@ def build_tool_registry(
         return await sandbox_pool.read_text(context.run_id, str(arguments.get("path", "")))
 
     async def write_file(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        return await sandbox_pool.write_text(context.run_id, str(arguments.get("path", "")), str(arguments.get("content", "")))
+        result = await sandbox_pool.write_text(context.run_id, str(arguments.get("path", "")), str(arguments.get("content", "")))
+        if result.get("success"):
+            result["generated_files"] = [{"path": result["path"]}]
+            return await persist_generated(result, context)
+        return result
 
     async def lookup_data(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         try:

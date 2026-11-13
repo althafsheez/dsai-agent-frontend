@@ -60,4 +60,5 @@ class LLMProvider(Protocol):
         execute_tool: ToolExecutor,
         max_steps: int,
         is_cancelled: Callable[[], bool] | None = None,
+        poll_steering: Callable[[str], list[str]] | None = None,
     ) -> AsyncIterator[ProviderEvent]: ...
