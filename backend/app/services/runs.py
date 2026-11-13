@@ -413,6 +413,11 @@ async def stream_run(
             )
             try:
                 async for runner_event in generation:
+                    # Native steering continues within the same tool loop.
+                    # Publish its persisted acknowledgements at the checkpoint.
+                    for steering_event in steering_events:
+                        yield _sse(steering_event)
+                    steering_events.clear()
                     with session_factory() as session:
                         run = session.get(AgentRun, run_id)
                         if run is None:
@@ -429,7 +434,7 @@ async def stream_run(
                             event_data = runner_event.data
                         event = _persist_event(session, run.id, runner_event.type, event_data)
                         yield _sse(event)
-                        if runner_event.type == "tool.completed":
+                        if runner_event.type in ("tool.completed", "tool.failed"):
                             output = runner_event.data.get("output")
                             resources = output.get("resources", []) if isinstance(output, dict) else []
                             for resource in resources:
@@ -452,6 +457,8 @@ async def stream_run(
                         history = [*history, ChatTurn(role="assistant", content=assistant.content)]
                 history.append(ChatTurn(role="user", content="High-priority steering instruction: " + "\n".join(steered.instructions)))
                 continue
+            finally:
+                await generation.aclose()
             for steering_event in steering_events:
                 yield _sse(steering_event)
             with session_factory() as session:

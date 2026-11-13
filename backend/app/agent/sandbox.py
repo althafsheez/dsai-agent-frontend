@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 from pathlib import PurePosixPath
 from threading import RLock
 from typing import Any
+
+
+MAX_OUTPUT_BYTES = 25 * 1024 * 1024
+OUTPUT_EXTENSIONS = {".csv", ".parquet", ".xlsx", ".xls", ".png", ".jpg", ".jpeg", ".pdf", ".txt", ".md", ".json"}
 
 
 class SandboxUnavailable(RuntimeError):
@@ -52,6 +57,7 @@ class E2BSandboxPool:
                     from e2b_code_interpreter import Sandbox
                 except ImportError as exc:
                     raise SandboxUnavailable("E2B Code Interpreter is not installed.") from exc
+                sandbox = None
                 try:
                     sandbox = Sandbox.create(timeout=self._timeout_seconds, api_key=self._api_key)
                     # E2B returns False when these standard directories already
@@ -59,10 +65,19 @@ class E2BSandboxPool:
                     sandbox.files.make_dir("/home/user/outputs")
                     sandbox.files.make_dir("/home/user/inputs")
                 except Exception as exc:
-                    raise SandboxUnavailable(f"Could not start the E2B sandbox: {type(exc).__name__}.") from exc
+                    if sandbox is not None:
+                        try:
+                            sandbox.kill()
+                        except Exception:
+                            pass
+                    raise SandboxUnavailable(f"Could not start the E2B sandbox ({self._error_detail(exc)}).") from exc
                 self._sandboxes[run_id] = sandbox
                 self._output_hashes[run_id] = {}
             return sandbox
+
+    def _error_detail(self, exc: Exception) -> str:
+        detail = str(exc).replace(self._api_key or "\x00", "[redacted]")
+        return f"{type(exc).__name__}: {' '.join(detail.split())[:240]}"
 
     async def execute(self, run_id: str, code: str, timeout_seconds: int) -> dict[str, Any]:
         if not isinstance(code, str) or not code.strip():
@@ -75,7 +90,6 @@ class E2BSandboxPool:
             sandbox = self._start_sync(run_id)
             try:
                 execution = sandbox.run_code(code, timeout=bounded_timeout)
-                generated = self._scan_outputs_sync(run_id, sandbox)
                 execution_error = getattr(execution, "error", None)
                 error = None
                 if execution_error:
@@ -86,27 +100,51 @@ class E2BSandboxPool:
                 logs = getattr(execution, "logs", None)
                 stdout_items = getattr(logs, "stdout", []) or []
                 stderr_items = getattr(logs, "stderr", []) or []
+                warnings: list[str] = []
+                results = list(getattr(execution, "results", []) or [])
+                # Matplotlib display()/show() results are separate from stdout
+                # and are not automatically files in the output directory.
+                for result in results[:10]:
+                    png = getattr(result, "png", None)
+                    if not png:
+                        continue
+                    try:
+                        if len(png) > (MAX_OUTPUT_BYTES * 4 // 3 + 4):
+                            raise ValueError("Displayed chart exceeds the 25 MB limit")
+                        content = base64.b64decode(png, validate=True)
+                        if len(content) > MAX_OUTPUT_BYTES:
+                            raise ValueError("Displayed chart exceeds the 25 MB limit")
+                        digest = hashlib.sha256(content).hexdigest()
+                        sandbox.files.write(f"/home/user/outputs/figure-{digest[:16]}.png", content)
+                    except Exception as exc:
+                        warnings.append(f"Could not save a displayed chart ({self._error_detail(exc)}).")
+                try:
+                    generated = self._scan_outputs_sync(run_id, sandbox, warnings)
+                except Exception as exc:
+                    generated = []
+                    warnings.append(f"Could not collect output files ({self._error_detail(exc)}).")
                 return {
                     "success": execution_error is None,
                     "stdout": "".join(str(getattr(item, "line", item)) for item in stdout_items)[:4000],
                     "stderr": "".join(str(getattr(item, "line", item)) for item in stderr_items)[:1000],
+                    "text": str(getattr(execution, "text", None) or "")[:4000],
+                    "results": [{"text": str(item.text)[:2000]} for item in results[:5] if getattr(item, "text", None)],
                     "error": error,
                     "generated_files": generated,
+                    "warnings": warnings,
                 }
             except Exception as exc:
                 # Keep the run sandbox alive so staged inputs and prior state
                 # remain available to the next tool call. Cleanup happens once
                 # at the end of the run; restarting here silently loses files.
-                detail = str(exc).strip().replace("\n", " ")[:240]
-                suffix = f": {detail}" if detail else ""
-                return {"success": False, "error": f"Sandbox execution failed ({type(exc).__name__}){suffix}."}
+                return {"success": False, "error": f"Sandbox execution failed ({self._error_detail(exc)})."}
 
         try:
             return await asyncio.to_thread(run)
         except SandboxUnavailable as exc:
             return {"success": False, "error": str(exc)}
 
-    def _scan_outputs_sync(self, run_id: str, sandbox: Any) -> list[dict[str, Any]]:
+    def _scan_outputs_sync(self, run_id: str, sandbox: Any, warnings: list[str] | None = None) -> list[dict[str, Any]]:
         generated: list[dict[str, Any]] = []
         known = self._output_hashes.setdefault(run_id, {})
         for entry in sandbox.files.list("/home/user/outputs"):
@@ -117,14 +155,26 @@ class E2BSandboxPool:
             entry_path = getattr(entry, "path", None)
             if not entry_path:
                 continue
-            path = self._safe_path(str(entry_path), writable=True)
-            content = sandbox.files.read(path, format="bytes")
-            digest = hashlib.sha256(content).hexdigest()
-            if known.get(path) == digest:
-                continue
-            known[path] = digest
-            generated.append({"path": path, "name": PurePosixPath(path).name, "size_bytes": len(content), "sha256": digest})
+            try:
+                path = self._safe_path(str(entry_path), writable=True)
+                if PurePosixPath(path).suffix.lower() not in OUTPUT_EXTENSIONS or getattr(entry, "size", 0) > MAX_OUTPUT_BYTES:
+                    continue
+                content = sandbox.files.read(path, format="bytes")
+                if len(content) > MAX_OUTPUT_BYTES:
+                    continue
+                digest = hashlib.sha256(content).hexdigest()
+                if known.get(path) == digest:
+                    continue
+                generated.append({"path": path, "name": PurePosixPath(path).name, "size_bytes": len(content), "sha256": digest})
+            except Exception as exc:
+                if warnings is not None:
+                    warnings.append(f"Could not collect an output file ({self._error_detail(exc)}).")
         return generated
+
+    def acknowledge_output(self, run_id: str, path: str, digest: str) -> None:
+        """Deduplicate only after the durable resource transaction succeeds."""
+        with self._lock:
+            self._output_hashes.setdefault(run_id, {})[path] = digest
 
     async def list_files(self, run_id: str, directory: str) -> dict[str, Any]:
         try:
@@ -134,6 +184,8 @@ class E2BSandboxPool:
             return {"directory": safe, "files": sorted(str(entry.name) for entry in entries if not str(entry.name).startswith("."))}
         except (SandboxUnavailable, ValueError) as exc:
             return {"error": str(exc)}
+        except Exception as exc:
+            return {"error": f"Could not list sandbox files ({self._error_detail(exc)})."}
 
     async def read_text(self, run_id: str, path: str) -> dict[str, Any]:
         try:

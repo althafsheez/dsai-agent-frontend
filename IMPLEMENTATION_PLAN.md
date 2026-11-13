@@ -44,6 +44,7 @@ Updated 2026-11-09 from final user decisions. Implement and verify sequentially.
 - Gates: deterministic runner/SSE tests for split chunks, race/cancel/retry/queue/steer; actual credential-backed Gemini response, title and explanation when keys configured. No fake model names.
 
 ## Phase 5 — E2B and output rendering — PENDING
+- 2026-11-13 execution repair: deterministic backend tests cover Gemini function-call IDs/signatures, same-loop steering, Python last-expression text, displayed PNG collection, output-scan warnings, partial outputs after Python failure, durable resource downloads after sandbox cleanup, and persistence-aware output deduplication. Live Gemini/E2B acceptance is still pending credentials; this does not mark Phase 5 complete.
 - Inspect multiple dataset inputs, execute Python in per-run E2B, sync outputs after tool checkpoints.
 - Preserve/dedup intermediate versions; CSV/Excel/Parquet -> Dataset, images/charts/reports -> Artifact.
 - Inline image/chart/file renderers, validated Recharts specification, expand, preview, download, Library.
