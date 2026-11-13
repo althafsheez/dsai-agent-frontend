@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -10,6 +11,12 @@ from .tools import ToolContext, ToolRegistry
 
 class RunnerCancelled(Exception):
     pass
+
+
+class RunnerSteered(Exception):
+    def __init__(self, instructions: list[str]):
+        super().__init__("The active run received a steering instruction.")
+        self.instructions = instructions
 
 
 @dataclass(frozen=True)
@@ -33,33 +40,68 @@ class AgentRunner:
         effort: str | None,
         is_cancelled: Callable[[], bool],
         context: ToolContext | None = None,
+        poll_steering: Callable[[str], list[str]] | None = None,
     ) -> AsyncIterator[RunnerEvent]:
-        if is_cancelled():
-            raise RunnerCancelled
+        def check_control(checkpoint: str) -> None:
+            if is_cancelled():
+                raise RunnerCancelled
+            if poll_steering is not None:
+                instructions = poll_steering(checkpoint)
+                if instructions:
+                    raise RunnerSteered(instructions)
+
+        check_control("before.model")
         definitions = self._tools.definitions()
         stream_with_tools = getattr(self._provider, "stream_with_tools", None)
         if definitions and context is not None and callable(stream_with_tools):
             provider_tools = tuple(ProviderTool(tool.name, tool.description, tool.parameters) for tool in definitions)
+            steering_after_tool: list[str] = []
 
             async def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
                 if is_cancelled():
                     raise RunnerCancelled
-                return await self._tools.execute(name, arguments, context)
+                check_control("before.tool")
+                result = await self._tools.execute(name, arguments, context)
+                if poll_steering is not None:
+                    steering_after_tool.extend(poll_steering("after.tool"))
+                return result
 
             try:
                 prepared = await self._tools.prepare(context)
                 tool_messages = messages
                 if prepared:
                     tool_messages = [*messages, ChatTurn(role="user", content=f"Authorized tool context (system-provided): {prepared}")]
-                async for event in stream_with_tools(tool_messages, model_id, effort, provider_tools, execute_tool, self._max_steps):
-                    if is_cancelled():
-                        raise RunnerCancelled
+                supports_cancel_callback = "is_cancelled" in inspect.signature(stream_with_tools).parameters
+                provider_stream = stream_with_tools(
+                    tool_messages,
+                    model_id,
+                    effort,
+                    provider_tools,
+                    execute_tool,
+                    self._max_steps,
+                    is_cancelled=is_cancelled,
+                ) if supports_cancel_callback else stream_with_tools(
+                    tool_messages, model_id, effort, provider_tools, execute_tool, self._max_steps
+                )
+                async for event in provider_stream:
+                    # A completed tool result is public progress and must be
+                    # persisted before cancellation/steering ends the loop.
+                    if event.type != "tool.completed":
+                        check_control("provider.event")
                     yield RunnerEvent(type=event.type, data=event.data)
+                    if event.type == "tool.completed" and is_cancelled():
+                        raise RunnerCancelled
+                    if steering_after_tool:
+                        instructions = steering_after_tool.copy()
+                        steering_after_tool.clear()
+                        raise RunnerSteered(instructions)
             finally:
                 await self._tools.cleanup(context)
             return
-        async for text in self._provider.stream_text(messages, model_id, effort):
-            if is_cancelled():
-                raise RunnerCancelled
+        stream_text = self._provider.stream_text
+        supports_cancel_callback = "is_cancelled" in inspect.signature(stream_text).parameters
+        provider_stream = stream_text(messages, model_id, effort, is_cancelled=is_cancelled) if supports_cancel_callback else stream_text(messages, model_id, effort)
+        async for text in provider_stream:
+            check_control("before.final")
             if text:
                 yield RunnerEvent(type="message.delta", data={"text": text})

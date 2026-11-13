@@ -154,6 +154,9 @@ describe("live chat page", () => {
         }
         return new Response(frames, { status: 200, headers: { "Content-Type": "text/event-stream" } });
       }
+      if (url.endsWith("/runs/run-real/cancel") && init?.method === "POST") {
+        return json({ run_id: "run-real", status: "cancellation_requested" }, 202);
+      }
       if (url.endsWith("/runs/run-real/queue") && init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as { content: string };
         return json({
@@ -219,6 +222,14 @@ describe("live chat page", () => {
     await user.click(screen.getByRole("button", { name: "Add files or connectors" }));
     expect(screen.getByRole("dialog", { name: "Add files and connectors" })).toBeVisible();
     expect(screen.getByText("Snowflake")).toBeVisible();
+    await user.click(screen.getByRole("tab", { name: "Apps & Tools" }));
+    expect(screen.getByText("Jira")).toBeVisible();
+    expect(screen.getByText("Slack")).toBeVisible();
+    expect(screen.queryByText("Snowflake")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Data Sources" }));
+    expect(screen.getByText("Google BigQuery")).toBeVisible();
+    await user.click(screen.getByRole("tab", { name: "Skills" }));
+    expect(screen.getByText("Forecasting")).toBeVisible();
     await user.upload(screen.getByLabelText("Add files to chat"), [
       new File(["month,revenue"], "sales.csv", { type: "text/csv" }),
       new File(["report"], "summary.pdf", { type: "application/pdf" }),
@@ -285,6 +296,23 @@ describe("live chat page", () => {
     const steerCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/runs/run-real/steer"));
     expect(JSON.parse(String(steerCall?.[1]?.body))).toMatchObject({ content: "Focus only on enterprise customers" });
 
+    openStreamController?.close();
+  });
+
+  it("stops the active run through its cancellation endpoint", async () => {
+    holdStreamOpen = true;
+    const user = userEvent.setup();
+    renderChat();
+    const composer = await screen.findByRole("textbox", { name: "Ask anything about your data" });
+
+    await user.type(composer, "Start a cancellable analysis");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Stop" })).toBeVisible());
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+
+    const cancelCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/runs/run-real/cancel"));
+    expect(JSON.parse(String(cancelCall?.[1]?.body))).toEqual({ reason: "user" });
+    expect(await screen.findByText("Stopping the active run…")).toBeVisible();
     openStreamController?.close();
   });
 });

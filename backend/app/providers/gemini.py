@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from google import genai
 from google.genai import types
@@ -65,9 +65,12 @@ class GeminiProvider:
         return selected
 
     async def stream_text(
-        self, messages: list[ChatTurn], model_id: str, effort: str | None
+        self, messages: list[ChatTurn], model_id: str, effort: str | None,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> AsyncIterator[str]:
         self.validate_selection(model_id, effort)
+        if is_cancelled is not None and is_cancelled():
+            return
         if self._client is None:
             raise ProviderError("provider_not_configured", "GEMINI_API_KEY is not configured.")
 
@@ -90,6 +93,8 @@ class GeminiProvider:
                 config=config,
             )
             async for chunk in stream:
+                if is_cancelled is not None and is_cancelled():
+                    return
                 if chunk.text:
                     yield chunk.text
         except ProviderError:
@@ -105,6 +110,7 @@ class GeminiProvider:
         tools: tuple[ProviderTool, ...],
         execute_tool: ToolExecutor,
         max_steps: int,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> AsyncIterator[ProviderEvent]:
         self.validate_selection(model_id, effort)
         if self._client is None:
@@ -129,6 +135,8 @@ class GeminiProvider:
         )
         try:
             for step in range(max_steps):
+                if is_cancelled is not None and is_cancelled():
+                    return
                 response = await self._client.aio.models.generate_content(model=model_id, contents=contents, config=config)
                 if not response.candidates or response.candidates[0].content is None:
                     raise ProviderError("empty_provider_response", "Gemini returned no response.")
@@ -142,6 +150,8 @@ class GeminiProvider:
                     return
                 response_parts: list[types.Part] = []
                 for index, call in enumerate(calls):
+                    if is_cancelled is not None and is_cancelled():
+                        return
                     name = str(call.name or "")
                     arguments = dict(call.args or {})
                     tool_call_id = call.id or f"step-{step + 1}-call-{index + 1}"

@@ -3,19 +3,33 @@
 import Image from "next/image";
 import {
   ArrowUp,
+  BarChart3,
+  BrainCircuit,
+  Calculator,
+  CircleStop,
   ChevronRight,
   CirclePause,
   CornerDownRight,
   Database,
+  FileSearch,
+  FileSpreadsheet,
   FileText,
+  Github,
+  HardDrive,
   ListPlus,
   LoaderCircle,
   Mail,
+  MessageSquare,
+  NotebookTabs,
   Paperclip,
+  PanelsTopLeft,
   Plus,
   Search,
+  Sigma,
   Snowflake,
   Sparkles,
+  TrendingUp,
+  Workflow,
   X,
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -24,6 +38,7 @@ import { ContextSidebar, type ContextFile } from "@/features/context-sidebar";
 import {
   createMessage,
   cancelQueuedRun,
+  cancelRun,
   getArtifacts,
   getChat,
   getDatasets,
@@ -91,9 +106,26 @@ type ConnectorCategory = "all" | "skills" | "data" | "apps";
 
 const connectorItems = [
   { name: "Data Cleaning", category: "skills" as const, icon: Sparkles },
+  { name: "Data Visualization", category: "skills" as const, icon: BarChart3 },
+  { name: "Forecasting", category: "skills" as const, icon: TrendingUp },
+  { name: "Statistical Analysis", category: "skills" as const, icon: Sigma },
+  { name: "Anomaly Detection", category: "skills" as const, icon: FileSearch },
+  { name: "Machine Learning", category: "skills" as const, icon: BrainCircuit },
+  { name: "Report Generation", category: "skills" as const, icon: FileText },
   { name: "Snowflake", category: "data" as const, icon: Snowflake },
+  { name: "Google BigQuery", category: "data" as const, icon: Database },
   { name: "PostgreSQL", category: "data" as const, icon: Database },
+  { name: "MySQL", category: "data" as const, icon: Database },
+  { name: "Google Sheets", category: "data" as const, icon: FileSpreadsheet },
+  { name: "Microsoft Excel", category: "data" as const, icon: FileSpreadsheet },
+  { name: "Google Drive", category: "data" as const, icon: HardDrive },
   { name: "Gmail", category: "apps" as const, icon: Mail },
+  { name: "Slack", category: "apps" as const, icon: MessageSquare },
+  { name: "Notion", category: "apps" as const, icon: NotebookTabs },
+  { name: "Jira", category: "apps" as const, icon: PanelsTopLeft },
+  { name: "GitHub", category: "apps" as const, icon: Github },
+  { name: "Zapier", category: "apps" as const, icon: Workflow },
+  { name: "Calculator", category: "apps" as const, icon: Calculator },
 ];
 
 function formatFileSize(bytes: number) {
@@ -126,6 +158,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [queuedQuestions, setQueuedQuestions] = useState<QueuedQuestion[]>([]);
   const [composerPending, setComposerPending] = useState<"queue" | "steer" | null>(null);
+  const [stopPending, setStopPending] = useState(false);
   const [composerStatus, setComposerStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<string>();
@@ -347,6 +380,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
         return;
       }
       if (event.type === "agent.cancelled" || event.type === "agent.interrupted") {
+        setComposerStatus(event.type === "agent.cancelled" ? "Run stopped." : "Run interrupted.");
         updateAssistant((message) => ({ ...message, status: "interrupted" }));
       }
     }
@@ -528,6 +562,19 @@ export function ChatPage({ chatId }: { chatId: string }) {
     }
   }
 
+  async function stopActiveRun() {
+    if (!activeRunId || stopPending) return;
+    setStopPending(true);
+    setError(null);
+    setComposerStatus("Stopping the active run…");
+    try {
+      await cancelRun(activeRunId);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not stop the active run.");
+      setStopPending(false);
+    }
+  }
+
   async function removeQueuedQuestion(runId: string) {
     setQueuedQuestions((current) => current.map((item) => item.runId === runId ? { ...item, removing: true } : item));
     setError(null);
@@ -611,8 +658,13 @@ export function ChatPage({ chatId }: { chatId: string }) {
               ))}
             </div>
           ) : null}
-          {running && activeRunId && draft.trim() ? (
+          {running && activeRunId ? (
             <div className="mx-auto mb-2 flex max-w-3xl items-center gap-2" aria-label="Active run actions">
+              <button type="button" onClick={() => void stopActiveRun()} disabled={stopPending} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-400/40 bg-red-950/20 px-3 text-xs font-medium text-red-200 hover:bg-red-950/40 disabled:opacity-40">
+                {stopPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <CircleStop className="size-3.5" />}
+                Stop
+              </button>
+              {draft.trim() ? <>
               <button type="button" onClick={() => void queueDraft()} disabled={Boolean(composerPending)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border-strong bg-raised px-3 text-xs font-medium text-foreground hover:bg-surface disabled:opacity-40">
                 {composerPending === "queue" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ListPlus className="size-3.5" />}
                 Queue
@@ -621,6 +673,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
                 {composerPending === "steer" ? <LoaderCircle className="size-3.5 animate-spin" /> : <CornerDownRight className="size-3.5" />}
                 Steer
               </button>
+              </> : null}
             </div>
           ) : null}
           <div ref={composerRef} className="relative mx-auto max-w-3xl rounded-lg border border-border-strong bg-surface p-2 focus-within:border-ring">
@@ -646,25 +699,25 @@ export function ChatPage({ chatId }: { chatId: string }) {
               <div className="relative">
                 <button type="button" aria-label="Add files or connectors" aria-haspopup="dialog" aria-expanded={attachmentMenuOpen} disabled={running || messagesQuery.isError} onClick={() => setAttachmentMenuOpen((open) => !open)} className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40"><Plus className="size-4" /></button>
                 {attachmentMenuOpen ? (
-                  <div role="dialog" aria-label="Add files and connectors" className="absolute bottom-11 left-0 z-50 w-[min(430px,calc(100vw-2rem))] rounded-xl border border-border-strong bg-[#191b1e] p-3 shadow-[0_22px_70px_rgba(0,0,0,0.55)]">
-                    <button type="button" onClick={() => fileInputRef.current?.click()} className="flex w-full items-center gap-3 rounded-xl border border-border-strong bg-[linear-gradient(110deg,#303744,#242a33)] p-3 text-left hover:border-slate/70">
-                      <span className="grid size-12 shrink-0 place-items-center rounded-xl bg-[#b8cef0] text-[#172033]"><Paperclip className="size-6" /></span>
-                      <span><span className="block text-sm font-semibold text-foreground">Add files</span><span className="mt-0.5 block text-xs text-foreground/65">From your device</span></span>
-                      <ChevronRight className="ml-auto size-5 text-foreground" />
+                  <div role="dialog" aria-label="Add files and connectors" className="absolute bottom-[calc(100%+8px)] left-0 z-50 flex h-[320px] w-[min(300px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-xl border border-border-strong bg-[#191b1e] p-2 shadow-[0_18px_50px_rgba(0,0,0,0.48)]">
+                    <button type="button" onClick={() => fileInputRef.current?.click()} className="flex w-full shrink-0 items-center gap-2 rounded-lg border border-border-strong bg-[linear-gradient(110deg,#303744,#242a33)] p-2 text-left hover:border-slate/70">
+                      <span className="grid size-9 shrink-0 place-items-center rounded-md bg-[#b8cef0] text-[#172033]"><Paperclip className="size-[18px]" /></span>
+                      <span><span className="block text-xs font-semibold leading-4 text-foreground">Add files</span><span className="block text-[10px] leading-4 text-foreground/65">From your device</span></span>
+                      <ChevronRight className="ml-auto size-3.5 text-foreground" />
                     </button>
-                    <label className="relative mt-3 block"><span className="sr-only">Find a connector</span><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><input value={connectorQuery} onChange={(event) => setConnectorQuery(event.target.value)} placeholder="Find a connector…" className="h-10 w-full rounded-lg border bg-transparent pl-9 pr-3 text-xs outline-none placeholder:text-muted-foreground focus:border-ring" /></label>
-                    <div role="tablist" aria-label="Connector categories" className="mt-2 grid grid-cols-4 gap-1 border-b pb-2">
+                    <label className="relative mt-2 block shrink-0"><span className="sr-only">Find a connector</span><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><input value={connectorQuery} onChange={(event) => setConnectorQuery(event.target.value)} placeholder="Find a connector…" className="h-8 w-full rounded-md border bg-transparent pl-8 pr-2.5 text-[11px] outline-none placeholder:text-muted-foreground focus:border-ring" /></label>
+                    <div role="tablist" aria-label="Connector categories" className="mt-1.5 grid shrink-0 grid-cols-4 gap-0.5 border-b pb-1.5">
                       {([['all', 'All'], ['skills', 'Skills'], ['data', 'Data Sources'], ['apps', 'Apps & Tools']] as const).map(([value, label]) => (
-                        <button key={value} type="button" role="tab" aria-selected={connectorCategory === value} onClick={() => setConnectorCategory(value)} className={`rounded-md px-2 py-1.5 text-[11px] ${connectorCategory === value ? "bg-raised text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>
+                        <button key={value} type="button" role="tab" aria-selected={connectorCategory === value} onClick={() => setConnectorCategory(value)} className={`min-h-8 rounded px-1 py-0.5 text-[11px] leading-[14px] ${connectorCategory === value ? "bg-raised text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>
                       ))}
                     </div>
-                    <div className="max-h-44 overflow-y-auto py-1">
+                    <div className="min-h-0 flex-1 overflow-y-auto py-0.5">
                       {visibleConnectors.map(({ name, icon: Icon }) => (
-                        <button key={name} type="button" disabled title={`${name} is coming soon`} className="flex w-full cursor-not-allowed items-center gap-3 rounded-md px-3 py-2 text-left text-xs text-foreground opacity-70"><Icon className="size-4" /><span>{name}</span><span className="ml-auto text-[9px] uppercase tracking-wide text-muted-foreground">Soon</span></button>
+                        <button key={name} type="button" disabled title={`${name} is coming soon`} className="flex w-full cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[11px] text-foreground opacity-70"><Icon className="size-3.5" /><span>{name}</span><span className="ml-auto text-[8px] uppercase tracking-wide text-muted-foreground">Soon</span></button>
                       ))}
-                      {!visibleConnectors.length ? <p className="px-3 py-5 text-center text-xs text-muted-foreground">No matching connectors.</p> : null}
+                      {!visibleConnectors.length ? <p className="px-2 py-3 text-center text-[11px] text-muted-foreground">No matching connectors.</p> : null}
                     </div>
-                    <p className="border-t px-2 pt-2 text-[10px] text-muted-foreground">Local files are available now. External connectors are coming soon.</p>
+                    <p className="shrink-0 border-t px-1.5 pt-1.5 text-[9px] text-muted-foreground">Local files are available now. External connectors are coming soon.</p>
                   </div>
                 ) : null}
               </div>

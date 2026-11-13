@@ -47,7 +47,8 @@ class LLMProvider(Protocol):
     def validate_selection(self, model_id: str, effort: str | None) -> ModelInfo: ...
 
     async def stream_text(
-        self, messages: list[ChatTurn], model_id: str, effort: str | None
+        self, messages: list[ChatTurn], model_id: str, effort: str | None,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> AsyncIterator[str]: ...
 
     async def stream_with_tools(
@@ -58,4 +59,5 @@ class LLMProvider(Protocol):
         tools: tuple[ProviderTool, ...],
         execute_tool: ToolExecutor,
         max_steps: int,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> AsyncIterator[ProviderEvent]: ...

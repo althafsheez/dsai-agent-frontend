@@ -181,6 +181,13 @@ export function steerRun(runId: string, input: {
   });
 }
 
+export function cancelRun(runId: string, reason: "user" | "navigation" | "refresh" = "user"): Promise<{ run_id: string; status: string }> {
+  return requestJson<{ run_id: string; status: string }>(`/runs/${encodeURIComponent(runId)}/cancel`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+}
+
 export async function cancelQueuedRun(runId: string): Promise<void> {
   const response = await fetch(`${API_ROOT}/runs/${encodeURIComponent(runId)}/queue`, {
     method: "DELETE",

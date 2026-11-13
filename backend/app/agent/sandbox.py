@@ -23,13 +23,24 @@ class E2BSandboxPool:
 
     @staticmethod
     def _safe_path(path: str, *, writable: bool = False) -> str:
-        candidate = PurePosixPath(path)
-        allowed = PurePosixPath("/home/user/outputs" if writable else "/home/user")
-        if not candidate.is_absolute() or candidate == allowed or allowed not in candidate.parents:
+        root = PurePosixPath("/home/user/outputs" if writable else "/home/user")
+        raw = str(path or "").strip()
+        # Tool callers commonly use paths relative to the sandbox working
+        # directory (for example `.` or `inputs/file.csv`). Resolve those
+        # inside the corresponding sandbox root instead of rejecting them.
+        candidate = PurePosixPath(raw) if raw.startswith("/") else root / (raw or ".")
+        candidate = PurePosixPath("/") / candidate.relative_to("/") if candidate.is_absolute() else candidate
+        allowed = root
+        if not candidate.is_absolute() or (candidate != allowed and allowed not in candidate.parents):
             raise ValueError("Path is outside the allowed sandbox directory.")
         if any(part.startswith(".") for part in candidate.parts):
             raise ValueError("Hidden paths are not accessible.")
         return str(candidate)
+
+    @classmethod
+    def safe_input_path(cls, path: str) -> str:
+        """Resolve a dataset path without allowing access outside the sandbox."""
+        return cls._safe_path(path)
 
     def _start_sync(self, run_id: str) -> Any:
         if not self._api_key:
@@ -41,9 +52,14 @@ class E2BSandboxPool:
                     from e2b_code_interpreter import Sandbox
                 except ImportError as exc:
                     raise SandboxUnavailable("E2B Code Interpreter is not installed.") from exc
-                sandbox = Sandbox.create(timeout=self._timeout_seconds, api_key=self._api_key)
-                sandbox.files.make_dir("/home/user/outputs")
-                sandbox.files.make_dir("/home/user/inputs")
+                try:
+                    sandbox = Sandbox.create(timeout=self._timeout_seconds, api_key=self._api_key)
+                    # E2B returns False when these standard directories already
+                    # exist, which is safe and expected for a fresh template.
+                    sandbox.files.make_dir("/home/user/outputs")
+                    sandbox.files.make_dir("/home/user/inputs")
+                except Exception as exc:
+                    raise SandboxUnavailable(f"Could not start the E2B sandbox: {type(exc).__name__}.") from exc
                 self._sandboxes[run_id] = sandbox
                 self._output_hashes[run_id] = {}
             return sandbox
@@ -60,19 +76,30 @@ class E2BSandboxPool:
             try:
                 execution = sandbox.run_code(code, timeout=bounded_timeout)
                 generated = self._scan_outputs_sync(run_id, sandbox)
+                execution_error = getattr(execution, "error", None)
                 error = None
-                if execution.error:
-                    error = f"{execution.error.name}: {execution.error.value}"[:500]
+                if execution_error:
+                    error = (
+                        f"{getattr(execution_error, 'name', 'ExecutionError')}: "
+                        f"{getattr(execution_error, 'value', str(execution_error))}"
+                    )[:500]
+                logs = getattr(execution, "logs", None)
+                stdout_items = getattr(logs, "stdout", []) or []
+                stderr_items = getattr(logs, "stderr", []) or []
                 return {
-                    "success": execution.error is None,
-                    "stdout": "".join(execution.logs.stdout)[:4000],
-                    "stderr": "".join(execution.logs.stderr)[:1000],
+                    "success": execution_error is None,
+                    "stdout": "".join(str(getattr(item, "line", item)) for item in stdout_items)[:4000],
+                    "stderr": "".join(str(getattr(item, "line", item)) for item in stderr_items)[:1000],
                     "error": error,
                     "generated_files": generated,
                 }
-            except Exception:
-                self._close_sync(run_id)
-                return {"success": False, "error": "Sandbox execution failed."}
+            except Exception as exc:
+                # Keep the run sandbox alive so staged inputs and prior state
+                # remain available to the next tool call. Cleanup happens once
+                # at the end of the run; restarting here silently loses files.
+                detail = str(exc).strip().replace("\n", " ")[:240]
+                suffix = f": {detail}" if detail else ""
+                return {"success": False, "error": f"Sandbox execution failed ({type(exc).__name__}){suffix}."}
 
         try:
             return await asyncio.to_thread(run)
@@ -83,10 +110,14 @@ class E2BSandboxPool:
         generated: list[dict[str, Any]] = []
         known = self._output_hashes.setdefault(run_id, {})
         for entry in sandbox.files.list("/home/user/outputs"):
-            entry_type = str(getattr(entry.type, "value", entry.type)).lower()
+            entry_type_value = getattr(entry, "type", None)
+            entry_type = str(getattr(entry_type_value, "value", entry_type_value)).lower()
             if entry_type != "file":
                 continue
-            path = self._safe_path(str(entry.path), writable=True)
+            entry_path = getattr(entry, "path", None)
+            if not entry_path:
+                continue
+            path = self._safe_path(str(entry_path), writable=True)
             content = sandbox.files.read(path, format="bytes")
             digest = hashlib.sha256(content).hexdigest()
             if known.get(path) == digest:

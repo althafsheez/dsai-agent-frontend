@@ -52,7 +52,11 @@ async def test_dataset_lookup_rejects_mutating_sql_before_sandbox(tool_setup) ->
 
 def test_sandbox_paths_are_strictly_scoped() -> None:
     assert E2BSandboxPool._safe_path("/home/user/inputs/data.csv") == "/home/user/inputs/data.csv"
+    assert E2BSandboxPool._safe_path(".") == "/home/user"
+    assert E2BSandboxPool._safe_path("inputs/data.csv") == "/home/user/inputs/data.csv"
+    assert E2BSandboxPool._safe_path("/home/user") == "/home/user"
     assert E2BSandboxPool._safe_path("/home/user/outputs/chart.png", writable=True) == "/home/user/outputs/chart.png"
+    assert E2BSandboxPool._safe_path("chart.png", writable=True) == "/home/user/outputs/chart.png"
     with pytest.raises(ValueError):
         E2BSandboxPool._safe_path("/etc/passwd")
     with pytest.raises(ValueError):

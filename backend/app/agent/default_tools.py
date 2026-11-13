@@ -147,7 +147,10 @@ def build_tool_registry(
         return await sandbox_pool.write_text(context.run_id, str(arguments.get("path", "")), str(arguments.get("content", "")))
 
     async def lookup_data(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        path = str(arguments.get("path", ""))
+        try:
+            path = sandbox_pool.safe_input_path(str(arguments.get("path", "")))
+        except ValueError as exc:
+            return {"error": str(exc)}
         sql = str(arguments.get("sql", "")).strip()
         if not re.match(r"(?is)^select\b", sql) or ";" in sql or re.search(r"(?is)\b(insert|update|delete|drop|alter|attach|copy|install|load|pragma|call)\b", sql):
             return {"error": "Only one read-only SELECT query is allowed."}

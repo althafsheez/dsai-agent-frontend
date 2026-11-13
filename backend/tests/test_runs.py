@@ -199,7 +199,7 @@ async def test_runner_executes_registered_tools_and_forwards_public_events() -> 
     assert events[-1].data == {"text": "hello"}
 
 
-async def test_queue_runs_next_and_late_steer_is_marked_unapplied(tmp_path, demo_headers: dict[str, str]) -> None:
+async def test_queue_runs_next_and_steer_restarts_same_run(tmp_path, demo_headers: dict[str, str]) -> None:
     from app.config import Settings
     from app.main import create_app
 
@@ -217,6 +217,9 @@ async def test_queue_runs_next_and_late_steer_is_marked_unapplied(tmp_path, demo
                 self.started.set()
                 await self.release.wait()
                 yield "Initial response."
+            elif call_number == 2:
+                assert messages[-1] == ChatTurn(role="user", content="High-priority steering instruction: Focus on enterprise")
+                yield "Steered response."
             else:
                 assert messages[-1] == ChatTurn(role="user", content="Compare last quarter")
                 yield "Queued response."
@@ -271,7 +274,8 @@ async def test_queue_runs_next_and_late_steer_is_marked_unapplied(tmp_path, demo
             response = await asyncio.wait_for(stream_task, timeout=3)
             assert response.status_code == 200
             events = parse_sse(response.text)
-            assert "steer.unapplied" in [event["type"] for event in events]
+            assert "steer.applied" in [event["type"] for event in events]
+            assert "steer.unapplied" not in [event["type"] for event in events]
             assert [event["type"] for event in events].count("agent.completed") == 2
             assert len({event["run_id"] for event in events if event["type"] == "agent.started"}) == 2
             with app.state.session_factory() as session:
@@ -279,7 +283,65 @@ async def test_queue_runs_next_and_late_steer_is_marked_unapplied(tmp_path, demo
                 instruction = session.scalar(select(SteeringInstruction))
                 assert [run.status for run in runs] == ["completed", "completed"]
                 assert instruction is not None
-                assert instruction.status == "unapplied"
+                assert instruction.run_id == runs[0].id
+                assert instruction.status == "applied"
+
+
+async def test_stop_during_run_cancels_without_completing(tmp_path, demo_headers: dict[str, str]) -> None:
+    from app.config import Settings
+    from app.main import create_app
+
+    class CancellableProvider(FakeProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def stream_text(self, messages, model_id, effort):
+            self.validate_selection(model_id, effort)
+            self.started.set()
+            await self.release.wait()
+            yield "This partial answer must be retained."
+
+    provider = CancellableProvider()
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path / 'cancel-run.db'}",
+        storage_root=tmp_path / "storage",
+    )
+    app = create_app(settings=settings, provider=provider)
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            created = await create_chat(client, demo_headers)
+            stream_task = asyncio.create_task(client.post(
+                f"/api/chats/{created['chat']['id']}/messages/stream",
+                headers=demo_headers,
+                json={
+                    "user_message_id": created["message"]["id"],
+                    "model_id": "gemini-test",
+                    "effort": "high",
+                    "client_request_id": "cancel-run",
+                },
+            ))
+            await asyncio.wait_for(provider.started.wait(), timeout=2)
+            with app.state.session_factory() as session:
+                active_run = session.scalar(select(AgentRun).where(AgentRun.status == "running"))
+                assert active_run is not None
+                active_run_id = active_run.id
+
+            cancel = await client.post(
+                f"/api/runs/{active_run_id}/cancel",
+                headers=demo_headers,
+                json={"reason": "user"},
+            )
+            assert cancel.status_code == 202
+            provider.release.set()
+            response = await asyncio.wait_for(stream_task, timeout=3)
+            events = parse_sse(response.text)
+            assert events[-1]["type"] == "agent.cancelled"
+            assert "agent.completed" not in [event["type"] for event in events]
+            with app.state.session_factory() as session:
+                run = session.get(AgentRun, active_run_id)
+                assert run is not None and run.status == "cancelled"
 
 
 async def test_paused_queue_can_be_resumed_after_a_failed_run(tmp_path, demo_headers: dict[str, str]) -> None:

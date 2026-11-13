@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..agent import AgentRunner, RunnerCancelled
+from ..agent import AgentRunner, RunnerCancelled, RunnerSteered
 from ..agent.tools import ToolContext
 from ..errors import APIError
 from ..models import AgentRun, Chat, ExecutionEvent, Message, SteeringInstruction, User, utc_now
@@ -392,58 +392,68 @@ async def stream_run(
             tool_context = ToolContext(run_id=run.id, chat_id=run.chat_id, user_id=chat.created_by)
 
         while True:
-            steered = False
+            steering_events: list[ExecutionEvent] = []
+
+            def poll_steering(checkpoint: str) -> list[str]:
+                with session_factory() as control_session:
+                    control_run = control_session.get(AgentRun, run_id)
+                    if control_run is None:
+                        return []
+                    contents, events = _apply_received_steering(control_session, control_run, checkpoint)
+                    steering_events.extend(events)
+                    return contents
+
             generation = runner.run(
                 history,
                 run.model_id,
                 run.effort,
                 lambda: coordinator.cancellation_reason(run_id) is not None,
                 tool_context,
+                poll_steering,
             )
-            async for runner_event in generation:
+            try:
+                async for runner_event in generation:
+                    with session_factory() as session:
+                        run = session.get(AgentRun, run_id)
+                        if run is None:
+                            return
+                        assistant = session.get(Message, run.assistant_message_id)
+                        if assistant is None:
+                            raise RuntimeError("Assistant message no longer exists.")
+                        if runner_event.type == "message.delta":
+                            text = str(runner_event.data["text"])
+                            assistant.content += text
+                            session.commit()
+                            event_data = {"message_id": assistant.id, "text": text}
+                        else:
+                            event_data = runner_event.data
+                        event = _persist_event(session, run.id, runner_event.type, event_data)
+                        yield _sse(event)
+                        if runner_event.type == "tool.completed":
+                            output = runner_event.data.get("output")
+                            resources = output.get("resources", []) if isinstance(output, dict) else []
+                            for resource in resources:
+                                resource_type = resource.get("resource_type") if isinstance(resource, dict) else None
+                                if resource_type in ("dataset", "artifact"):
+                                    created = _persist_event(
+                                        session,
+                                        run.id,
+                                        f"{resource_type}.created",
+                                        {resource_type: resource, "scope": {"type": "chat", "id": run.chat_id}},
+                                    )
+                                    yield _sse(created)
+            except RunnerSteered as steered:
+                for steering_event in steering_events:
+                    yield _sse(steering_event)
                 with session_factory() as session:
-                    run = session.get(AgentRun, run_id)
-                    if run is None:
-                        return
-                    assistant = session.get(Message, run.assistant_message_id)
-                    if assistant is None:
-                        raise RuntimeError("Assistant message no longer exists.")
-                    if runner_event.type == "message.delta":
-                        text = str(runner_event.data["text"])
-                        assistant.content += text
-                        session.commit()
-                        event_data = {"message_id": assistant.id, "text": text}
-                    else:
-                        event_data = runner_event.data
-                    event = _persist_event(session, run.id, runner_event.type, event_data)
-                    yield _sse(event)
-                    if runner_event.type == "tool.completed":
-                        output = runner_event.data.get("output")
-                        resources = output.get("resources", []) if isinstance(output, dict) else []
-                        for resource in resources:
-                            resource_type = resource.get("resource_type") if isinstance(resource, dict) else None
-                            if resource_type in ("dataset", "artifact"):
-                                created = _persist_event(
-                                    session,
-                                    run.id,
-                                    f"{resource_type}.created",
-                                    {resource_type: resource, "scope": {"type": "chat", "id": run.chat_id}},
-                                )
-                                yield _sse(created)
-                    if runner_event.type == "tool.completed" and not assistant.content:
-                        steering, steering_events = _apply_received_steering(session, run, runner_event.type)
-                        for steering_event in steering_events:
-                            yield _sse(steering_event)
-                        if steering:
-                            history = [
-                                *history,
-                                ChatTurn(role="user", content="Steering instruction: " + "\n".join(steering)),
-                            ]
-                            steered = True
-                if steered:
-                    break
-            if steered:
+                    current_run = session.get(AgentRun, run_id)
+                    assistant = session.get(Message, current_run.assistant_message_id) if current_run else None
+                    if assistant is not None and assistant.content:
+                        history = [*history, ChatTurn(role="assistant", content=assistant.content)]
+                history.append(ChatTurn(role="user", content="High-priority steering instruction: " + "\n".join(steered.instructions)))
                 continue
+            for steering_event in steering_events:
+                yield _sse(steering_event)
             with session_factory() as session:
                 run = session.get(AgentRun, run_id)
                 if run is None:
