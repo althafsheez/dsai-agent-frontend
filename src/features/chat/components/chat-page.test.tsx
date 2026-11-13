@@ -70,6 +70,8 @@ describe("live chat page", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   let holdStreamOpen: boolean;
   let openStreamController: ReadableStreamDefaultController<Uint8Array> | null;
+  let pendingCreate: Promise<void> | null;
+  let resolvePendingCreate: (() => void) | null;
 
   beforeEach(() => {
     window.sessionStorage.clear();
@@ -77,6 +79,8 @@ describe("live chat page", () => {
     persistedMessages = [{ ...initialMessage }];
     holdStreamOpen = false;
     openStreamController = null;
+    pendingCreate = null;
+    resolvePendingCreate = null;
     let nextUser = 1;
     fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
@@ -88,6 +92,7 @@ describe("live chat page", () => {
       }
       if (url.endsWith(`/chats/${chat.id}/runs`) && !init?.method) return json({ items: [], next_cursor: null });
       if (url.endsWith(`/chats/${chat.id}/messages`) && init?.method === "POST") {
+        if (pendingCreate) await pendingCreate;
         const body = JSON.parse(String(init.body)) as { content: string };
         const message: MessageDto = {
           ...initialMessage,
@@ -219,6 +224,21 @@ describe("live chat page", () => {
     expect(screen.getByText("Follow up")).toBeInTheDocument();
   });
 
+  it("shows a submitted question immediately while message creation is still pending", async () => {
+    const user = userEvent.setup();
+    renderChat();
+    await screen.findByText("Stored question");
+    pendingCreate = new Promise<void>((resolve) => { resolvePendingCreate = resolve; });
+
+    await user.type(screen.getByRole("textbox", { name: "Ask anything about your data" }), "Show this immediately");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(screen.getByText("Show this immediately")).toBeVisible();
+    expect(screen.getByText("Stored question")).toBeVisible();
+    resolvePendingCreate?.();
+    expect(await screen.findByText("Streamed answer")).toBeVisible();
+  });
+
   it("adds multiple files, uploads them before the run, and catalogs datasets and artifacts", async () => {
     const user = userEvent.setup();
     renderChat();
@@ -283,6 +303,9 @@ describe("live chat page", () => {
     await user.type(composer, "Start a long analysis");
     await user.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(composer).toHaveAttribute("placeholder", "Type a follow-up to queue or steer…"));
+    // The first SSE event arrives while getMessages still contains the old
+    // cache. The submitted user bubble must remain visible in that gap.
+    expect(screen.getByText("Start a long analysis")).toBeVisible();
 
     await user.type(composer, "Compare this with last quarter");
     expect(composer).toBeEnabled();

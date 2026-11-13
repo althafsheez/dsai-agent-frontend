@@ -11,6 +11,8 @@ import type {
   RunStartInput,
   SteeringInstructionDto,
   WorkspaceDto,
+  WorkspaceContextFileDto,
+  WorkflowDto,
 } from "./types";
 import type { ArtifactResource, DatasetResource } from "@/features/context-sidebar/types";
 
@@ -76,7 +78,44 @@ export function getWorkspaces(): Promise<ApiList<WorkspaceDto>> {
   return requestJson<ApiList<WorkspaceDto>>("/workspaces");
 }
 
-export function updateWorkspace(workspaceId: string, input: { name?: string; archived?: boolean }): Promise<WorkspaceDto> {
+export function getWorkspace(workspaceId: string): Promise<WorkspaceDto> {
+  return requestJson<WorkspaceDto>(`/workspaces/${encodeURIComponent(workspaceId)}`);
+}
+
+export function getWorkspaceChats(workspaceId: string): Promise<ApiList<ChatDto>> {
+  return requestJson<ApiList<ChatDto>>(`/workspaces/${encodeURIComponent(workspaceId)}/chats`);
+}
+
+export function getWorkspaceContextFiles(workspaceId: string): Promise<ApiList<WorkspaceContextFileDto>> {
+  return requestJson<ApiList<WorkspaceContextFileDto>>(`/workspaces/${encodeURIComponent(workspaceId)}/context-files`);
+}
+
+export function getWorkspaceWorkflows(workspaceId: string): Promise<ApiList<WorkflowDto>> {
+  return requestJson<ApiList<WorkflowDto>>(`/workspaces/${encodeURIComponent(workspaceId)}/workflows`);
+}
+
+export function createWorkspaceWorkflow(workspaceId: string, input: { name: string; description?: string | null }): Promise<WorkflowDto> {
+  return requestJson<WorkflowDto>(`/workspaces/${encodeURIComponent(workspaceId)}/workflows`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function linkWorkspaceWorkflowChat(workspaceId: string, workflowId: string, chatId: string): Promise<{ workflow_id: string; chat_id: string; relation_type: string }> {
+  return requestJson(`/workspaces/${encodeURIComponent(workspaceId)}/workflows/${encodeURIComponent(workflowId)}/chats`, { method: "POST", body: JSON.stringify({ chat_id: chatId, relation_type: "referenced" }) });
+}
+
+export function createWorkspaceContextFile(workspaceId: string, input: { name: string; content: string }): Promise<WorkspaceContextFileDto> {
+  return requestJson<WorkspaceContextFileDto>(`/workspaces/${encodeURIComponent(workspaceId)}/context-files`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function updateWorkspaceContextFile(workspaceId: string, fileId: string, input: { name?: string; content?: string }): Promise<WorkspaceContextFileDto> {
+  return requestJson<WorkspaceContextFileDto>(`/workspaces/${encodeURIComponent(workspaceId)}/context-files/${encodeURIComponent(fileId)}`, { method: "PATCH", body: JSON.stringify(input) });
+}
+
+export async function deleteWorkspaceContextFile(workspaceId: string, fileId: string): Promise<void> {
+  const response = await fetch(`${API_ROOT}/workspaces/${encodeURIComponent(workspaceId)}/context-files/${encodeURIComponent(fileId)}`, { method: "DELETE", headers: requestHeaders() });
+  if (!response.ok) throw await apiError(response);
+}
+
+export function updateWorkspace(workspaceId: string, input: { name?: string; description?: string | null; archived?: boolean }): Promise<WorkspaceDto> {
   return requestJson<WorkspaceDto>(`/workspaces/${encodeURIComponent(workspaceId)}`, {
     method: "PATCH",
     body: JSON.stringify(input),
@@ -91,7 +130,7 @@ export async function deleteWorkspace(workspaceId: string): Promise<void> {
   if (!response.ok) throw await apiError(response);
 }
 
-export function createWorkspace(input: { name: string; description?: string | null }): Promise<WorkspaceDto> {
+export function createWorkspace(input: { name: string; description?: string | null; ai_context?: string | null }): Promise<WorkspaceDto> {
   return requestJson<WorkspaceDto>("/workspaces", {
     method: "POST",
     body: JSON.stringify(input),
@@ -113,11 +152,25 @@ export function getChats(): Promise<ApiList<ChatDto>> {
   return requestJson<ApiList<ChatDto>>("/chats");
 }
 
-export function updateChat(chatId: string, input: { title?: string; archived?: boolean }): Promise<ChatDto> {
+export function getActivity(): Promise<ApiList<ChatDto>> {
+  return requestJson<ApiList<ChatDto>>("/chats/activity/list");
+}
+
+export function updateChat(chatId: string, input: { title?: string; workspace_id?: string | null; archived?: boolean; is_unread?: boolean }): Promise<ChatDto> {
   return requestJson<ChatDto>(`/chats/${encodeURIComponent(chatId)}`, {
     method: "PATCH",
     body: JSON.stringify(input),
   });
+}
+
+export async function setChatPresence(chatId: string, viewing: boolean): Promise<void> {
+  const response = await fetch(`${API_ROOT}/chats/${encodeURIComponent(chatId)}/presence`, {
+    method: "POST",
+    headers: requestHeaders(true),
+    body: JSON.stringify({ viewing }),
+    keepalive: !viewing,
+  });
+  if (!response.ok) throw await apiError(response);
 }
 
 export async function deleteChat(chatId: string): Promise<void> {
@@ -150,8 +203,35 @@ export function getDatasets(chatId: string): Promise<ApiList<DatasetResource>> {
   return requestJson<ApiList<DatasetResource>>(`/datasets?chat_id=${encodeURIComponent(chatId)}`);
 }
 
+export function getWorkspaceDatasets(workspaceId: string): Promise<ApiList<DatasetResource>> {
+  return requestJson<ApiList<DatasetResource>>(`/datasets?workspace_id=${encodeURIComponent(workspaceId)}`);
+}
+
 export function getArtifacts(chatId: string): Promise<ApiList<ArtifactResource>> {
   return requestJson<ApiList<ArtifactResource>>(`/artifacts?chat_id=${encodeURIComponent(chatId)}`);
+}
+
+export type LibraryCategory = "dataset" | "visual" | "code" | "report" | "other";
+
+/** A saved resource retains its dataset/artifact discriminator for preview rendering. */
+export type LibraryResource =
+  | (DatasetResource & { resource_type: "dataset"; library_category: LibraryCategory; library_created_at: string })
+  | (ArtifactResource & { resource_type: "artifact"; library_category: LibraryCategory; library_created_at: string });
+
+export function getLibrary(): Promise<ApiList<LibraryResource>> {
+  return requestJson<ApiList<LibraryResource>>("/library");
+}
+
+export function addResourceToLibrary(resourceId: string): Promise<{ resource_id: string; in_library: boolean; library_entry_id: string }> {
+  return requestJson(`/resources/${encodeURIComponent(resourceId)}/library`, { method: "POST" });
+}
+
+export async function removeResourceFromLibrary(resourceId: string): Promise<void> {
+  const response = await fetch(`${API_ROOT}/resources/${encodeURIComponent(resourceId)}/library`, {
+    method: "DELETE",
+    headers: requestHeaders(),
+  });
+  if (!response.ok) throw await apiError(response);
 }
 
 export async function getResourcePreview(url: string): Promise<Blob> {

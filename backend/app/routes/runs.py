@@ -22,20 +22,31 @@ from ..schemas import (
     SteeringInstructionResponse,
 )
 from ..services.records import require_chat
-from ..services.runs import prepare_queued_run, prepare_retry, prepare_run, prepare_steering, stream_run
+from ..services.runs import (
+    execute_run_in_background,
+    prepare_queued_run,
+    prepare_retry,
+    prepare_run,
+    prepare_steering,
+    stream_persisted_events,
+)
 
 
 router = APIRouter(tags=["runs"])
 
 
 def _stream_response(request: Request, run: AgentRun) -> StreamingResponse:
-    return StreamingResponse(
-        stream_run(
+    request.app.state.run_coordinator.start(
+        run.id,
+        execute_run_in_background(
             request.app.state.session_factory,
             run.id,
             request.app.state.runner,
             request.app.state.run_coordinator,
         ),
+    )
+    return StreamingResponse(
+        stream_persisted_events(request.app.state.session_factory, run.id),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

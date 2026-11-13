@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { PanelLeftClose, PanelLeftOpen, Plus, Settings, X } from "lucide-react";
+import { LoaderCircle, PanelLeftClose, PanelLeftOpen, Plus, Settings, X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { getActivity } from "@/lib/api";
 import { useUiStore } from "@/stores/ui-store";
 import { Button } from "@/components/ui/button";
 import { Brand } from "./brand";
@@ -16,6 +18,12 @@ export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
   const setMobileOpen = useUiStore((state) => state.setMobileSidebarOpen);
   const compact = collapsed && !mobile;
   const closeMobile = () => { if (mobile) setMobileOpen(false); };
+  const activityQuery = useQuery({
+    queryKey: ["activity"],
+    queryFn: getActivity,
+    refetchInterval: 2000,
+  });
+  const activity = activityQuery.data?.items ?? [];
 
   return <div className="flex h-full flex-col bg-sidebar">
     <div className={compact ? "flex h-16 items-center justify-center" : "flex h-16 items-center gap-1 px-4"}>
@@ -38,7 +46,14 @@ export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
       </nav>
       {!compact && <div className="px-0.5">
         <SidebarSection title="Pinned"><p className="text-xs leading-relaxed text-muted-foreground">Keep important work close.<br />Your pinned items will appear here.</p></SidebarSection>
-        <SidebarSection title="Activity"><div className="flex items-start gap-2 text-xs text-muted-foreground"><span className="mt-1 size-1.5 shrink-0 rounded-full bg-border-strong" /><span>All quiet for now.</span></div></SidebarSection>
+        <SidebarSection title="Activity">{activity.length ? <div className="space-y-1">{activity.map((chat) => {
+          const running = chat.active_run_status === "running" || chat.active_run_status === "queued";
+          return <Link key={chat.id} href={`/chat/${chat.id}`} onClick={closeMobile} className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1.5 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
+            {running ? <LoaderCircle className="size-3 shrink-0 animate-spin text-sage" /> : <span aria-label="Unread" className="size-1.5 shrink-0 rounded-full bg-sage" />}
+            <span className="min-w-0 flex-1 truncate">{chat.title}</span>
+            <span className="shrink-0 text-[9px]">{running ? "Running..." : "●"}</span>
+          </Link>;
+        })}</div> : <div className="flex items-start gap-2 text-xs text-muted-foreground"><span className="mt-1 size-1.5 shrink-0 rounded-full bg-border-strong" /><span>All quiet for now.</span></div>}</SidebarSection>
       </div>}
     </div>
     <div className={compact ? "flex flex-col items-center gap-2 border-t py-3" : "flex items-center gap-2.5 border-t px-4 py-3"}>

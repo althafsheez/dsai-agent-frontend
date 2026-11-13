@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..errors import APIError
-from ..models import Chat, Message, User, Workspace, utc_now
+from ..models import Chat, Message, User, Workspace, WorkspaceContextFile, utc_now
 from ..schemas import ChatCreate, ChatUpdate, WorkspaceCreate, WorkspaceUpdate
 
 
@@ -24,6 +24,14 @@ def create_workspace(session: Session, user: User, data: WorkspaceCreate) -> Wor
         raise APIError(422, "empty_workspace_name", "Workspace name cannot be blank.")
     workspace = Workspace(name=name, description=data.description, created_by=user.id)
     session.add(workspace)
+    session.flush()
+    if data.ai_context and data.ai_context.strip():
+        session.add(WorkspaceContextFile(
+            workspace_id=workspace.id,
+            name="ai-instructions.md",
+            content=data.ai_context.strip(),
+            created_by=user.id,
+        ))
     session.commit()
     session.refresh(workspace)
     return workspace
@@ -131,6 +139,9 @@ def update_chat(session: Session, user: User, chat_id: str, data: ChatUpdate) ->
         chat.workspace_id = data.workspace_id
     if data.archived is not None:
         chat.archived_at = utc_now() if data.archived else None
+    if data.is_unread is not None:
+        chat.is_unread = data.is_unread
+    chat.updated_at = utc_now()
     session.commit()
     session.refresh(chat)
     return chat
@@ -161,7 +172,7 @@ def list_messages(session: Session, user: User, chat_id: str) -> list[Message]:
 
 
 def create_message(session: Session, user: User, chat_id: str, content: str, request_id: str) -> Message:
-    require_chat(session, user, chat_id)
+    chat = require_chat(session, user, chat_id)
     existing = session.scalar(
         select(Message).where(Message.chat_id == chat_id, Message.client_request_id == request_id)
     )
@@ -180,6 +191,7 @@ def create_message(session: Session, user: User, chat_id: str, content: str, req
         client_request_id=request_id,
     )
     session.add(message)
+    chat.updated_at = utc_now()
     session.commit()
     session.refresh(message)
     return message

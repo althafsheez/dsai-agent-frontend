@@ -16,7 +16,7 @@ describe("HistoryToolbar", () => {
   it("updates search, segmented controls, filters and sort", async () => {
     const user = userEvent.setup();
     render(<ToolbarHarness />);
-    await user.type(screen.getByPlaceholderText("Search chats and workspaces..."), "sales");
+    await user.type(screen.getByPlaceholderText("Search chats..."), "sales");
     await user.click(screen.getByRole("button", { name: "All" }));
     await user.click(screen.getByRole("button", { name: "Archived" }));
     await user.click(screen.getByRole("button", { name: "Filters" }));
@@ -33,4 +33,3 @@ describe("HistoryToolbar", () => {
     expect(screen.getByRole("status")).toHaveTextContent('"sort":"name_asc"');
   });
 });
-

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -41,6 +41,10 @@ class Workspace(TimestampMixin, Base):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    context_files: Mapped[list["WorkspaceContextFile"]] = relationship(
+        back_populates="workspace", cascade="all, delete-orphan", order_by="WorkspaceContextFile.name"
+    )
+
 
 class Chat(TimestampMixin, Base):
     __tablename__ = "chats"
@@ -55,10 +59,49 @@ class Chat(TimestampMixin, Base):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     first_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    is_unread: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     messages: Mapped[list[Message]] = relationship(
         back_populates="chat", cascade="all, delete-orphan", order_by="Message.position"
     )
+
+
+class WorkspaceContextFile(TimestampMixin, Base):
+    """Markdown instructions shared by future runs in one workspace."""
+
+    __tablename__ = "workspace_context_files"
+    __table_args__ = (UniqueConstraint("workspace_id", "name", name="uq_workspace_context_name"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    name: Mapped[str] = mapped_column(String(240))
+    content: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+
+    workspace: Mapped[Workspace] = relationship(back_populates="context_files")
+
+
+class Workflow(TimestampMixin, Base):
+    """Small persisted workflow record; execution remains independent of chats."""
+
+    __tablename__ = "workflows"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str | None] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(24), default="draft", index=True)
+
+
+class WorkflowChat(Base):
+    __tablename__ = "workflow_chats"
+    __table_args__ = (UniqueConstraint("workflow_id", "chat_id", name="uq_workflow_chat"),)
+
+    workflow_id: Mapped[str] = mapped_column(ForeignKey("workflows.id"), primary_key=True)
+    chat_id: Mapped[str] = mapped_column(ForeignKey("chats.id"), primary_key=True)
+    relation_type: Mapped[str] = mapped_column(String(24), default="referenced")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class Message(TimestampMixin, Base):
@@ -142,6 +185,7 @@ class Resource(Base):
     file_object_id: Mapped[str] = mapped_column(ForeignKey("file_objects.id"))
     name: Mapped[str] = mapped_column(String(240))
     origin: Mapped[str] = mapped_column(String(16))
+    source: Mapped[str] = mapped_column(String(16), default="input")
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     run_id: Mapped[str | None] = mapped_column(ForeignKey("agent_runs.id"))
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -169,6 +213,18 @@ class Favorite(Base):
 
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
     artifact_id: Mapped[str] = mapped_column(ForeignKey("resources.id"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class LibraryEntry(Base):
+    """A user-owned reference to any resource, without duplicating file bytes."""
+
+    __tablename__ = "library_entries"
+    __table_args__ = (UniqueConstraint("user_id", "resource_id", name="uq_library_entry_resource"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    resource_id: Mapped[str] = mapped_column(ForeignKey("resources.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 

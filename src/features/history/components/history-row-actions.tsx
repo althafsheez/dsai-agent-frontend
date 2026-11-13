@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Archive, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { Archive, Mail, MailOpen, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import type { HistoryRecord } from "../types";
@@ -12,11 +12,12 @@ interface HistoryRowActionsProps {
   onRename: (name: string) => Promise<void>;
   onArchive: (archived: boolean) => Promise<void>;
   onDelete: () => Promise<void>;
+  onUnreadChange: (isUnread: boolean) => Promise<void>;
   menuOpen: boolean;
   onMenuOpenChange: (open: boolean) => void;
 }
 
-export function HistoryRowActions({ record, onRename, onArchive, onDelete, menuOpen, onMenuOpenChange }: HistoryRowActionsProps) {
+export function HistoryRowActions({ record, onRename, onArchive, onDelete, onUnreadChange, menuOpen, onMenuOpenChange }: HistoryRowActionsProps) {
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [name, setName] = useState(record.name);
@@ -34,7 +35,7 @@ export function HistoryRowActions({ record, onRename, onArchive, onDelete, menuO
       if (!trigger) return;
       const rect = trigger.getBoundingClientRect();
       const menuWidth = 144;
-      const menuHeight = 108;
+      const menuHeight = record.kind === "chat" ? 140 : 108;
       const gap = 4;
       const viewportPadding = 8;
       const opensAbove = rect.bottom + gap + menuHeight > window.innerHeight - viewportPadding;
@@ -51,7 +52,7 @@ export function HistoryRowActions({ record, onRename, onArchive, onDelete, menuO
       window.removeEventListener("resize", positionMenu);
       window.removeEventListener("scroll", positionMenu, true);
     };
-  }, [menuOpen]);
+  }, [menuOpen, record.kind]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -89,6 +90,7 @@ export function HistoryRowActions({ record, onRename, onArchive, onDelete, menuO
       <Button ref={triggerRef} type="button" variant="ghost" size="icon" aria-label={`Actions for ${record.name}`} aria-haspopup="menu" aria-controls={menuOpen ? menuId : undefined} aria-expanded={menuOpen} onClick={() => onMenuOpenChange(!menuOpen)} className="size-7 opacity-60 group-hover:opacity-100 focus:opacity-100"><MoreHorizontal /></Button>
       {menuOpen && createPortal(<div ref={menuRef} id={menuId} role="menu" aria-label={`Actions for ${record.name}`} className="fixed z-[60] w-36 rounded-md border bg-[var(--surface-raised)] p-1 shadow-xl" style={menuPosition}>
         <ActionButton icon={Pencil} label="Rename" onClick={() => { setName(record.name); setRenameOpen(true); onMenuOpenChange(false); }} />
+        {record.kind === "chat" && <ActionButton icon={record.is_unread ? MailOpen : Mail} label={record.is_unread ? "Mark as Read" : "Mark as Unread"} onClick={() => void perform(() => onUnreadChange(!record.is_unread), () => onMenuOpenChange(false))} />}
         <ActionButton icon={record.archived_at ? RotateCcw : Archive} label={record.archived_at ? "Restore" : "Archive"} onClick={() => void perform(() => onArchive(!record.archived_at), () => onMenuOpenChange(false))} />
         <ActionButton icon={Trash2} label="Delete" destructive onClick={() => { setDeleteOpen(true); onMenuOpenChange(false); }} />
       </div>, document.body)}

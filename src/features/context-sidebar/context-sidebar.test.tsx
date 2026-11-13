@@ -59,12 +59,12 @@ const baseProps = {
 };
 
 describe("ContextSidebar", () => {
-  it("switches tabs and keeps datasets grouped by scope", async () => {
+  it("switches tabs and groups resources by input and output", async () => {
     const user = userEvent.setup();
     render(<ContextSidebar {...baseProps} onClose={vi.fn()} onFileSelect={vi.fn()} />);
 
-    expect(screen.getByText("Workspace Datasets")).toBeInTheDocument();
-    expect(screen.getByText("Chat Datasets")).toBeInTheDocument();
+    expect(screen.getByText("Input")).toBeInTheDocument();
+    expect(screen.getByText("Output")).toBeInTheDocument();
     expect(screen.getByText("Sales.csv")).toBeInTheDocument();
     expect(screen.getByText("Revenue.xlsx")).toBeInTheDocument();
 
@@ -73,38 +73,59 @@ describe("ContextSidebar", () => {
     expect(screen.getByText("Revenue report.pdf")).toBeInTheDocument();
   });
 
-  it("omits the workspace group for standalone chats", () => {
+  it("keeps input and output grouping for standalone chats", () => {
     render(<ContextSidebar {...baseProps} workspaceId={null} onClose={vi.fn()} onFileSelect={vi.fn()} />);
-    expect(screen.queryByText("Workspace Datasets")).not.toBeInTheDocument();
-    expect(screen.getByText("Chat Datasets")).toBeInTheDocument();
+    expect(screen.getByText("Input")).toBeInTheDocument();
+    expect(screen.getByText("Output")).toBeInTheDocument();
   });
 
-  it("selects resources and toggles artifact favorites locally", async () => {
+  it("selects resources and requests adding an artifact to Library", async () => {
     const user = userEvent.setup();
     const onFileSelect = vi.fn();
-    render(<ContextSidebar {...baseProps} onClose={vi.fn()} onFileSelect={onFileSelect} />);
+    const onLibraryToggle = vi.fn();
+    render(<ContextSidebar {...baseProps} onClose={vi.fn()} onFileSelect={onFileSelect} onLibraryToggle={onLibraryToggle} />);
 
     await user.click(screen.getByText("Sales.csv"));
     expect(onFileSelect).toHaveBeenCalledWith(workspaceDataset);
 
     await user.click(screen.getByRole("tab", { name: "Artifacts" }));
-    await user.click(screen.getByRole("button", { name: "Save Revenue report.pdf to Library" }));
-    expect(screen.getByRole("button", { name: "Remove Revenue report.pdf from Library" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "Add to Library" }));
+    expect(onLibraryToggle).toHaveBeenCalledWith(artifact);
   });
 
   it("keeps Context mounted while an independent preview supports Back and Close", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
 
-    render(<><ContextSidebar {...baseProps} onClose={vi.fn()} onFileSelect={vi.fn()} /><FilePreviewSidebar file={workspaceDataset} onBack={onClose} onClose={onClose} /></>);
+    const previewDataset = { ...workspaceDataset, name: "Sales.xlsx", mime_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" };
+    render(<><ContextSidebar {...baseProps} onClose={vi.fn()} onFileSelect={vi.fn()} /><FilePreviewSidebar file={previewDataset} onBack={onClose} onClose={onClose} /></>);
     expect(screen.getByRole("complementary", { name: "Analysis context" })).toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Preview Sales.csv" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Preview Sales.xlsx" })).toBeInTheDocument();
     expect(screen.getByText("2,500 rows · 3 columns")).toBeInTheDocument();
     expect(within(screen.getByRole("table")).getByText("customer_id")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Return to context" }));
     await user.click(screen.getByRole("button", { name: "Close preview" }));
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("renders duplicate source column names without duplicate React keys", () => {
+    const duplicateColumns: DatasetResource = {
+      ...workspaceDataset,
+      name: "Sales.xlsx",
+      mime_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      columns: [
+        { name: "sepal_length", data_type: "Float" },
+        { name: "sepal_length", data_type: "Float" },
+      ],
+      preview_rows: [[5.1, 5.1]],
+    };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    render(<FilePreviewSidebar file={duplicateColumns} onBack={vi.fn()} onClose={vi.fn()} />);
+
+    expect(within(screen.getByRole("table")).getAllByText("sepal_length")).toHaveLength(2);
+    expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining("same key"));
+    consoleError.mockRestore();
   });
 
   it("keeps Quick Assistant messages independent from file selection and the main chat", async () => {

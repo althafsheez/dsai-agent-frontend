@@ -1,4 +1,5 @@
 export type ResourceOrigin = "uploaded" | "generated";
+export type ResourceSource = "input" | "output";
 
 export type DatasetScope = "workspace" | "chat";
 
@@ -15,6 +16,7 @@ export interface DatasetResource {
   mime_type: string;
   size_bytes: number;
   origin: ResourceOrigin;
+  source?: ResourceSource;
   preview_url: string | null;
   download_url: string;
   created_by: string;
@@ -25,6 +27,9 @@ export interface DatasetResource {
   preview_rows?: DatasetCell[][];
   scope_type: DatasetScope;
   run_id: string | null;
+  in_library?: boolean;
+  /** Transitional compatibility for older fixture payloads. */
+  saved?: boolean;
 }
 
 export type ArtifactKind = "image" | "chart" | "pdf" | "report" | "document" | "code" | "file";
@@ -35,13 +40,16 @@ export interface ArtifactResource {
   mime_type: string;
   size_bytes: number;
   origin: ResourceOrigin;
+  source?: ResourceSource;
   preview_url: string | null;
   download_url: string;
   kind: ArtifactKind;
   created_by: string;
   created_at: string;
   run_id: string | null;
-  saved: boolean;
+  in_library?: boolean;
+  /** Transitional compatibility for older fixture payloads. */
+  saved?: boolean;
 }
 
 export type ContextFile = DatasetResource | ArtifactResource;
@@ -57,4 +65,5 @@ export interface ContextSidebarProps {
   artifacts: ArtifactResource[];
   onClose: () => void;
   onFileSelect: (file: ContextFile) => void;
+  onLibraryToggle?: (file: ContextFile) => void;
 }

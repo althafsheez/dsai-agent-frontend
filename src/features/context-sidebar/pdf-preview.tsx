@@ -31,5 +31,5 @@ export function PDFPreview({ artifact }: PDFPreviewProps) {
 
   if (!artifact.preview_url || failed) return <div className="grid min-h-48 place-items-center rounded-md border border-dashed text-xs text-muted-foreground">PDF preview unavailable.</div>;
   if (!url) return <div className="grid min-h-48 place-items-center rounded-md border border-dashed text-xs text-muted-foreground">Loading PDF preview…</div>;
-  return <iframe src={url} title={`Preview of ${artifact.name}`} className="h-[520px] w-full rounded-md border bg-white" />;
+  return <iframe src={url} title={`Preview of ${artifact.name}`} className="h-[min(72vh,760px)] w-full rounded-md border bg-white" />;
 }

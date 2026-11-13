@@ -57,13 +57,13 @@ function shortFileType(file: File) {
   return file.type.split("/").pop()?.toUpperCase() || "FILE";
 }
 
-export function WelcomeComposer() {
+export function WelcomeComposer({ initialWorkspaceId = null }: { initialWorkspaceId?: string | null }) {
   const router = useRouter();
   const modelsQuery = useQuery({ queryKey: ["models"], queryFn: getModels });
   const workspacesQuery = useQuery({ queryKey: ["workspaces"], queryFn: getWorkspaces });
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(initialWorkspaceId);
   const [modelId, setModelId] = useState("");
   const [effort, setEffort] = useState("");
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);

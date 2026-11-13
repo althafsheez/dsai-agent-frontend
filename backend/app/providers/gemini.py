@@ -130,7 +130,8 @@ class GeminiProvider:
                 "You are a data analysis agent. Use tools when they materially help. "
                 "Never invent tool results. Files may only be read from /home/user/inputs and written under /home/user/outputs. "
                 "Use lookup_data for read-only CSV/Parquet SQL, execute_python for analysis, and generate_visualization for chart files. "
-                "When a DataFrame is a meaningful intermediate or answer table, save it as CSV or Parquet under /home/user/outputs so it can be persisted and previewed."
+                "When a DataFrame is a meaningful intermediate or answer table, save it as CSV or Parquet under /home/user/outputs so it can be persisted and previewed. "
+                "When the user asks you to create code, show it in a fenced Markdown code block and also call write_file to save the complete code under /home/user/outputs with the correct extension; the saved file becomes a downloadable Artifact card."
             ),
             thinking_config=types.ThinkingConfig(thinking_level=effort) if effort else None,
         )
@@ -138,16 +139,41 @@ class GeminiProvider:
             for step in range(max_steps):
                 if is_cancelled is not None and is_cancelled():
                     return
-                response = await self._client.aio.models.generate_content(model=model_id, contents=contents, config=config)
-                if not response.candidates or response.candidates[0].content is None:
+                stream = await self._client.aio.models.generate_content_stream(
+                    model=model_id,
+                    contents=contents,
+                    config=config,
+                )
+                model_parts: list[types.Part] = []
+                calls: list[object] = []
+                seen_call_ids: set[str] = set()
+                received_content = False
+                async for chunk in stream:
+                    if is_cancelled is not None and is_cancelled():
+                        return
+                    if not chunk.candidates or chunk.candidates[0].content is None:
+                        continue
+                    received_content = True
+                    for part in chunk.candidates[0].content.parts or []:
+                        if part.function_call is not None:
+                            call = part.function_call
+                            # Providers may repeat the final function-call part
+                            # in streamed chunks. Execute each call only once.
+                            call_id = str(call.id or f"step-{step + 1}-call-{len(calls) + 1}")
+                            if call_id not in seen_call_ids:
+                                seen_call_ids.add(call_id)
+                                calls.append(call)
+                                model_parts.append(part)
+                            continue
+                        if part.text:
+                            model_parts.append(types.Part.from_text(text=part.text))
+                            yield ProviderEvent("message.delta", {"text": part.text})
+                if not received_content:
                     raise ProviderError("empty_provider_response", "Gemini returned no response.")
-                model_content = response.candidates[0].content
-                contents.append(model_content)
-                calls = [part.function_call for part in (model_content.parts or []) if part.function_call is not None]
+                if not model_parts:
+                    raise ProviderError("empty_provider_response", "Gemini returned no response.")
+                contents.append(types.Content(role="model", parts=model_parts))
                 if not calls:
-                    text = response.text or ""
-                    if text:
-                        yield ProviderEvent("message.delta", {"text": text})
                     return
                 response_parts: list[types.Part] = []
                 for index, call in enumerate(calls):
