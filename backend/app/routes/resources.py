@@ -5,7 +5,7 @@ import hashlib
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from ..dependencies import get_current_user, get_db
 from ..errors import APIError
 from ..models import Favorite, FileObject, Message, Resource, ResourceLink, User
 from ..services.records import require_chat, require_workspace
+from ..services.dataset_preview import MAX_PREVIEW_ROWS, inspect_dataset
 from ..storage import LocalFileStorage
 router = APIRouter(prefix="/api/resources", tags=["resources"])
 catalog_router = APIRouter(prefix="/api", tags=["resources"])
@@ -78,7 +79,7 @@ async def upload_resource(
         name=filename,
         origin="uploaded",
         created_by=user.id,
-        metadata_json={"size_bytes": len(content)},
+        metadata_json={"size_bytes": len(content), **inspect_dataset(filename, content)},
     )
     session.add(resource)
     session.flush()
@@ -193,6 +194,28 @@ async def list_artifacts(
         if resource.resource_type == "artifact"
     ]
     return {"items": items, "next_cursor": None}
+
+
+@catalog_router.get("/datasets/{resource_id}/preview")
+async def preview_dataset(
+    resource_id: str,
+    limit: int = Query(default=50, ge=1, le=MAX_PREVIEW_ROWS),
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    resource, _ = _accessible_resource(session, user, resource_id)
+    if resource.resource_type != "dataset":
+        raise APIError(404, "dataset_not_found", "Dataset not found.")
+    metadata = resource.metadata_json
+    rows = metadata.get("preview_rows", [])
+    return {
+        "name": resource.name,
+        "total_rows": metadata.get("row_count"),
+        "column_count": metadata.get("column_count"),
+        "columns": metadata.get("columns", []),
+        "rows": rows[:limit],
+        "truncated": metadata.get("row_count") is None or len(rows) < (metadata.get("row_count") or 0),
+    }
 
 
 def _accessible_resource(session: Session, user: User, resource_id: str) -> tuple[Resource, FileObject]:

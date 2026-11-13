@@ -129,7 +129,8 @@ class GeminiProvider:
             system_instruction=(
                 "You are a data analysis agent. Use tools when they materially help. "
                 "Never invent tool results. Files may only be read from /home/user/inputs and written under /home/user/outputs. "
-                "Use lookup_data for read-only CSV/Parquet SQL, execute_python for analysis, and generate_visualization for chart files."
+                "Use lookup_data for read-only CSV/Parquet SQL, execute_python for analysis, and generate_visualization for chart files. "
+                "When a DataFrame is a meaningful intermediate or answer table, save it as CSV or Parquet under /home/user/outputs so it can be persisted and previewed."
             ),
             thinking_config=types.ThinkingConfig(thinking_level=effort) if effort else None,
         )
@@ -160,7 +161,7 @@ class GeminiProvider:
                     failed = bool(result.get("error")) or result.get("success") is False
                     yield ProviderEvent(
                         "tool.failed" if failed else "tool.completed",
-                        {"tool_call_id": tool_call_id, "name": name, "error": result.get("error")} if failed else {"tool_call_id": tool_call_id, "name": name, "output": result},
+                        {"tool_call_id": tool_call_id, "name": name, "error": result.get("error"), "output": result} if failed else {"tool_call_id": tool_call_id, "name": name, "output": result},
                     )
                     response_parts.append(types.Part.from_function_response(name=name, response=result))
                 contents.append(types.Content(role="user", parts=response_parts))

@@ -55,7 +55,6 @@ export interface ContextSidebarProps {
   workspaceId: string | null;
   datasets: DatasetResource[];
   artifacts: ArtifactResource[];
-  selectedFile: ContextFile | null;
   onClose: () => void;
-  onFileSelect: (file: ContextFile | null) => void;
+  onFileSelect: (file: ContextFile) => void;
 }

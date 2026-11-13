@@ -1,25 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { Check, ChevronDown, Circle, LoaderCircle, X } from "lucide-react";
-import type { TraceStep } from "../types";
+import { Check, ChevronDown, Circle, FileText, LoaderCircle, X } from "lucide-react";
+import type { TraceResourceReference, TraceStep } from "../types";
 import { cn } from "@/lib/utils";
 
-export function AgentTrace({ steps }: { steps: TraceStep[] }) {
+function ResourceChips({ label, resources, onResourceSelect }: { label: string; resources?: TraceResourceReference[]; onResourceSelect?: (id: string) => void }) {
+  if (!resources?.length) return null;
+  return <div className="mt-2"><p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p><div className="flex flex-wrap gap-1.5">{resources.map((resource) => <button key={resource.id} type="button" onClick={() => onResourceSelect?.(resource.id)} className="inline-flex max-w-full items-center gap-1 rounded border bg-raised px-1.5 py-1 text-[10px] text-foreground hover:border-border-strong"><FileText className="size-3 shrink-0 text-sage" /><span className="truncate">{resource.name}</span></button>)}</div></div>;
+}
+
+function StepCard({ step, onResourceSelect }: { step: TraceStep; onResourceSelect?: (id: string) => void }) {
+  const [open, setOpen] = useState(step.status === "running" || step.status === "failed");
+  const Icon = step.status === "completed" ? Check : step.status === "failed" ? X : step.status === "running" ? LoaderCircle : Circle;
+  const results = step.results === undefined ? "" : typeof step.results === "string" ? step.results : JSON.stringify(step.results, null, 2);
+  return <li className="rounded-md border border-transparent px-1 py-1 hover:border-border"><button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} className="flex w-full items-start gap-2.5 rounded px-1 py-1 text-left text-xs"><Icon className={cn("mt-0.5 size-3.5 shrink-0", step.status === "completed" && "text-sage", step.status === "failed" && "text-red-400", step.status === "running" && "animate-spin text-slate", step.status === "pending" && "text-muted-foreground")} /><span className="min-w-0 flex-1"><span className="block font-medium">{step.label}</span><span className="mt-0.5 block text-[11px] text-muted-foreground">{step.summary ?? step.detail ?? "Execution step"}{step.durationMs !== undefined ? ` · ${step.durationMs} ms` : ""}</span></span><ChevronDown className={cn("mt-0.5 size-3.5 text-muted-foreground transition-transform", !open && "-rotate-90")} /></button>{open ? <div className="ml-7 mt-1 border-l pl-3 pb-2 text-[11px] text-muted-foreground"><ResourceChips label="Inputs" resources={step.inputs} onResourceSelect={onResourceSelect} /><ResourceChips label="Outputs" resources={step.outputs} onResourceSelect={onResourceSelect} />{step.code ? <><p className="mt-2 text-[10px] font-medium uppercase tracking-wide">Python</p><pre className="mt-1 max-h-48 overflow-auto rounded bg-background p-2 font-mono text-[10px] leading-4 text-foreground/85">{step.code}</pre></> : null}{step.sql ? <><p className="mt-2 text-[10px] font-medium uppercase tracking-wide">SQL</p><pre className="mt-1 max-h-32 overflow-auto rounded bg-background p-2 font-mono text-[10px] leading-4 text-foreground/85">{step.sql}</pre></> : null}{results ? <><p className="mt-2 text-[10px] font-medium uppercase tracking-wide">Bounded result</p><pre className="mt-1 max-h-40 overflow-auto rounded bg-background p-2 font-mono text-[10px] leading-4 text-foreground/85">{results.slice(0, 8000)}</pre></> : null}{step.stdout ? <><p className="mt-2 text-[10px] font-medium uppercase tracking-wide">Standard output</p><pre className="mt-1 max-h-32 overflow-auto rounded bg-background p-2 font-mono text-[10px] leading-4 text-foreground/85">{step.stdout}</pre></> : null}{step.stderr ? <><p className="mt-2 text-[10px] font-medium uppercase tracking-wide">Standard error</p><pre className="mt-1 max-h-32 overflow-auto rounded bg-background p-2 font-mono text-[10px] leading-4 text-red-200">{step.stderr}</pre></> : null}{step.error ? <p className="mt-2 rounded border border-red-400/30 bg-red-400/5 p-2 text-red-200">{step.error}</p> : null}</div> : null}</li>;
+}
+
+export function AgentTrace({ steps, onResourceSelect }: { steps: TraceStep[]; onResourceSelect?: (id: string) => void }) {
   const [open, setOpen] = useState(true);
   const running = steps.some((step) => step.status === "running" || step.status === "pending");
-  return <div className="my-4 rounded-lg border bg-surface">
-    <button onClick={() => setOpen((value) => !value)} aria-expanded={open} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium hover:bg-raised/50">
-      <ChevronDown className={cn("size-3.5 text-muted-foreground transition-transform", !open && "-rotate-90")} />
-      Agent execution
-      {running && <span className="ml-auto inline-flex items-center gap-1.5 text-[10px] font-normal text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Running</span>}
-    </button>
-    {open && <ol className="space-y-0.5 border-t px-3 py-2" aria-label="Execution progress">{steps.map((step) => {
-      const StatusIcon = step.status === "completed" ? Check : step.status === "failed" ? X : step.status === "running" ? LoaderCircle : Circle;
-      return <li key={step.id} className="flex items-start gap-2.5 rounded px-1 py-2 text-xs">
-        <StatusIcon className={cn("mt-0.5 size-3.5 shrink-0", step.status === "completed" && "text-sage", step.status === "failed" && "text-red-400", step.status === "running" && "animate-spin text-slate", step.status === "pending" && "text-muted-foreground")} />
-        <span><span className="block">{step.label}</span>{step.detail && <span className="mt-0.5 block text-[11px] text-muted-foreground">{step.detail}</span>}</span>
-      </li>;
-    })}</ol>}
-  </div>;
+  return <div className="my-4 rounded-lg border bg-surface"><button onClick={() => setOpen((value) => !value)} aria-expanded={open} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium hover:bg-raised/50"><ChevronDown className={cn("size-3.5 text-muted-foreground transition-transform", !open && "-rotate-90")} />Agent execution{running ? <span className="ml-auto inline-flex items-center gap-1.5 text-[10px] font-normal text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Running</span> : null}</button>{open ? <ol className="space-y-1 border-t px-3 py-2" aria-label="Execution progress">{steps.map((step) => <StepCard key={step.id} step={step} onResourceSelect={onResourceSelect} />)}</ol> : null}</div>;
 }

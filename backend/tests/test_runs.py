@@ -56,6 +56,8 @@ async def test_agent_sse_persists_text_events_and_reasoning_selection(
     assert run["status"] == "completed"
     persisted = (await client.get(f"/api/runs/{run_id}/events", headers=demo_headers)).json()["items"]
     assert [event["sequence"] for event in persisted] == list(range(1, 7))
+    discovered = (await client.get(f"/api/chats/{created['chat']['id']}/runs", headers=demo_headers)).json()["items"]
+    assert [item["id"] for item in discovered] == [run_id]
     messages = (await client.get(
         f"/api/chats/{created['chat']['id']}/messages", headers=demo_headers
     )).json()["items"]
@@ -196,6 +198,13 @@ async def test_runner_executes_registered_tools_and_forwards_public_events() -> 
         ToolContext("run-tools", "chat-tools", "user-you"),
     )]
     assert [event.type for event in events] == ["tool.started", "tool.completed", "message.delta"]
+    started, completed, _ = events
+    assert started.data["step_id"] != "call-1"
+    assert started.data["run_id"] == "run-tools"
+    assert started.data["message_id"] == ""
+    assert started.data["summary"] == "Starting echo."
+    assert completed.data["step_id"] == started.data["step_id"]
+    assert isinstance(completed.data["duration_ms"], int)
     assert events[-1].data == {"text": "hello"}
 
 

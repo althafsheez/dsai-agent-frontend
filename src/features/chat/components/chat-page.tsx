@@ -34,15 +34,18 @@ import {
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ContextSidebar, type ContextFile } from "@/features/context-sidebar";
+import { ContextSidebar, FilePreviewSidebar, type ContextFile } from "@/features/context-sidebar";
 import {
   createMessage,
+  downloadResource,
   cancelQueuedRun,
   cancelRun,
   getArtifacts,
+  getChatRuns,
   getChat,
   getDatasets,
   getMessages,
+  getRunEvents,
   getModels,
   getWorkspaces,
   queueRun,
@@ -53,15 +56,30 @@ import {
   type ExecutionEvent,
   type MessageDto,
 } from "@/lib/api";
-import type { AssistantMessage, ChatMessage } from "../types";
+import type { AssistantMessage, ChatMessage, MessageBlock } from "../types";
+import { replayTrace } from "../execution-trace";
 import { takePendingRun } from "../pending-run";
 import { ChatHeader } from "./chat-header";
 import { ConversationNavigator } from "./conversation-navigator";
 import { MessageList } from "./message-list";
 
-function toMessage(message: MessageDto): ChatMessage {
+function toMessage(message: MessageDto, resources = new Map<string, ContextFile>()): ChatMessage {
   if (message.role === "user") {
-    return { id: message.id, role: "user", content: message.content, createdAt: message.created_at };
+    return {
+      id: message.id,
+      role: "user",
+      content: message.content,
+      createdAt: message.created_at,
+      attachments: message.attachment_refs.map((reference) => {
+        const resource = resources.get(reference.resource_id);
+        return {
+          id: reference.resource_id,
+          name: resource?.name ?? "Attached file",
+          kind: resource && "scope_type" in resource ? "Dataset" : resource?.kind ?? "File",
+          size: resource ? formatFileSize(resource.size_bytes) : "Loading…",
+        };
+      }),
+    };
   }
   const status: AssistantMessage["status"] = message.status === "completed"
     ? "completed"
@@ -69,13 +87,24 @@ function toMessage(message: MessageDto): ChatMessage {
       ? "failed"
       : message.status === "interrupted" || message.status === "cancelled"
         ? "interrupted"
-        : "running";
+      : "running";
+  const outputBlocks: Extract<MessageBlock, { type: "file" }>[] = message.attachment_refs.map((reference) => {
+    const resource = resources.get(reference.resource_id);
+    return {
+      type: "file",
+      id: reference.resource_id,
+      name: resource?.name ?? "Generated file",
+      kind: reference.resource_type === "dataset" ? "Dataset" : "Generated file",
+      size: resource ? formatFileSize(resource.size_bytes) : "Loading…",
+      description: resource?.origin === "generated" ? "Generated during this analysis" : "Attached output",
+    };
+  });
   return {
     id: message.id,
     role: "assistant",
     status,
     createdAt: message.created_at,
-    blocks: [{ type: "markdown", content: message.content }],
+    blocks: [{ type: "markdown", content: message.content }, ...outputBlocks],
   };
 }
 
@@ -162,15 +191,20 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [composerStatus, setComposerStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<string>();
+  const [traceEvents, setTraceEvents] = useState<ExecutionEvent[]>([]);
   const datasetsQuery = useQuery({
     queryKey: ["chat", chatId, "datasets"],
     queryFn: () => getDatasets(chatId),
-    enabled: panelOpen,
   });
   const artifactsQuery = useQuery({
     queryKey: ["chat", chatId, "artifacts"],
     queryFn: () => getArtifacts(chatId),
-    enabled: panelOpen,
+  });
+  const runsQuery = useQuery({ queryKey: ["chat", chatId, "runs"], queryFn: () => getChatRuns(chatId) });
+  const traceHistoryQuery = useQuery({
+    queryKey: ["chat", chatId, "trace-events", runsQuery.data?.items.map((run) => run.id).join(",")],
+    enabled: Boolean(runsQuery.data?.items.length),
+    queryFn: async () => (await Promise.all((runsQuery.data?.items ?? []).map(async (run) => (await getRunEvents(run.id)).items))).flat(),
   });
   const sections = useRef(new Map<string, HTMLElement>());
   const composerRef = useRef<HTMLDivElement>(null);
@@ -189,17 +223,34 @@ export function ChatPage({ chatId }: { chatId: string }) {
     (connectorCategory === "all" || connector.category === connectorCategory)
     && connector.name.toLowerCase().includes(connectorQuery.trim().toLowerCase())
   ));
+  const resources = useMemo(() => new Map<string, ContextFile>([
+    ...(datasetsQuery.data?.items ?? []),
+    ...(artifactsQuery.data?.items ?? []),
+  ].map((resource) => [resource.id, resource])), [artifactsQuery.data?.items, datasetsQuery.data?.items]);
+  const traceReplay = useMemo(() => replayTrace(traceEvents), [traceEvents]);
+
+  useEffect(() => {
+    if (traceHistoryQuery.data) setTraceEvents(traceHistoryQuery.data);
+  }, [traceHistoryQuery.data]);
 
   useEffect(() => {
     if (!messagesQuery.data) return;
-    const next = messagesQuery.data.items.map(toMessage);
+    const next = messagesQuery.data.items.map((message) => toMessage(message, resources));
     setMessages((current) => next.map((message) => {
       if (message.role !== "assistant") return message;
       const existing = current.find((item): item is AssistantMessage => item.role === "assistant" && item.id === message.id);
-      return existing?.trace?.length ? { ...message, trace: existing.trace } : message;
+      const historicalOutputs = (traceReplay.outputsByMessage.get(message.id) ?? []).map((output): Extract<MessageBlock, { type: "file" }> => ({
+        type: "file", id: output.id, name: output.name, kind: output.resourceType === "dataset" ? "Dataset" : "Generated file", size: output.sizeBytes ? formatFileSize(output.sizeBytes) : "Saved output", description: "Generated during this analysis",
+      }));
+      const outputBlocks = [...(existing?.blocks.filter((block) => block.type === "file") ?? []), ...historicalOutputs];
+      const uniqueOutputs = outputBlocks.filter((output, index, all) => output.type === "file" && all.findIndex((candidate) => candidate.type === "file" && candidate.id === output.id) === index);
+      const trace = traceReplay.stepsByMessage.get(message.id) ?? existing?.trace;
+      return trace?.length || uniqueOutputs.length
+        ? { ...message, trace, blocks: [...message.blocks, ...uniqueOutputs.filter((output) => !message.blocks.some((block) => block.type === "file" && block.id === output.id))] }
+        : message;
     }));
     setActiveSection((current) => current ?? next.find((message) => message.role === "user")?.id);
-  }, [messagesQuery.data]);
+  }, [messagesQuery.data, resources, traceReplay]);
 
   useEffect(() => {
     if (!models.length) return;
@@ -280,6 +331,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
     }
 
     function onEvent(event: ExecutionEvent) {
+      setTraceEvents((current) => current.some((item) => item.event_id === event.event_id) ? current : [...current, event]);
       if (event.type === "agent.started") {
         const run = event.data.run;
         if (run && typeof run === "object") {
@@ -326,7 +378,10 @@ export function ChatPage({ chatId }: { chatId: string }) {
         if (!text) return;
         updateAssistant((message) => {
           const currentText = message.blocks[0]?.type === "markdown" ? message.blocks[0].content : "";
-          return { ...message, blocks: [{ type: "markdown", content: currentText + text }] };
+          return {
+            ...message,
+            blocks: [{ type: "markdown", content: currentText + text }, ...message.blocks.filter((block) => block.type === "file")],
+          };
         });
         return;
       }
@@ -336,7 +391,16 @@ export function ChatPage({ chatId }: { chatId: string }) {
         if (!id || !name) return;
         updateAssistant((message) => ({
           ...message,
-          trace: [...(message.trace ?? []), { id, label: toolLabel(name), detail: "Tool is running", status: "running" }],
+          trace: [...(message.trace ?? []), {
+            id: eventString(event, "step_id") ?? `${event.run_id}:${id}`,
+            runId: event.run_id,
+            messageId: assistantId,
+            label: toolLabel(name),
+            summary: eventString(event, "summary") ?? "Starting tool.",
+            detail: "Tool is running",
+            status: "running",
+            startedAt: event.timestamp,
+          }],
         }));
         return;
       }
@@ -346,10 +410,33 @@ export function ChatPage({ chatId }: { chatId: string }) {
         const failed = event.type === "tool.failed";
         updateAssistant((message) => ({
           ...message,
-          trace: (message.trace ?? []).map((step) => step.id === id
-            ? { ...step, detail: failed ? eventString(event, "error") ?? "Tool failed" : "Completed", status: failed ? "failed" : "completed" }
+          trace: (message.trace ?? []).map((step) => step.id === (eventString(event, "step_id") ?? `${event.run_id}:${id}`)
+            ? { ...step, detail: failed ? eventString(event, "error") ?? "Tool failed" : "Completed", status: failed ? "failed" : "completed", completedAt: event.timestamp }
             : step),
         }));
+        return;
+      }
+      if (event.type === "dataset.created" || event.type === "artifact.created") {
+        const resourceKey = event.type === "dataset.created" ? "dataset" : "artifact";
+        const resource = event.data[resourceKey];
+        if (!resource || typeof resource !== "object") return;
+        const data = resource as { id?: unknown; name?: unknown; size_bytes?: unknown };
+        if (typeof data.id !== "string" || typeof data.name !== "string") return;
+        const outputBlock: Extract<MessageBlock, { type: "file" }> = {
+          type: "file",
+          id: data.id,
+          name: data.name,
+          kind: event.type === "dataset.created" ? "Dataset" : "Generated file",
+          size: typeof data.size_bytes === "number" ? formatFileSize(data.size_bytes) : "Saved output",
+          description: "Generated during this analysis",
+        };
+        updateAssistant((message) => {
+          const blocks = message.blocks.some((block) => block.type === "file" && block.id === data.id)
+            ? message.blocks
+            : [...message.blocks, outputBlock];
+          return { ...message, blocks };
+        });
+        void queryClient.invalidateQueries({ queryKey: ["chat", chatId, event.type === "dataset.created" ? "datasets" : "artifacts"] });
         return;
       }
       if (event.type === "message.completed") {
@@ -357,7 +444,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
         updateAssistant((message) => ({
           ...message,
           status: "completed",
-          blocks: [{ type: "markdown", content }],
+          blocks: [{ type: "markdown", content }, ...message.blocks.filter((block) => block.type === "file")],
         }));
         return;
       }
@@ -429,9 +516,19 @@ export function ChatPage({ chatId }: { chatId: string }) {
     });
   }, [chatId, messagesQuery.data, runMessage]);
 
-  function selectFile(file: ContextFile | null) {
+  function selectFile(file: ContextFile) {
     setSelectedFile(file);
     setPanelOpen(true);
+  }
+
+  function selectFileById(id: string) {
+    const resource = resources.get(id);
+    if (resource) selectFile(resource);
+  }
+
+  function downloadFileById(id: string) {
+    const resource = resources.get(id);
+    if (resource) void downloadResource(resource.download_url, resource.name);
   }
 
   function togglePanel() {
@@ -483,7 +580,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
           clientUploadId: attachment.id,
         });
       }
-      setMessages((current) => [...current, toMessage(userMessage)]);
+      setMessages((current) => [...current, toMessage(userMessage, resources)]);
       setDraft("");
       setAttachments((current) => {
         current.forEach((attachment) => {
@@ -495,6 +592,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ["chat", chatId, "datasets"] }),
           queryClient.invalidateQueries({ queryKey: ["chat", chatId, "artifacts"] }),
+          queryClient.invalidateQueries({ queryKey: ["chat", chatId, "messages"] }),
         ]);
         setPanelOpen(true);
       }
@@ -624,7 +722,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
           ) : (
             <MessageList
               messages={messages}
-              onFileSelect={() => undefined}
+              onFileSelect={selectFileById}
+              onFileDownload={downloadFileById}
               registerSection={(id, node) => {
                 if (node) sections.current.set(id, node);
                 else sections.current.delete(id);
@@ -767,10 +866,14 @@ export function ChatPage({ chatId }: { chatId: string }) {
             workspaceId={chatQuery.data?.workspace_id ?? null}
             datasets={datasetsQuery.data?.items ?? []}
             artifacts={artifactsQuery.data?.items ?? []}
-            selectedFile={selectedFile}
             onClose={() => { setSelectedFile(null); setPanelOpen(false); }}
             onFileSelect={selectFile}
           />
+        </div>
+      ) : null}
+      {selectedFile ? (
+        <div className="absolute inset-y-0 right-0 z-50 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:w-[340px] xl:max-w-none">
+          <FilePreviewSidebar file={selectedFile} onBack={() => setSelectedFile(null)} onClose={() => setSelectedFile(null)} />
         </div>
       ) : null}
     </section>

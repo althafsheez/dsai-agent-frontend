@@ -29,8 +29,8 @@ export function createMockChat(chatId: string): ChatRecord {
         createdAt: "2026-11-09T09:30:12.000Z",
         status: "completed",
         trace: [
-          { id: "trace-1", label: "Inspecting regional_revenue.csv", detail: "18,240 rows · 8 columns", status: "completed" },
-          { id: "trace-2", label: "Running revenue comparison", detail: "Python · 1.8s", status: "completed" },
+          { id: "trace-1", runId: "demo-run-1", messageId: "answer-1", label: "Inspecting regional_revenue.csv", detail: "18,240 rows · 8 columns", status: "completed" },
+          { id: "trace-2", runId: "demo-run-1", messageId: "answer-1", label: "Running revenue comparison", detail: "Python · 1.8s", status: "completed" },
         ],
         blocks: [
           { type: "markdown", content: "## Revenue is 12.7% ahead of forecast\n\nNorth America and APAC account for **78% of the year-to-date increase**. Growth accelerated in April, while EMEA remained broadly flat." },

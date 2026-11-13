@@ -5,11 +5,26 @@ from dataclasses import dataclass
 from typing import Any
 
 
-@dataclass(frozen=True)
+@dataclass
 class ToolContext:
     run_id: str
     chat_id: str
     user_id: str
+    assistant_message_id: str = ""
+    step_id: str | None = None
+    tool_name: str | None = None
+    input_resources: tuple[dict[str, Any], ...] = ()
+
+    def for_step(self, step_id: str, tool_name: str) -> "ToolContext":
+        return ToolContext(
+            run_id=self.run_id,
+            chat_id=self.chat_id,
+            user_id=self.user_id,
+            assistant_message_id=self.assistant_message_id,
+            step_id=step_id,
+            tool_name=tool_name,
+            input_resources=self.input_resources,
+        )
 
 
 ToolHandler = Callable[[dict[str, Any], ToolContext], Awaitable[dict[str, Any]]]

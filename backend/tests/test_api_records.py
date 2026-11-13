@@ -141,3 +141,22 @@ async def test_chat_resource_upload_is_classified_and_idempotent(
     assert datasets.json()["items"][0]["scope_type"] == "chat"
     assert [item["name"] for item in artifacts.json()["items"]] == ["summary.pdf"]
     assert artifacts.json()["items"][0]["kind"] == "pdf"
+
+    message = (await client.get(
+        f"/api/chats/{created['chat']['id']}/messages", headers=demo_headers
+    )).json()["items"][0]
+    assert message["attachment_refs"] == [
+        {"resource_type": "dataset", "resource_id": first.json()["resource"]["id"]},
+        {"resource_type": "artifact", "resource_id": artifact.json()["resource"]["id"]},
+    ]
+
+    preview = await client.get(
+        f"/api/datasets/{first.json()['resource']['id']}/preview",
+        headers=demo_headers,
+    )
+    assert preview.status_code == 200
+    assert preview.json()["columns"] == [
+        {"name": "month", "data_type": "string"},
+        {"name": "revenue", "data_type": "string"},
+    ]
+    assert preview.json()["rows"] == [["Jan", "10"]]

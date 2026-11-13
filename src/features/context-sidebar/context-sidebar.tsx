@@ -5,7 +5,6 @@ import { useState } from "react";
 import { ArtifactsPanel } from "./artifacts-panel";
 import { ContextTabs, type ContextTab } from "./context-tabs";
 import { DatasetsPanel } from "./datasets-panel";
-import { FilePreviewSidebar } from "./file-preview-sidebar";
 import { QuickAssistant } from "./quick-assistant";
 import type { ContextSidebarProps } from "./types";
 
@@ -14,15 +13,10 @@ export function ContextSidebar({
   workspaceId,
   datasets,
   artifacts,
-  selectedFile,
   onClose,
   onFileSelect,
 }: ContextSidebarProps) {
   const [tab, setTab] = useState<ContextTab>("datasets");
-
-  if (selectedFile) {
-    return <FilePreviewSidebar file={selectedFile} onBack={() => onFileSelect(null)} onClose={onClose} />;
-  }
 
   return (
     <aside className="flex h-full min-h-0 w-full flex-col border-l bg-sidebar text-sidebar-foreground" aria-label="Analysis context">

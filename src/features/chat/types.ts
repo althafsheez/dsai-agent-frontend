@@ -2,9 +2,30 @@ export type ChatStatus = "completed" | "running" | "failed" | "interrupted";
 
 export type TraceStep = {
   id: string;
+  runId: string;
+  messageId: string;
   label: string;
+  summary?: string;
   detail?: string;
   status: "pending" | "running" | "completed" | "failed";
+  startedAt?: string;
+  completedAt?: string;
+  durationMs?: number;
+  inputs?: TraceResourceReference[];
+  outputs?: TraceResourceReference[];
+  code?: string;
+  sql?: string;
+  results?: unknown;
+  stdout?: string;
+  stderr?: string;
+  error?: string;
+};
+
+export type TraceResourceReference = {
+  id: string;
+  name: string;
+  resourceType: "dataset" | "artifact";
+  sizeBytes?: number;
 };
 
 export type ChartDatum = Record<string, string | number>;

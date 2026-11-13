@@ -2,6 +2,7 @@
 
 import { BarChart3, Download, FileImage, FileText, FileType2, Star } from "lucide-react";
 import { useState } from "react";
+import { downloadResource } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { formatBytes } from "./resource-utils";
 import type { ArtifactKind, ArtifactResource } from "./types";
@@ -70,15 +71,14 @@ export function ArtifactsPanel({ artifacts, onFileSelect }: ArtifactsPanelProps)
                     >
                       <Star className={cn("size-3.5", saved && "fill-sage text-sage")} />
                     </button>
-                    <a
-                      href={artifact.download_url}
-                      download
+                    <button
+                      type="button"
                       aria-label={`Download ${artifact.name}`}
                       className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-surface hover:text-foreground"
-                      onClick={(event) => event.stopPropagation()}
+                      onClick={() => void downloadResource(artifact.download_url, artifact.name)}
                     >
                       <Download className="size-3.5" />
-                    </a>
+                    </button>
                   </li>
                 );
               })}

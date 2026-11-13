@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import inspect
+import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from ..providers import ChatTurn, LLMProvider, ProviderTool
 from .tools import ToolContext, ToolRegistry
@@ -56,12 +58,15 @@ class AgentRunner:
         if definitions and context is not None and callable(stream_with_tools):
             provider_tools = tuple(ProviderTool(tool.name, tool.description, tool.parameters) for tool in definitions)
             steering_after_tool: list[str] = []
+            pending_steps: list[ToolContext] = []
+            steps: dict[str, tuple[str, float, str]] = {}
 
             async def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
                 if is_cancelled():
                     raise RunnerCancelled
                 check_control("before.tool")
-                result = await self._tools.execute(name, arguments, context)
+                step_context = pending_steps.pop(0) if pending_steps else context.for_step(str(uuid4()), name)
+                result = await self._tools.execute(name, arguments, step_context)
                 if poll_steering is not None:
                     steering_after_tool.extend(poll_steering("after.tool"))
                 return result
@@ -88,7 +93,40 @@ class AgentRunner:
                     # persisted before cancellation/steering ends the loop.
                     if event.type != "tool.completed":
                         check_control("provider.event")
-                    yield RunnerEvent(type=event.type, data=event.data)
+                    event_data = dict(event.data)
+                    if event.type == "tool.started":
+                        provider_call_id = str(event_data.get("tool_call_id") or uuid4())
+                        name = str(event_data.get("name") or "tool")
+                        step_id = str(uuid4())
+                        pending_steps.append(context.for_step(step_id, name))
+                        steps[provider_call_id] = (step_id, time.perf_counter(), name)
+                        arguments = event_data.get("arguments") if isinstance(event_data.get("arguments"), dict) else {}
+                        event_data.update({
+                            "step_id": step_id,
+                            "run_id": context.run_id,
+                            "message_id": context.assistant_message_id,
+                            "summary": f"Starting {name.replace('_', ' ')}.",
+                            "code": arguments.get("code"),
+                            "sql": arguments.get("sql"),
+                            "input_resources": list(context.input_resources),
+                        })
+                    elif event.type in ("tool.completed", "tool.failed"):
+                        provider_call_id = str(event_data.get("tool_call_id") or "")
+                        step_id, started_at, name = steps.get(provider_call_id, (str(uuid4()), time.perf_counter(), str(event_data.get("name") or "tool")))
+                        output = event_data.get("output") if isinstance(event_data.get("output"), dict) else {}
+                        event_data.update({
+                            "step_id": step_id,
+                            "run_id": context.run_id,
+                            "message_id": context.assistant_message_id,
+                            "duration_ms": max(0, round((time.perf_counter() - started_at) * 1000)),
+                            "summary": (
+                                f"{name.replace('_', ' ').capitalize()} failed."
+                                if event.type == "tool.failed"
+                                else f"Completed {name.replace('_', ' ')}."
+                            ),
+                            "resources": output.get("resources", []),
+                        })
+                    yield RunnerEvent(type=event.type, data=event_data)
                     if event.type == "tool.completed" and is_cancelled():
                         raise RunnerCancelled
                     if steering_after_tool:

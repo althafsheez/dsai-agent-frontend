@@ -3,6 +3,7 @@ import type {
   ChatDto,
   CreateChatResponse,
   ExecutionEvent,
+  AgentRunDto,
   MessageDto,
   ModelsResponse,
   QueueRunInput,
@@ -35,6 +36,13 @@ function requestHeaders(json = false): HeadersInit {
     "X-Demo-User-Id": DEMO_USER_ID,
     ...(json ? { "Content-Type": "application/json" } : {}),
   };
+}
+
+/** Resolve an API-relative resource URL through the same API boundary as JSON requests. */
+function resourceUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) return path;
+  const apiPath = path.replace(/^\/api(?=\/|$)/, "");
+  return `${API_ROOT}${apiPath.startsWith("/") ? apiPath : `/${apiPath}`}`;
 }
 
 async function apiError(response: Response): Promise<ApiError> {
@@ -146,12 +154,38 @@ export function getArtifacts(chatId: string): Promise<ApiList<ArtifactResource>>
   return requestJson<ApiList<ArtifactResource>>(`/artifacts?chat_id=${encodeURIComponent(chatId)}`);
 }
 
+export async function getResourcePreview(url: string): Promise<Blob> {
+  const response = await fetch(resourceUrl(url), { headers: requestHeaders() });
+  if (!response.ok) throw await apiError(response);
+  return response.blob();
+}
+
+export async function downloadResource(url: string, filename: string): Promise<void> {
+  const blob = await getResourcePreview(url);
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
 export function getChat(chatId: string): Promise<ChatDto> {
   return requestJson<ChatDto>(`/chats/${encodeURIComponent(chatId)}`);
 }
 
 export function getMessages(chatId: string): Promise<ApiList<MessageDto>> {
   return requestJson<ApiList<MessageDto>>(`/chats/${encodeURIComponent(chatId)}/messages`);
+}
+
+export function getChatRuns(chatId: string): Promise<ApiList<AgentRunDto>> {
+  return requestJson<ApiList<AgentRunDto>>(`/chats/${encodeURIComponent(chatId)}/runs`);
+}
+
+export function getRunEvents(runId: string, afterSequence = 0): Promise<ApiList<ExecutionEvent>> {
+  return requestJson<ApiList<ExecutionEvent>>(`/runs/${encodeURIComponent(runId)}/events?after_sequence=${afterSequence}`);
 }
 
 export function createMessage(chatId: string, input: {

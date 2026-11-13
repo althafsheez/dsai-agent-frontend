@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import Settings
 from ..models import AgentMemory, Chat, FileObject, Resource, ResourceLink
+from ..services.dataset_preview import inspect_dataset
 from ..storage import LocalFileStorage
 from .sandbox import E2BSandboxPool, SandboxUnavailable
 from .tools import ToolContext, ToolDefinition, ToolRegistry
@@ -38,9 +39,10 @@ def build_tool_registry(
                 ResourceLink.scope_id.in_([scope[1] for scope in scope_ids]),
             )))
             staged: list[dict[str, Any]] = []
+            staged_ids: set[str] = set()
             for link in links:
                 resource = session.get(Resource, link.resource_id)
-                if resource is None or resource.created_by != context.user_id:
+                if resource is None or resource.created_by != context.user_id or resource.id in staged_ids:
                     continue
                 file_object = session.get(FileObject, resource.file_object_id)
                 if file_object is None:
@@ -50,56 +52,93 @@ def build_tool_registry(
                     path = await sandbox_pool.upload_input(context.run_id, f"{resource.id}-{resource.name}", content)
                 except SandboxUnavailable:
                     return {"files": [], "warning": "E2B is not configured, so attached files are not available to tools."}
-                staged.append({"resource_id": resource.id, "name": resource.name, "type": resource.resource_type, "path": path})
+                staged.append({
+                    "id": resource.id,
+                    "resource_id": resource.id,
+                    "name": resource.name,
+                    "resource_type": resource.resource_type,
+                    "path": path,
+                })
+                staged_ids.add(resource.id)
+            context.input_resources = tuple(staged)
             return {"files": staged} if staged else {}
 
     registry = ToolRegistry(prepare=prepare, cleanup=lambda context: sandbox_pool.close(context.run_id))
 
     async def persist_generated(result: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         resources: list[dict[str, Any]] = []
-        for generated in result.get("generated_files", []):
+        registration_failures: list[dict[str, str]] = []
+        generated_files = result.get("generated_files", [])
+        if not generated_files:
+            return result
+        for generated in generated_files:
             path = str(generated.get("path", ""))
             name = PurePosixPath(path).name
             extension = PurePosixPath(name).suffix.lower()
             if extension not in {".csv", ".parquet", ".xlsx", ".xls", ".png", ".jpg", ".jpeg", ".pdf", ".txt", ".md", ".json"}:
                 continue
-            content = await sandbox_pool.read_output_bytes(context.run_id, path)
-            if len(content) > 25 * 1024 * 1024:
-                continue
-            digest = str(generated.get("sha256", ""))
-            resource_type = "dataset" if extension in {".csv", ".parquet", ".xlsx", ".xls"} else "artifact"
-            with session_factory() as session:
-                duplicate = next((item for item in session.scalars(select(Resource).where(Resource.run_id == context.run_id)) if item.metadata_json.get("sandbox_path") == path and item.metadata_json.get("sha256") == digest), None)
-                if duplicate is not None:
-                    resource = duplicate
-                else:
-                    file_object = session.scalar(select(FileObject).where(FileObject.content_hash == digest))
-                    if file_object is None:
-                        stored = storage.store_bytes(content)
-                        file_object = FileObject(
-                            content_hash=stored.content_hash,
-                            relative_storage_path=stored.relative_path,
-                            mime_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
-                            size_bytes=stored.size_bytes,
+            try:
+                content = await sandbox_pool.read_output_bytes(context.run_id, path)
+                if len(content) > 25 * 1024 * 1024:
+                    registration_failures.append({"path": path, "error": "Output exceeds the 25 MB limit."})
+                    continue
+                digest = str(generated.get("sha256", ""))
+                resource_type = "dataset" if extension in {".csv", ".parquet", ".xlsx", ".xls"} else "artifact"
+                with session_factory() as session:
+                    duplicate = next((item for item in session.scalars(select(Resource).where(Resource.run_id == context.run_id)) if item.metadata_json.get("sandbox_path") == path and item.metadata_json.get("sha256") == digest), None)
+                    if duplicate is not None:
+                        resource = duplicate
+                    else:
+                        file_object = session.scalar(select(FileObject).where(FileObject.content_hash == digest))
+                        if file_object is None:
+                            stored = storage.store_bytes(content)
+                            file_object = FileObject(
+                                content_hash=stored.content_hash,
+                                relative_storage_path=stored.relative_path,
+                                mime_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
+                                size_bytes=stored.size_bytes,
+                            )
+                            session.add(file_object)
+                            session.flush()
+                        resource = Resource(
+                            resource_type=resource_type,
+                            file_object_id=file_object.id,
+                            name=name,
+                            origin="generated",
+                            created_by=context.user_id,
+                            run_id=context.run_id,
+                            metadata_json={
+                                "sandbox_path": path,
+                                "sha256": digest,
+                                "size_bytes": len(content),
+                                "producing_step_id": context.step_id,
+                                "input_resource_ids": [item["resource_id"] for item in context.input_resources],
+                                **inspect_dataset(name, content),
+                            },
                         )
-                        session.add(file_object)
+                        session.add(resource)
                         session.flush()
-                    resource = Resource(
-                        resource_type=resource_type,
-                        file_object_id=file_object.id,
-                        name=name,
-                        origin="generated",
-                        created_by=context.user_id,
-                        run_id=context.run_id,
-                        metadata_json={"sandbox_path": path, "sha256": digest, "size_bytes": len(content)},
-                    )
-                    session.add(resource)
-                    session.flush()
-                    session.add(ResourceLink(resource_id=resource.id, scope_type="chat", scope_id=context.chat_id))
-                    session.commit()
-                    session.refresh(resource)
-                resources.append({"id": resource.id, "resource_type": resource.resource_type, "name": resource.name, "size_bytes": len(content), "origin": resource.origin})
-        return {**result, "resources": resources}
+                        session.add(ResourceLink(
+                            resource_id=resource.id,
+                            scope_type="chat",
+                            scope_id=context.chat_id,
+                            message_id=context.assistant_message_id or None,
+                        ))
+                        session.commit()
+                        session.refresh(resource)
+                    sandbox_pool.acknowledge_output(context.run_id, path, digest)
+                    resources.append({
+                        "id": resource.id,
+                        "resource_type": resource.resource_type,
+                        "name": resource.name,
+                        "size_bytes": len(content),
+                        "origin": resource.origin,
+                        "producing_step_id": context.step_id,
+                        "input_resource_ids": [item["resource_id"] for item in context.input_resources],
+                    })
+            except Exception as exc:
+                registration_failures.append({"path": path, "error": f"Could not register output: {type(exc).__name__}."})
+        return {**result, "resources": resources, "registration_failures": registration_failures}
 
     async def web_search(arguments: dict[str, Any], _: ToolContext) -> dict[str, Any]:
         query = str(arguments.get("query", "")).strip()
@@ -133,9 +172,7 @@ def build_tool_registry(
             str(arguments.get("code", "")),
             int(arguments.get("timeout_seconds", 30)),
         )
-        if result.get("success"):
-            return await persist_generated(result, context)
-        return result
+        return await persist_generated(result, context)
 
     async def list_files(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         return await sandbox_pool.list_files(context.run_id, str(arguments.get("directory", "/home/user/outputs")))
@@ -144,7 +181,11 @@ def build_tool_registry(
         return await sandbox_pool.read_text(context.run_id, str(arguments.get("path", "")))
 
     async def write_file(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        return await sandbox_pool.write_text(context.run_id, str(arguments.get("path", "")), str(arguments.get("content", "")))
+        result = await sandbox_pool.write_text(context.run_id, str(arguments.get("path", "")), str(arguments.get("content", "")))
+        if result.get("success"):
+            result = {**result, "generated_files": await sandbox_pool.collect_outputs(context.run_id)}
+            return await persist_generated(result, context)
+        return result
 
     async def lookup_data(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         try:
@@ -165,13 +206,16 @@ def build_tool_registry(
             f"rows=con.execute({json.dumps(sql)}).fetchdf().head(200)\n"
             "print(rows.to_json(orient='records', date_format='iso'))\n"
         )
-        result = await sandbox_pool.execute(context.run_id, code, 30)
+        result = await persist_generated(await sandbox_pool.execute(context.run_id, code, 30), context)
         if not result.get("success"):
             return result
         try:
-            return {"rows": json.loads(str(result.get("stdout", "[]"))), "truncated": False}
+            rows = json.loads(str(result.get("stdout", "[]")))
+            if not isinstance(rows, list):
+                return {**result, "error": "Dataset query returned an unreadable result."}
+            return {**result, "rows": rows[:50], "truncated": len(rows) > 50, "sql": sql, "code": code}
         except json.JSONDecodeError:
-            return {"error": "Dataset query returned an unreadable result."}
+            return {**result, "error": "Dataset query returned an unreadable result."}
 
     async def save_memory(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         key = str(arguments.get("key", "")).strip()[:100]

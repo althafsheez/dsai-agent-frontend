@@ -106,6 +106,19 @@ async def get_run(
     return RunResponse.model_validate(run)
 
 
+@router.get("/api/chats/{chat_id}/runs")
+async def get_chat_runs(
+    chat_id: str,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    require_chat(session, user, chat_id)
+    runs = session.scalars(
+        select(AgentRun).where(AgentRun.chat_id == chat_id).order_by(AgentRun.created_at, AgentRun.id)
+    )
+    return {"items": [RunResponse.model_validate(run) for run in runs], "next_cursor": None}
+
+
 @router.get("/api/runs/{run_id}/events")
 async def get_run_events(
     run_id: str,

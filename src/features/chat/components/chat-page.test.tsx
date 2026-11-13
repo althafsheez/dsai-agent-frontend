@@ -86,6 +86,7 @@ describe("live chat page", () => {
       if (url.endsWith(`/chats/${chat.id}/messages`) && !init?.method) {
         return json({ items: persistedMessages, next_cursor: null });
       }
+      if (url.endsWith(`/chats/${chat.id}/runs`) && !init?.method) return json({ items: [], next_cursor: null });
       if (url.endsWith(`/chats/${chat.id}/messages`) && init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as { content: string };
         const message: MessageDto = {
@@ -137,10 +138,11 @@ describe("live chat page", () => {
           event("message.created", 2, { message_id: assistantId, role: "assistant" }),
           event("tool.started", 3, { tool_call_id: "tool-1", name: "execute_python", arguments: { code: "print(1)" } }),
           event("tool.completed", 4, { tool_call_id: "tool-1", name: "execute_python", output: { success: true } }),
-          event("message.delta", 5, { message_id: assistantId, text: "Streamed " }),
-          event("message.delta", 6, { message_id: assistantId, text: "answer" }),
-          event("message.completed", 7, { message_id: assistantId, content: "Streamed answer", status: "completed" }),
-          event("agent.completed", 8, { run_id: "run-real" }),
+          event("dataset.created", 5, { dataset: { id: "resource-dataset", name: "sales.csv", size_bytes: 12 } }),
+          event("message.delta", 6, { message_id: assistantId, text: "Streamed " }),
+          event("message.delta", 7, { message_id: assistantId, text: "answer" }),
+          event("message.completed", 8, { message_id: assistantId, content: "Streamed answer", status: "completed" }),
+          event("agent.completed", 9, { run_id: "run-real" }),
         ].join("");
         if (holdStreamOpen) {
           const encoder = new TextEncoder();
@@ -206,6 +208,9 @@ describe("live chat page", () => {
     expect(await screen.findByText("Streamed answer")).toBeInTheDocument();
     expect(screen.getByText("Execute Python")).toBeVisible();
     expect(screen.getByText("Completed")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Preview sales.csv" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Preview sales.csv" }));
+    expect(await screen.findByRole("dialog", { name: "Preview sales.csv" })).toBeVisible();
     const streamCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/messages/stream"));
     expect(JSON.parse(String(streamCall?.[1]?.body))).toMatchObject({
       model_id: "gemini-pro",
@@ -243,7 +248,7 @@ describe("live chat page", () => {
 
     expect(await screen.findByRole("complementary", { name: "Analysis context" })).toBeVisible();
     await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/resources/upload"))).toHaveLength(2));
-    expect(await screen.findByText("sales.csv")).toBeVisible();
+    expect((await screen.findAllByText("sales.csv")).length).toBeGreaterThan(0);
     await user.click(screen.getByRole("tab", { name: "Artifacts" }));
     expect(await screen.findByText("summary.pdf")).toBeVisible();
   });

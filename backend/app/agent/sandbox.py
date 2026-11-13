@@ -122,9 +122,13 @@ class E2BSandboxPool:
             digest = hashlib.sha256(content).hexdigest()
             if known.get(path) == digest:
                 continue
-            known[path] = digest
             generated.append({"path": path, "name": PurePosixPath(path).name, "size_bytes": len(content), "sha256": digest})
         return generated
+
+    def acknowledge_output(self, run_id: str, path: str, digest: str) -> None:
+        """Mark an output as synced only after its durable resource commit succeeds."""
+        with self._lock:
+            self._output_hashes.setdefault(run_id, {})[path] = digest
 
     async def list_files(self, run_id: str, directory: str) -> dict[str, Any]:
         try:
@@ -164,6 +168,11 @@ class E2BSandboxPool:
         safe = self._safe_path(path, writable=True)
         sandbox = await asyncio.to_thread(self._start_sync, run_id)
         return await asyncio.to_thread(sandbox.files.read, safe, format="bytes")
+
+    async def collect_outputs(self, run_id: str) -> list[dict[str, Any]]:
+        """Discover unacknowledged output files without executing more code."""
+        sandbox = await asyncio.to_thread(self._start_sync, run_id)
+        return await asyncio.to_thread(self._scan_outputs_sync, run_id, sandbox)
 
     async def upload_input(self, run_id: str, filename: str, content: bytes) -> str:
         safe_name = "".join(character for character in filename if character.isalnum() or character in "._-")[:160] or "input.bin"

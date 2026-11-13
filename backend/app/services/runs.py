@@ -389,7 +389,12 @@ async def stream_run(
             chat = session.get(Chat, run.chat_id)
             if chat is None:
                 raise RuntimeError("Run chat no longer exists.")
-            tool_context = ToolContext(run_id=run.id, chat_id=run.chat_id, user_id=chat.created_by)
+            tool_context = ToolContext(
+                run_id=run.id,
+                chat_id=run.chat_id,
+                user_id=chat.created_by,
+                assistant_message_id=run.assistant_message_id,
+            )
 
         while True:
             steering_events: list[ExecutionEvent] = []
@@ -429,7 +434,7 @@ async def stream_run(
                             event_data = runner_event.data
                         event = _persist_event(session, run.id, runner_event.type, event_data)
                         yield _sse(event)
-                        if runner_event.type == "tool.completed":
+                        if runner_event.type in ("tool.completed", "tool.failed"):
                             output = runner_event.data.get("output")
                             resources = output.get("resources", []) if isinstance(output, dict) else []
                             for resource in resources:
@@ -439,7 +444,12 @@ async def stream_run(
                                         session,
                                         run.id,
                                         f"{resource_type}.created",
-                                        {resource_type: resource, "scope": {"type": "chat", "id": run.chat_id}},
+                                        {
+                                            resource_type: resource,
+                                            "scope": {"type": "chat", "id": run.chat_id},
+                                            "step_id": runner_event.data.get("step_id"),
+                                            "message_id": run.assistant_message_id,
+                                        },
                                     )
                                     yield _sse(created)
             except RunnerSteered as steered:

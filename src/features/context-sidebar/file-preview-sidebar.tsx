@@ -1,6 +1,8 @@
 "use client";
 
 import { ArrowLeft, Download, FileText, X } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { downloadResource } from "@/lib/api";
 import { DatasetPreview } from "./dataset-preview";
 import { ImagePreview } from "./image-preview";
 import { PDFPreview } from "./pdf-preview";
@@ -15,16 +17,34 @@ interface FilePreviewSidebarProps {
 
 export function FilePreviewSidebar({ file, onBack, onClose }: FilePreviewSidebarProps) {
   const dataset = isDatasetResource(file);
+  const closeButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    closeButton.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   return (
-    <aside className="flex h-full min-h-0 w-full flex-col border-l bg-sidebar text-sidebar-foreground" aria-label={`Preview ${file.name}`}>
+    <section
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Preview ${file.name}`}
+      className="flex h-full min-h-0 w-full flex-col border-l bg-sidebar text-sidebar-foreground"
+    >
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
         <button type="button" onClick={onBack} aria-label="Back to context" className="flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
           <ArrowLeft className="size-4" />
           <span>Back</span>
         </button>
         <h1 className="min-w-0 flex-1 truncate text-center text-xs font-medium text-foreground" title={file.name}>{file.name}</h1>
-        <button type="button" onClick={onClose} aria-label="Close preview" className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
+        <button ref={closeButton} type="button" onClick={onClose} aria-label="Close preview" className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
           <X className="size-4" />
         </button>
       </header>
@@ -42,11 +62,11 @@ export function FilePreviewSidebar({ file, onBack, onClose }: FilePreviewSidebar
       </div>
 
       <footer className="flex shrink-0 gap-2 border-t p-3">
-        <a href={file.download_url} download className="inline-flex h-8 flex-1 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90">
+        <button type="button" onClick={() => void downloadResource(file.download_url, file.name)} className="inline-flex h-8 flex-1 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90">
           <Download className="size-3.5" /> Download
-        </a>
+        </button>
         <button type="button" onClick={onBack} className="h-8 rounded-md border bg-surface px-3 text-xs text-muted-foreground hover:border-border-strong hover:text-foreground">Return to context</button>
       </footer>
-    </aside>
+    </section>
   );
 }

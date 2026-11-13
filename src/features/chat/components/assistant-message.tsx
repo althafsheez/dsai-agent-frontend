@@ -21,23 +21,23 @@ function Markdown({ content }: { content: string }) {
   })}</div>;
 }
 
-function MessageRenderer({ block, onFileSelect }: { block: MessageBlock; onFileSelect?: (id: string) => void }) {
+function MessageRenderer({ block, onFileSelect, onFileDownload }: { block: MessageBlock; onFileSelect?: (id: string) => void; onFileDownload?: (id: string) => void }) {
   switch (block.type) {
     case "markdown": return <Markdown content={block.content} />;
     case "code": return <CodeBlock {...block} />;
     case "table": return <TableBlock {...block} />;
     case "chart": return <ChartBlock {...block} />;
     case "image": return <figure className="my-4 overflow-hidden rounded-lg border bg-surface"><Image src={block.src} alt={block.alt} width={1200} height={800} unoptimized className="max-h-[480px] w-full object-contain" />{block.caption && <figcaption className="border-t px-3 py-2 text-[11px] text-muted-foreground">{block.caption}</figcaption>}</figure>;
-    case "file": return <FileBlock {...block} onPreview={onFileSelect} />;
+    case "file": return <FileBlock {...block} onPreview={onFileSelect} onDownload={onFileDownload} />;
   }
 }
 
-export function AssistantMessage({ message, onRetry, onFileSelect }: { message: AssistantMessageType; onRetry?: (message: AssistantMessageType) => void; onFileSelect?: (id: string) => void }) {
+export function AssistantMessage({ message, onRetry, onFileSelect, onFileDownload }: { message: AssistantMessageType; onRetry?: (message: AssistantMessageType) => void; onFileSelect?: (id: string) => void; onFileDownload?: (id: string) => void }) {
   return <div className="flex gap-3">
     <div className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md border bg-surface text-sage"><Sparkles className="size-3.5" /></div>
     <div className="min-w-0 max-w-3xl flex-1">
-      {message.trace?.length ? <AgentTrace steps={message.trace} /> : null}
-      <div aria-live={message.status === "running" ? "polite" : undefined}>{message.blocks.map((block, index) => <MessageRenderer key={`${message.id}-${index}`} block={block} onFileSelect={onFileSelect} />)}</div>
+      {message.trace?.length ? <AgentTrace steps={message.trace} onResourceSelect={onFileSelect} /> : null}
+      <div aria-live={message.status === "running" ? "polite" : undefined}>{message.blocks.map((block, index) => <MessageRenderer key={`${message.id}-${index}`} block={block} onFileSelect={onFileSelect} onFileDownload={onFileDownload} />)}</div>
       {message.status === "running" && <span className="mt-2 inline-block h-4 w-1 animate-pulse rounded bg-sage" aria-label="Response streaming" />}
       {(message.status === "failed" || message.status === "interrupted") && <div role="alert" className="mt-4 flex items-start gap-3 rounded-lg border border-red-400/30 bg-red-400/5 p-3"><AlertTriangle className="mt-0.5 size-4 text-red-400" /><div className="flex-1"><p className="text-xs font-medium">{message.status === "failed" ? "The Gemini response failed" : "The Gemini response was interrupted"}</p><p className="mt-1 text-[11px] text-muted-foreground">Any completed output remains saved in this conversation.</p></div>{onRetry && <Button variant="outline" size="sm" onClick={() => onRetry(message)}><RotateCcw />Retry</Button>}</div>}
       <time dateTime={message.createdAt} className="mt-3 block text-[10px] text-muted-foreground">{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
