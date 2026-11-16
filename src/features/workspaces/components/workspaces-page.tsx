@@ -2,33 +2,15 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, MoreHorizontal, Pin, Search, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, MoreHorizontal, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { WorkspaceDto } from "@/lib/api";
+import { getWorkspaces, uploadResource, type WorkspaceDto } from "@/lib/api";
 import { CreateWorkspaceDialog } from "./create-workspace-dialog";
 
 type Ownership = "all" | "owned" | "shared";
 type Sort = "updated_desc" | "updated_asc" | "name_asc";
-
-interface WorkspacePreview {
-  id: string;
-  name: string;
-  owner: string;
-  ownership: Exclude<Ownership, "all">;
-  created: string;
-  updated: string;
-  updatedRank: number;
-  pinned: boolean;
-}
-
-const workspacePreviews: WorkspacePreview[] = [
-  { id: "revenue-intelligence", name: "Revenue Intelligence", owner: "You", ownership: "owned", created: "Nov 10, 2026", updated: "2h ago", updatedRank: 1, pinned: true },
-  { id: "sales-research", name: "Sales Research", owner: "Alex", ownership: "shared", created: "Oct 29, 2026", updated: "3d ago", updatedRank: 3, pinned: true },
-  { id: "customer-analytics", name: "Customer Analytics", owner: "You", ownership: "owned", created: "Nov 8, 2026", updated: "1d ago", updatedRank: 2, pinned: false },
-  { id: "market-insights", name: "Market Insights", owner: "Sarah", ownership: "shared", created: "Oct 24, 2026", updated: "5d ago", updatedRank: 4, pinned: false },
-  { id: "project-alpha", name: "Project Alpha", owner: "You", ownership: "owned", created: "Oct 20, 2026", updated: "6d ago", updatedRank: 5, pinned: false },
-  { id: "research", name: "Research", owner: "You", ownership: "owned", created: "Oct 18, 2026", updated: "1w ago", updatedRank: 6, pinned: false },
-];
 
 const ownershipOptions: Array<{ value: Ownership; label: string }> = [
   { value: "all", label: "All" },
@@ -37,35 +19,35 @@ const ownershipOptions: Array<{ value: Ownership; label: string }> = [
 ];
 
 export function WorkspacesPage() {
+  const router = useRouter();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [ownership, setOwnership] = useState<Ownership>("all");
   const [sort, setSort] = useState<Sort>("updated_desc");
-  const [createdWorkspaces, setCreatedWorkspaces] = useState<WorkspacePreview[]>([]);
+  const workspacesQuery = useQuery({ queryKey: ["workspaces"], queryFn: getWorkspaces });
 
   const workspaces = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
-    return [...createdWorkspaces, ...workspacePreviews]
-      .filter((workspace) => ownership === "all" || workspace.ownership === ownership)
-      .filter((workspace) => !query || workspace.name.toLocaleLowerCase().includes(query) || workspace.owner.toLocaleLowerCase().includes(query))
+    return [...(workspacesQuery.data?.items ?? [])]
+      .filter(() => ownership !== "shared")
+      .filter((workspace) => !query || workspace.name.toLocaleLowerCase().includes(query))
       .sort((left, right) => {
-        if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
         if (sort === "name_asc") return left.name.localeCompare(right.name);
-        return sort === "updated_asc" ? right.updatedRank - left.updatedRank : left.updatedRank - right.updatedRank;
+        return sort === "updated_asc" ? left.updated_at.localeCompare(right.updated_at) : right.updated_at.localeCompare(left.updated_at);
       });
-  }, [createdWorkspaces, ownership, search, sort]);
+  }, [ownership, search, sort, workspacesQuery.data?.items]);
 
-  function addCreatedWorkspace(workspace: WorkspaceDto) {
-    const createdAt = new Date(workspace.created_at);
-    setCreatedWorkspaces((current) => [{
-      id: workspace.id,
-      name: workspace.name,
-      owner: "You",
-      ownership: "owned",
-      created: new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(createdAt),
-      updated: "just now",
-      updatedRank: 0,
-      pinned: false,
-    }, ...current]);
+  const uploadInitialFiles = useMutation({
+    mutationFn: async ({ workspace, files }: { workspace: WorkspaceDto; files: File[] }) => {
+      await Promise.all(files.map((file, index) => uploadResource({ file, scopeType: "workspace", scopeId: workspace.id, clientUploadId: `workspace-${workspace.id}-${index}-${file.name}-${file.lastModified}` })));
+      return workspace;
+    },
+  });
+
+  async function addCreatedWorkspace(workspace: WorkspaceDto, files: File[]) {
+    await uploadInitialFiles.mutateAsync({ workspace, files });
+    await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+    router.push(`/workspaces/${workspace.id}`);
   }
 
   return <section className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
@@ -104,7 +86,7 @@ export function WorkspacesPage() {
       </div>
     </div>
 
-    {workspaces.length > 0 ? <div className="mt-6 overflow-x-auto rounded-md border">
+    {workspacesQuery.isLoading ? <div className="mt-6 rounded-md border px-6 py-14 text-center text-sm text-muted-foreground">Loading workspaces…</div> : workspacesQuery.isError ? <div className="mt-6 rounded-md border border-red-400/30 px-6 py-14 text-center"><p className="text-sm font-medium">Could not load workspaces</p><button type="button" onClick={() => workspacesQuery.refetch()} className="mt-3 text-xs text-slate">Try again</button></div> : workspaces.length > 0 ? <div className="mt-6 overflow-x-auto rounded-md border">
       <table className="w-full min-w-[640px] table-fixed border-collapse text-left">
         <thead className="bg-surface text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
           <tr>
@@ -119,20 +101,19 @@ export function WorkspacesPage() {
           {workspaces.map((workspace) => <tr key={workspace.id} className="group border-t text-xs transition-colors hover:bg-surface">
             <td className="p-0 font-medium text-foreground">
               <Link href={`/workspaces/${workspace.id}`} className="flex min-w-0 items-center gap-2.5 px-3 py-3 outline-none focus-visible:bg-raised">
-                {workspace.pinned ? <Pin className="size-3.5 shrink-0 fill-foreground text-foreground" aria-label="Pinned" /> : <span className="size-3.5 shrink-0" aria-hidden="true" />}
                 <span className="truncate">{workspace.name}</span>
               </Link>
             </td>
-            <td className="truncate px-3 py-3 text-muted-foreground">{workspace.owner}</td>
-            <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{workspace.created}</td>
-            <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{workspace.updated}</td>
-            <td className="px-2 py-1"><button type="button" disabled title="Workspace actions are not connected yet" aria-label={`Actions for ${workspace.name}`} className="grid size-8 cursor-not-allowed place-items-center rounded-md text-muted-foreground opacity-70"><MoreHorizontal className="size-4" /></button></td>
+            <td className="truncate px-3 py-3 text-muted-foreground">You</td>
+            <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(workspace.created_at))}</td>
+            <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(workspace.updated_at))}</td>
+            <td className="px-2 py-1"><span aria-label={`Actions for ${workspace.name}`} className="grid size-8 place-items-center rounded-md text-muted-foreground"><MoreHorizontal className="size-4" /></span></td>
           </tr>)}
         </tbody>
       </table>
     </div> : <div className="mt-6 rounded-md border border-dashed px-6 py-14 text-center">
-      <p className="text-sm font-medium">No matching workspaces</p>
-      <p className="mt-1 text-xs text-muted-foreground">Try adjusting your search or ownership filter.</p>
+      <p className="text-sm font-medium">{search ? "No matching workspaces" : "No workspaces yet"}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{search ? "Try adjusting your search or ownership filter." : "Create a workspace to collect its chats, datasets, and shared AI context."}</p>
       <button type="button" onClick={() => { setSearch(""); setOwnership("all"); }} className="mt-4 text-xs font-medium text-slate hover:text-foreground">Clear filters</button>
     </div>}
   </section>;

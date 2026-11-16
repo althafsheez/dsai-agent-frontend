@@ -17,6 +17,7 @@ interface HistoryTableProps {
   onRename: (record: HistoryRecord, name: string) => Promise<void>;
   onArchive: (record: HistoryRecord, archived: boolean) => Promise<void>;
   onDelete: (record: HistoryRecord) => Promise<void>;
+  onUnreadChange?: (record: HistoryRecord, isUnread: boolean) => Promise<void>;
   onDeleteMany?: (records: HistoryRecord[]) => Promise<void>;
 }
 
@@ -24,7 +25,7 @@ function recordKey(record: HistoryRecord) {
   return `${record.kind}:${record.id}`;
 }
 
-export function HistoryTable({ records, loading, hasFilters, onClearFilters, onRename, onArchive, onDelete, onDeleteMany }: HistoryTableProps) {
+export function HistoryTable({ records, loading, hasFilters, onClearFilters, onRename, onArchive, onDelete, onUnreadChange = async () => {}, onDeleteMany }: HistoryTableProps) {
   const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
@@ -72,7 +73,7 @@ export function HistoryTable({ records, loading, hasFilters, onClearFilters, onR
 
   if (records.length === 0) return <div className="mt-6 rounded-md border border-dashed px-6 py-14 text-center">
     <p className="text-sm font-medium">{hasFilters ? "No matching history" : "No history yet"}</p>
-    <p className="mt-1 text-xs text-muted-foreground">{hasFilters ? "Try adjusting your search or filters." : "Chats and workspaces will appear here after you create them."}</p>
+    <p className="mt-1 text-xs text-muted-foreground">{hasFilters ? "Try adjusting your search or filters." : "Chats will appear here after you send your first query."}</p>
     {hasFilters && <button type="button" onClick={onClearFilters} className="mt-4 text-xs font-medium text-slate hover:text-foreground">Clear filters</button>}
   </div>;
 
@@ -100,7 +101,7 @@ export function HistoryTable({ records, loading, hasFilters, onClearFilters, onR
             <td className="truncate px-3 py-3 text-muted-foreground">{record.kind === "workspace" ? "—" : record.workspace_name ?? "Standalone"}</td>
             <td className="truncate px-3 py-3 text-muted-foreground">{record.author.name}</td>
             <td className="whitespace-nowrap px-3 py-3 text-muted-foreground"><time dateTime={record.updated_at}>{formatRelativeTime(record.updated_at)}</time></td>
-            <td className="px-2 py-1"><HistoryRowActions record={record} menuOpen={openMenuKey === key} onMenuOpenChange={(open) => setOpenMenuKey(open ? key : null)} onRename={(name) => onRename(record, name)} onArchive={(archived) => onArchive(record, archived)} onDelete={() => onDelete(record)} /></td>
+            <td className="px-2 py-1"><HistoryRowActions record={record} menuOpen={openMenuKey === key} onMenuOpenChange={(open) => setOpenMenuKey(open ? key : null)} onRename={(name) => onRename(record, name)} onArchive={(archived) => onArchive(record, archived)} onDelete={() => onDelete(record)} onUnreadChange={(isUnread) => onUnreadChange(record, isUnread)} /></td>
           </tr>;
         })}
       </tbody>
@@ -109,7 +110,7 @@ export function HistoryTable({ records, loading, hasFilters, onClearFilters, onR
     <Dialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
       <DialogContent className="max-w-sm p-5">
         <DialogTitle className="text-sm font-medium">Delete {selectedRecords.length} selected {selectedRecords.length === 1 ? "item" : "items"}?</DialogTitle>
-        <DialogDescription className="mt-2 text-xs leading-5 text-muted-foreground">The selected chats and workspaces will be removed from normal lists. Their data is preserved for recovery.</DialogDescription>
+        <DialogDescription className="mt-2 text-xs leading-5 text-muted-foreground">The selected chats will be removed from normal lists. Their data is preserved for recovery.</DialogDescription>
         <div className="mt-5 flex justify-end gap-2"><DialogClose asChild><Button type="button" variant="ghost">Cancel</Button></DialogClose><Button type="button" disabled={bulkDeletePending} onClick={() => void deleteSelected()} className="bg-[var(--destructive,oklch(0.65_0.17_25))] text-white">Delete selected</Button></div>
       </DialogContent>
     </Dialog>

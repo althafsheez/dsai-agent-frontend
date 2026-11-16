@@ -11,14 +11,15 @@ from sqlalchemy.orm import Session
 
 from ..dependencies import get_current_user, get_db
 from ..errors import APIError
-from ..models import Favorite, FileObject, Message, Resource, ResourceLink, User
+from ..models import FileObject, LibraryEntry, Message, Resource, ResourceLink, User
 from ..services.records import require_chat, require_workspace
 from ..services.dataset_preview import MAX_PREVIEW_ROWS, inspect_dataset
 from ..storage import LocalFileStorage
 router = APIRouter(prefix="/api/resources", tags=["resources"])
 catalog_router = APIRouter(prefix="/api", tags=["resources"])
 DATASET_EXTENSIONS = {".csv", ".parquet", ".xlsx", ".xls"}
-ALLOWED_EXTENSIONS = DATASET_EXTENSIONS | {".png", ".jpg", ".jpeg", ".pdf", ".txt", ".md", ".json"}
+CODE_EXTENSIONS = {".py", ".js", ".ts", ".tsx", ".jsx", ".sql", ".html", ".css", ".yaml", ".yml", ".sh", ".r"}
+ALLOWED_EXTENSIONS = DATASET_EXTENSIONS | CODE_EXTENSIONS | {".png", ".jpg", ".jpeg", ".pdf", ".txt", ".md", ".json"}
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
@@ -78,6 +79,7 @@ async def upload_resource(
         file_object_id=file_object.id,
         name=filename,
         origin="uploaded",
+        source="input",
         created_by=user.id,
         metadata_json={"size_bytes": len(content), **inspect_dataset(filename, content)},
     )
@@ -114,16 +116,30 @@ def _artifact_kind(name: str) -> str:
         return "pdf"
     if extension in {".md", ".txt"}:
         return "document"
-    if extension == ".json":
+    if extension == ".json" or extension in CODE_EXTENSIONS:
         return "code"
     return "file"
+
+
+def _library_category(resource: Resource) -> str:
+    """Use one stable category vocabulary for Library filtering clients."""
+    if resource.resource_type == "dataset":
+        return "dataset"
+    kind = _artifact_kind(resource.name)
+    if kind in {"image", "chart"}:
+        return "visual"
+    if kind == "code":
+        return "code"
+    if kind in {"pdf", "document"}:
+        return "report"
+    return "other"
 
 
 def _catalog_item(
     resource: Resource,
     file_object: FileObject,
     scope_type: str,
-    saved: bool = False,
+    in_library: bool = False,
 ) -> dict:
     base = {
         "id": resource.id,
@@ -131,6 +147,7 @@ def _catalog_item(
         "mime_type": file_object.mime_type,
         "size_bytes": file_object.size_bytes,
         "origin": resource.origin,
+        "source": resource.source,
         "preview_url": f"/api/resources/{resource.id}/preview",
         "download_url": f"/api/resources/{resource.id}/download",
         "created_by": resource.created_by,
@@ -145,8 +162,9 @@ def _catalog_item(
             "columns": resource.metadata_json.get("columns", []),
             "preview_rows": resource.metadata_json.get("preview_rows", []),
             "scope_type": scope_type,
+            "in_library": in_library,
         }
-    return {**base, "kind": _artifact_kind(resource.name), "saved": saved}
+    return {**base, "kind": _artifact_kind(resource.name), "in_library": in_library}
 
 
 def _chat_catalog(session: Session, user: User, chat_id: str) -> list[tuple[Resource, FileObject, str]]:
@@ -158,24 +176,43 @@ def _chat_catalog(session: Session, user: User, chat_id: str) -> list[tuple[Reso
         )
     from sqlalchemy import or_
 
-    return list(session.execute(
+    rows = list(session.execute(
         select(Resource, FileObject, ResourceLink.scope_type)
         .join(ResourceLink, ResourceLink.resource_id == Resource.id)
         .join(FileObject, FileObject.id == Resource.file_object_id)
         .where(or_(*scope_filters))
         .order_by(Resource.created_at.desc(), Resource.id.desc())
     ).all())
+    # A resource may be linked directly to the chat and to its workspace. It
+    # is one effective input, so prefer the direct chat link and emit it once.
+    seen: set[str] = set()
+    return [row for row in sorted(rows, key=lambda row: row[2] != "chat") if not (row[0].id in seen or seen.add(row[0].id))]
 
 
 @catalog_router.get("/datasets")
 async def list_datasets(
-    chat_id: str,
+    chat_id: str | None = None,
+    workspace_id: str | None = None,
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
+    if bool(chat_id) == bool(workspace_id):
+        raise APIError(422, "invalid_scope", "Provide exactly one chat_id or workspace_id.")
+    library_ids = set(session.scalars(select(LibraryEntry.resource_id).where(LibraryEntry.user_id == user.id)))
+    if workspace_id:
+        require_workspace(session, user, workspace_id)
+        rows = session.execute(
+            select(Resource, FileObject, ResourceLink.scope_type)
+            .join(ResourceLink, ResourceLink.resource_id == Resource.id)
+            .join(FileObject, FileObject.id == Resource.file_object_id)
+            .where(ResourceLink.scope_type == "workspace", ResourceLink.scope_id == workspace_id)
+            .order_by(Resource.created_at.desc(), Resource.id.desc())
+        ).all()
+    else:
+        rows = _chat_catalog(session, user, chat_id or "")
     items = [
-        _catalog_item(resource, file_object, scope_type)
-        for resource, file_object, scope_type in _chat_catalog(session, user, chat_id)
+        _catalog_item(resource, file_object, scope_type, resource.id in library_ids)
+        for resource, file_object, scope_type in rows
         if resource.resource_type == "dataset"
     ]
     return {"items": items, "next_cursor": None}
@@ -187,13 +224,72 @@ async def list_artifacts(
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    saved_ids = set(session.scalars(select(Favorite.artifact_id).where(Favorite.user_id == user.id)))
+    library_ids = set(session.scalars(select(LibraryEntry.resource_id).where(LibraryEntry.user_id == user.id)))
     items = [
-        _catalog_item(resource, file_object, scope_type, resource.id in saved_ids)
+        _catalog_item(resource, file_object, scope_type, resource.id in library_ids)
         for resource, file_object, scope_type in _chat_catalog(session, user, chat_id)
         if resource.resource_type == "artifact"
     ]
     return {"items": items, "next_cursor": None}
+
+
+@catalog_router.get("/library")
+async def list_library(
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    rows = session.execute(
+        select(LibraryEntry, Resource, FileObject)
+        .join(Resource, Resource.id == LibraryEntry.resource_id)
+        .join(FileObject, FileObject.id == Resource.file_object_id)
+        .where(LibraryEntry.user_id == user.id, Resource.created_by == user.id)
+        .order_by(LibraryEntry.created_at.desc(), LibraryEntry.id.desc())
+    ).all()
+    items = []
+    for entry, resource, file_object in rows:
+        item = _catalog_item(resource, file_object, "library", True)
+        items.append({
+            **item,
+            "resource_type": resource.resource_type,
+            "library_category": _library_category(resource),
+            "library_created_at": entry.created_at,
+        })
+    return {"items": items, "next_cursor": None}
+
+
+@router.post("/{resource_id}/library", status_code=status.HTTP_201_CREATED)
+async def add_resource_to_library(
+    resource_id: str,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    _accessible_resource(session, user, resource_id)
+    entry = session.scalar(select(LibraryEntry).where(
+        LibraryEntry.user_id == user.id,
+        LibraryEntry.resource_id == resource_id,
+    ))
+    if entry is None:
+        entry = LibraryEntry(user_id=user.id, resource_id=resource_id)
+        session.add(entry)
+        session.commit()
+        session.refresh(entry)
+    return {"resource_id": resource_id, "in_library": True, "library_entry_id": entry.id}
+
+
+@router.delete("/{resource_id}/library", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_resource_from_library(
+    resource_id: str,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    _accessible_resource(session, user, resource_id)
+    entry = session.scalar(select(LibraryEntry).where(
+        LibraryEntry.user_id == user.id,
+        LibraryEntry.resource_id == resource_id,
+    ))
+    if entry is not None:
+        session.delete(entry)
+        session.commit()
 
 
 @catalog_router.get("/datasets/{resource_id}/preview")
@@ -254,9 +350,12 @@ async def preview_resource(
     user: User = Depends(get_current_user),
 ) -> Response:
     resource, file_object = _accessible_resource(session, user, resource_id)
-    if resource.resource_type == "dataset" or file_object.mime_type not in {
-        "image/png", "image/jpeg", "application/pdf"
-    }:
+    extension = Path(resource.name).suffix.lower()
+    previewable = file_object.mime_type in {"image/png", "image/jpeg", "application/pdf"} or extension in CODE_EXTENSIONS | {".txt", ".md", ".json"}
+    if resource.resource_type == "dataset" or not previewable:
         raise APIError(415, "preview_unavailable", "A browser preview is not available for this file.")
     storage: LocalFileStorage = request.app.state.storage
-    return Response(content=storage.read_bytes(file_object.relative_storage_path), media_type=file_object.mime_type)
+    content = storage.read_bytes(file_object.relative_storage_path)
+    if extension in CODE_EXTENSIONS | {".txt", ".md", ".json"}:
+        content = content[:1_000_000]
+    return Response(content=content, media_type=file_object.mime_type)

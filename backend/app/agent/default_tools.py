@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import Settings
-from ..models import AgentMemory, Chat, FileObject, Resource, ResourceLink
+from ..models import AgentMemory, Chat, FileObject, Resource, ResourceLink, WorkspaceContextFile
 from ..services.dataset_preview import inspect_dataset
 from ..storage import LocalFileStorage
 from .sandbox import E2BSandboxPool, SandboxUnavailable
@@ -61,7 +61,21 @@ def build_tool_registry(
                 })
                 staged_ids.add(resource.id)
             context.input_resources = tuple(staged)
-            return {"files": staged} if staged else {}
+            workspace_context: list[dict[str, str]] = []
+            if chat and chat.workspace_id:
+                workspace_context = [
+                    {"name": item.name, "content": item.content}
+                    for item in session.scalars(select(WorkspaceContextFile).where(
+                        WorkspaceContextFile.workspace_id == chat.workspace_id,
+                        WorkspaceContextFile.created_by == context.user_id,
+                    ).order_by(WorkspaceContextFile.name))
+                ]
+            prepared: dict[str, Any] = {}
+            if staged:
+                prepared["files"] = staged
+            if workspace_context:
+                prepared["workspace_context"] = workspace_context
+            return prepared
 
     registry = ToolRegistry(prepare=prepare, cleanup=lambda context: sandbox_pool.close(context.run_id))
 
@@ -75,7 +89,7 @@ def build_tool_registry(
             path = str(generated.get("path", ""))
             name = PurePosixPath(path).name
             extension = PurePosixPath(name).suffix.lower()
-            if extension not in {".csv", ".parquet", ".xlsx", ".xls", ".png", ".jpg", ".jpeg", ".pdf", ".txt", ".md", ".json"}:
+            if extension not in {".csv", ".parquet", ".xlsx", ".xls", ".png", ".jpg", ".jpeg", ".pdf", ".txt", ".md", ".json", ".py", ".js", ".ts", ".tsx", ".jsx", ".sql", ".html", ".css", ".yaml", ".yml", ".sh", ".r"}:
                 continue
             try:
                 content = await sandbox_pool.read_output_bytes(context.run_id, path)
@@ -103,8 +117,9 @@ def build_tool_registry(
                         resource = Resource(
                             resource_type=resource_type,
                             file_object_id=file_object.id,
-                            name=name,
-                            origin="generated",
+                        name=name,
+                        origin="generated",
+                        source="output",
                             created_by=context.user_id,
                             run_id=context.run_id,
                             metadata_json={

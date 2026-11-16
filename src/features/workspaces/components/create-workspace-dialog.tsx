@@ -8,7 +8,7 @@ import { createWorkspace, type WorkspaceDto } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface CreateWorkspaceDialogProps {
-  onCreated: (workspace: WorkspaceDto) => void;
+  onCreated: (workspace: WorkspaceDto, files: File[]) => Promise<void> | void;
 }
 
 function formatFileSize(bytes: number) {
@@ -49,8 +49,8 @@ export function CreateWorkspaceDialog({ onCreated }: CreateWorkspaceDialogProps)
     setSubmitting(true);
     setError(null);
     try {
-      const workspace = await createWorkspace({ name: name.trim(), description: context.trim() });
-      onCreated(workspace);
+      const workspace = await createWorkspace({ name: name.trim(), description: context.trim(), ai_context: context.trim() });
+      await onCreated(workspace, files);
       setOpen(false);
       reset();
     } catch (caught) {

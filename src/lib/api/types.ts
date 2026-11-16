@@ -27,6 +27,27 @@ export interface WorkspaceDto {
   deleted_at: string | null;
 }
 
+export interface WorkspaceContextFileDto {
+  id: string;
+  workspace_id: string;
+  name: string;
+  content: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowDto {
+  id: string;
+  workspace_id: string | null;
+  created_by: string;
+  name: string;
+  description: string | null;
+  status: "active" | "inactive" | "draft" | string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ChatDto {
   id: string;
   title: string;
@@ -38,6 +59,8 @@ export interface ChatDto {
   archived_at: string | null;
   deleted_at: string | null;
   first_run_at: string | null;
+  is_unread: boolean;
+  active_run_status: "queued" | "running" | null;
 }
 
 export interface MessageDto {

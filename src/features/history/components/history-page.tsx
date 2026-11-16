@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { deleteChat, deleteWorkspace, getChats, getWorkspaces, updateChat, updateWorkspace } from "@/lib/api";
+import { deleteChat, getChats, getWorkspaces, updateChat } from "@/lib/api";
 import { filterHistory } from "../logic/filter-history";
 import { currentDemoUser, type HistoryFilters, type HistoryOwnership, type HistoryRecord, type HistorySort, type HistoryStatus, type HistoryTime } from "../types";
 import { HistoryTable } from "./history-table";
@@ -33,22 +33,12 @@ export function HistoryPage() {
   const pathname = usePathname();
   const queryClient = useQueryClient();
   const filters = useMemo(() => readFilters(new URLSearchParams(params.toString())), [params]);
+  const workspacesQuery = useQuery({ queryKey: ["workspaces"], queryFn: getWorkspaces });
   const historyQuery = useQuery({
     queryKey: historyKey,
     queryFn: async () => {
       const [chatList, workspaceList] = await Promise.all([getChats(), getWorkspaces()]);
       const workspaceNames = new Map(workspaceList.items.map((workspace) => [workspace.id, workspace.name]));
-      const workspaceRecords: HistoryRecord[] = workspaceList.items.map((workspace) => ({
-        kind: "workspace",
-        id: workspace.id,
-        name: workspace.name,
-        workspace_id: null,
-        workspace_name: null,
-        author: currentDemoUser,
-        updated_at: workspace.updated_at,
-        archived_at: workspace.archived_at,
-        deleted_at: workspace.deleted_at,
-      }));
       const chatRecords: HistoryRecord[] = chatList.items.map((chat) => ({
         kind: "chat",
         id: chat.id,
@@ -59,23 +49,27 @@ export function HistoryPage() {
         updated_at: chat.updated_at,
         archived_at: chat.archived_at,
         deleted_at: chat.deleted_at,
+        is_unread: chat.is_unread,
       }));
-      return [...chatRecords, ...workspaceRecords];
+      return chatRecords;
     },
+    refetchInterval: 2000,
   });
   const records = useMemo(() => filterHistory(historyQuery.data ?? [], filters), [filters, historyQuery.data]);
   const options = useMemo(() => ({
     authors: historyQuery.data?.length ? [currentDemoUser] : [],
-    workspaces: (historyQuery.data ?? [])
-      .filter((record) => record.kind === "workspace")
-      .map((record) => ({ id: record.id, name: record.name }))
+    workspaces: (workspacesQuery.data?.items ?? [])
+      .map((workspace) => ({ id: workspace.id, name: workspace.name }))
       .sort((a, b) => a.name.localeCompare(b.name)),
-  }), [historyQuery.data]);
+  }), [historyQuery.data?.length, workspacesQuery.data?.items]);
 
   const mutation = useMutation({
     mutationFn: async (operation: () => Promise<void>) => operation(),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: historyKey });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: historyKey }),
+        queryClient.invalidateQueries({ queryKey: ["sidebar", "recent-chats"] }),
+      ]);
     },
   });
 
@@ -99,7 +93,7 @@ export function HistoryPage() {
   return <section className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
     <header className="mb-6">
       <h1 className="text-xl font-semibold tracking-tight">History</h1>
-      <p className="mt-1 text-xs text-muted-foreground">View and manage your chats and workspaces</p>
+      <p className="mt-1 text-xs text-muted-foreground">View and manage your chats</p>
     </header>
     <HistoryToolbar filters={filters} options={options} onChange={updateFilters} />
     <HistoryTable
@@ -108,19 +102,20 @@ export function HistoryPage() {
       hasFilters={hasFilters}
       onClearFilters={() => updateFilters({ ownership: "owned", status: "active", search: "", time: "any", authorId: "all", workspaceId: "all", sort: "updated_desc" })}
       onRename={(record: HistoryRecord, name) => mutate(async () => {
-        if (record.kind === "chat") await updateChat(record.id, { title: name });
-        else await updateWorkspace(record.id, { name });
+        await updateChat(record.id, { title: name });
       })}
       onArchive={(record: HistoryRecord, archived) => mutate(async () => {
-        if (record.kind === "chat") await updateChat(record.id, { archived });
-        else await updateWorkspace(record.id, { archived });
+        await updateChat(record.id, { archived });
       })}
       onDelete={(record: HistoryRecord) => mutate(async () => {
-        if (record.kind === "chat") await deleteChat(record.id);
-        else await deleteWorkspace(record.id);
+        await deleteChat(record.id);
+      })}
+      onUnreadChange={(record: HistoryRecord, isUnread) => mutate(async () => {
+        await updateChat(record.id, { is_unread: isUnread });
+        await queryClient.invalidateQueries({ queryKey: ["activity"] });
       })}
       onDeleteMany={(selectedRecords) => mutate(async () => {
-        await Promise.all(selectedRecords.map((record) => record.kind === "chat" ? deleteChat(record.id) : deleteWorkspace(record.id)));
+        await Promise.all(selectedRecords.map((record) => deleteChat(record.id)));
       })}
     />
   </section>;

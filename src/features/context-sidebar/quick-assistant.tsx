@@ -37,7 +37,7 @@ export function QuickAssistant({ chatId, workspaceId }: QuickAssistantProps) {
   }
 
   return (
-    <section className="flex min-h-[210px] flex-col border-t bg-sidebar" aria-labelledby="quick-assistant-title" data-chat-id={chatId} data-workspace-id={workspaceId ?? undefined}>
+    <section className="flex min-h-[210px] shrink-0 flex-col border-t bg-sidebar" aria-labelledby="quick-assistant-title" data-chat-id={chatId} data-workspace-id={workspaceId ?? undefined}>
       <div className="px-4 pb-2 pt-3">
         <h2 id="quick-assistant-title" className="text-xs font-medium text-foreground">Quick Assistant</h2>
         <p className="mt-1 text-[11px] leading-4 text-muted-foreground">Read-only questions about this context.</p>

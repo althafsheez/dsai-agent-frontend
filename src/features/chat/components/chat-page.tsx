@@ -36,6 +36,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ContextSidebar, FilePreviewSidebar, type ContextFile } from "@/features/context-sidebar";
 import {
+  addResourceToLibrary,
   createMessage,
   downloadResource,
   cancelQueuedRun,
@@ -50,6 +51,8 @@ import {
   getWorkspaces,
   queueRun,
   resumeChatQueue,
+  removeResourceFromLibrary,
+  setChatPresence,
   steerRun,
   streamChatRun,
   uploadResource,
@@ -167,15 +170,27 @@ function fileType(file: File) {
   return file.name.split(".").pop()?.toUpperCase() || "FILE";
 }
 
+function appendMessageOnce(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {
+  return messages.some((current) => current.id === message.id) ? messages : [...messages, message];
+}
+
+function replaceMessageId(messages: ChatMessage[], temporaryId: string, persisted: ChatMessage): ChatMessage[] {
+  const replaced = messages.map((message) => message.id === temporaryId ? persisted : message);
+  // A cache refresh may have inserted the persisted record before this request
+  // resolves. Keep the first occurrence and never create duplicate React keys.
+  return replaced.filter((message, index, all) => all.findIndex((candidate) => candidate.id === message.id) === index);
+}
+
 export function ChatPage({ chatId }: { chatId: string }) {
   const queryClient = useQueryClient();
   const chatQuery = useQuery({ queryKey: ["chat", chatId], queryFn: () => getChat(chatId) });
-  const messagesQuery = useQuery({ queryKey: ["chat", chatId, "messages"], queryFn: () => getMessages(chatId) });
+  const messagesQuery = useQuery({ queryKey: ["chat", chatId, "messages"], queryFn: () => getMessages(chatId), refetchInterval: 1000 });
   const modelsQuery = useQuery({ queryKey: ["models"], queryFn: getModels });
   const workspacesQuery = useQuery({ queryKey: ["workspaces"], queryFn: getWorkspaces });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<ContextFile | null>(null);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
@@ -200,19 +215,24 @@ export function ChatPage({ chatId }: { chatId: string }) {
     queryKey: ["chat", chatId, "artifacts"],
     queryFn: () => getArtifacts(chatId),
   });
-  const runsQuery = useQuery({ queryKey: ["chat", chatId, "runs"], queryFn: () => getChatRuns(chatId) });
+  const runsQuery = useQuery({ queryKey: ["chat", chatId, "runs"], queryFn: () => getChatRuns(chatId), refetchInterval: 1000 });
   const traceHistoryQuery = useQuery({
     queryKey: ["chat", chatId, "trace-events", runsQuery.data?.items.map((run) => run.id).join(",")],
     enabled: Boolean(runsQuery.data?.items.length),
     queryFn: async () => (await Promise.all((runsQuery.data?.items ?? []).map(async (run) => (await getRunEvents(run.id)).items))).flat(),
   });
   const sections = useRef(new Map<string, HTMLElement>());
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const sectionVisibility = useRef(new Map<string, number>());
   const composerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentsRef = useRef<DraftAttachment[]>([]);
   const initialRunChecked = useRef(false);
   const streamController = useRef<AbortController | null>(null);
   const queuedQuestionsRef = useRef<QueuedQuestion[]>([]);
+  const submittingRef = useRef(false);
+  const initiallyPositionedChatRef = useRef<string | null>(null);
   const models = useMemo(() => modelsQuery.data?.models ?? [], [modelsQuery.data?.models]);
   const selectedModel = models.find((model) => model.id === modelId) ?? models[0];
   const supportedEfforts = selectedModel?.supported_efforts ?? [];
@@ -228,6 +248,68 @@ export function ChatPage({ chatId }: { chatId: string }) {
     ...(artifactsQuery.data?.items ?? []),
   ].map((resource) => [resource.id, resource])), [artifactsQuery.data?.items, datasetsQuery.data?.items]);
   const traceReplay = useMemo(() => replayTrace(traceEvents), [traceEvents]);
+  const questionKey = useMemo(() => messages.filter((message) => message.role === "user").map((message) => message.id).join("\u0000"), [messages]);
+  const latestQuestionId = useMemo(
+    () => [...messages].reverse().find((message) => message.role === "user")?.id,
+    [messages],
+  );
+
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined" || !questionKey) return;
+    const questionIds = questionKey.split("\u0000");
+    const visibility = sectionVisibility.current;
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const id = entry.target.id.replace(/^message-/, "");
+        if (entry.isIntersecting) visibility.set(id, entry.intersectionRatio);
+        else visibility.delete(id);
+      }
+      const scrollRoot = chatScrollRef.current;
+      if (scrollRoot && scrollRoot.scrollHeight - scrollRoot.scrollTop - scrollRoot.clientHeight < 24) {
+        const finalQuestionId = questionIds.at(-1);
+        if (finalQuestionId) setActiveSection((current) => current === finalQuestionId ? current : finalQuestionId);
+        return;
+      }
+      let nextId: string | undefined;
+      let bestRatio = -1;
+      for (const id of questionIds) {
+        const ratio = visibility.get(id) ?? -1;
+        if (ratio > bestRatio) {
+          bestRatio = ratio;
+          nextId = id;
+        }
+      }
+      if (nextId && bestRatio >= 0) setActiveSection((current) => current === nextId ? current : nextId);
+    }, { root: chatScrollRef.current, rootMargin: "-12% 0px -58% 0px", threshold: [0, 0.25, 0.5, 0.75, 1] });
+    for (const id of questionIds) {
+      const section = sections.current.get(id);
+      if (section) observer.observe(section);
+    }
+    return () => {
+      observer.disconnect();
+      visibility.clear();
+    };
+  }, [questionKey]);
+
+  useEffect(() => {
+    void setChatPresence(chatId, true).then(() => {
+      void queryClient.invalidateQueries({ queryKey: ["activity"] });
+      void queryClient.invalidateQueries({ queryKey: ["history"] });
+      void queryClient.invalidateQueries({ queryKey: ["sidebar", "recent-chats"] });
+    }).catch(() => {});
+    return () => { void setChatPresence(chatId, false).catch(() => {}); };
+  }, [chatId, queryClient]);
+
+  useEffect(() => {
+    const active = runsQuery.data?.items.find((run) => run.status === "running" || run.status === "queued");
+    if (active) {
+      setActiveRunId(active.id);
+      setRunning(true);
+    } else if (!streamController.current) {
+      setActiveRunId(null);
+      setRunning(false);
+    }
+  }, [runsQuery.data?.items]);
 
   useEffect(() => {
     if (traceHistoryQuery.data) setTraceEvents(traceHistoryQuery.data);
@@ -236,7 +318,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
   useEffect(() => {
     if (!messagesQuery.data) return;
     const next = messagesQuery.data.items.map((message) => toMessage(message, resources));
-    setMessages((current) => next.map((message) => {
+    setMessages((current) => {
+      const hydrated = next.map((message) => {
       if (message.role !== "assistant") return message;
       const existing = current.find((item): item is AssistantMessage => item.role === "assistant" && item.id === message.id);
       const historicalOutputs = (traceReplay.outputsByMessage.get(message.id) ?? []).map((output): Extract<MessageBlock, { type: "file" }> => ({
@@ -248,9 +331,33 @@ export function ChatPage({ chatId }: { chatId: string }) {
       return trace?.length || uniqueOutputs.length
         ? { ...message, trace, blocks: [...message.blocks, ...uniqueOutputs.filter((output) => !message.blocks.some((block) => block.type === "file" && block.id === output.id))] }
         : message;
-    }));
+      });
+      const persistedIds = new Set(hydrated.map((message) => message.id));
+      // Never let an older query result erase a just-submitted question or a
+      // live assistant placeholder before the backend has returned it.
+      const liveOnly = current.filter((message) => !persistedIds.has(message.id) && (
+        // The POST has already returned by this point, but TanStack Query may
+        // still hold a pre-send messages response while an SSE trace event
+        // arrives. Keep that user bubble until the next messages refresh.
+        message.role === "user"
+        || (message.role === "assistant" && message.status === "running")
+      ));
+      return [...hydrated, ...liveOnly];
+    });
     setActiveSection((current) => current ?? next.find((message) => message.role === "user")?.id);
   }, [messagesQuery.data, resources, traceReplay]);
+
+  useEffect(() => {
+    if (!messagesQuery.data || !latestQuestionId || initiallyPositionedChatRef.current === chatId) return;
+    const frame = requestAnimationFrame(() => {
+      const viewport = chatScrollRef.current;
+      if (!viewport) return;
+      viewport.scrollTop = viewport.scrollHeight;
+      setActiveSection(latestQuestionId);
+      initiallyPositionedChatRef.current = chatId;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [chatId, latestQuestionId, messagesQuery.data]);
 
   useEffect(() => {
     if (!models.length) return;
@@ -266,7 +373,17 @@ export function ChatPage({ chatId }: { chatId: string }) {
     }
   }, [effort, selectedModel]);
 
-  useEffect(() => () => streamController.current?.abort(), []);
+  const resizeComposer = useCallback((element: HTMLTextAreaElement | null) => {
+    if (!element) return;
+    element.style.height = "auto";
+    const maxHeight = 104; // roughly four compact text lines
+    element.style.height = `${Math.min(Math.max(element.scrollHeight, 36), maxHeight)}px`;
+    element.style.overflowY = element.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, []);
+
+  useEffect(() => {
+    resizeComposer(textareaRef.current);
+  }, [draft, resizeComposer]);
 
   useEffect(() => {
     attachmentsRef.current = attachments;
@@ -310,16 +427,13 @@ export function ChatPage({ chatId }: { chatId: string }) {
     setRunning(true);
     setError(null);
     if (input.type === "message") {
-      setMessages((current) => [
-        ...current,
-        {
+      setMessages((current) => appendMessageOnce(current, {
           id: placeholderId,
           role: "assistant",
           status: "running",
           createdAt: new Date().toISOString(),
           blocks: [{ type: "markdown", content: "" }],
-        },
-      ]);
+        }));
     }
 
     function updateAssistant(update: (message: AssistantMessage) => AssistantMessage) {
@@ -351,11 +465,9 @@ export function ChatPage({ chatId }: { chatId: string }) {
             });
             assistantId = id;
             if (queued) {
-              setMessages((current) => [
-                ...current,
+              setMessages((current) => appendMessageOnce(appendMessageOnce(current,
                 { id: `queued-user-${nextRunId}`, role: "user", content: queued.content, createdAt: new Date().toISOString() },
-                { id, role: "assistant", status: "running", createdAt: new Date().toISOString(), blocks: [{ type: "markdown", content: "" }] },
-              ]);
+              ), { id, role: "assistant", status: "running", createdAt: new Date().toISOString(), blocks: [{ type: "markdown", content: "" }] }));
             }
           } else if (typeof id === "string") {
             assistantId = id;
@@ -497,6 +609,9 @@ export function ChatPage({ chatId }: { chatId: string }) {
       setRunning(false);
       await queryClient.invalidateQueries({ queryKey: ["chat", chatId, "messages"] });
       await queryClient.invalidateQueries({ queryKey: ["chat", chatId] });
+      await queryClient.invalidateQueries({ queryKey: ["activity"] });
+      await queryClient.invalidateQueries({ queryKey: ["history"] });
+      await queryClient.invalidateQueries({ queryKey: ["sidebar", "recent-chats"] });
     }
   }, [chatId, queryClient]);
 
@@ -518,6 +633,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
 
   function selectFile(file: ContextFile) {
     setSelectedFile(file);
+    setPreviewExpanded(false);
     setPanelOpen(true);
   }
 
@@ -529,6 +645,20 @@ export function ChatPage({ chatId }: { chatId: string }) {
   function downloadFileById(id: string) {
     const resource = resources.get(id);
     if (resource) void downloadResource(resource.download_url, resource.name);
+  }
+
+  async function toggleResourceLibrary(file: ContextFile) {
+    try {
+      if (file.in_library) await removeResourceFromLibrary(file.id);
+      else await addResourceToLibrary(file.id);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["chat", chatId, "datasets"] }),
+        queryClient.invalidateQueries({ queryKey: ["chat", chatId, "artifacts"] }),
+        queryClient.invalidateQueries({ queryKey: ["library"] }),
+      ]);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update the Library.");
+    }
   }
 
   function togglePanel() {
@@ -563,15 +693,38 @@ export function ChatPage({ chatId }: { chatId: string }) {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = draft.trim();
-    if (!content || !selectedModel || running) return;
+    if (!content || !selectedModel || running || submittingRef.current) return;
+    // React state updates are asynchronous; this guard closes the short window
+    // where a double-click/Enter could create a second identical message.
+    submittingRef.current = true;
+    const clientRequestId = crypto.randomUUID();
+    const temporaryUserId = `user-pending-${clientRequestId}`;
+    const submittedAttachments = [...attachments];
+    const optimisticUser: ChatMessage = {
+      id: temporaryUserId,
+      role: "user",
+      content,
+      createdAt: new Date().toISOString(),
+      attachments: submittedAttachments.map((attachment) => ({
+        id: attachment.id,
+        name: attachment.file.name,
+        kind: fileType(attachment.file),
+        size: formatFileSize(attachment.file.size),
+      })),
+    };
+    // Show the question before the network request starts. Streaming assistant
+    // content is deliberately added separately by runMessage.
+    setMessages((current) => appendMessageOnce(current, optimisticUser));
+    setDraft("");
     setRunning(true);
     setError(null);
     try {
       const userMessage = await createMessage(chatId, {
         content,
-        client_request_id: crypto.randomUUID(),
+        client_request_id: clientRequestId,
       });
-      for (const attachment of attachments) {
+      setMessages((current) => replaceMessageId(current, temporaryUserId, toMessage(userMessage, resources)));
+      for (const attachment of submittedAttachments) {
         await uploadResource({
           file: attachment.file,
           scopeType: "chat",
@@ -580,8 +733,6 @@ export function ChatPage({ chatId }: { chatId: string }) {
           clientUploadId: attachment.id,
         });
       }
-      setMessages((current) => [...current, toMessage(userMessage, resources)]);
-      setDraft("");
       setAttachments((current) => {
         current.forEach((attachment) => {
           if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
@@ -601,11 +752,15 @@ export function ChatPage({ chatId }: { chatId: string }) {
         userMessageId: userMessage.id,
         modelId: selectedModel.id,
         effort: effort || null,
-        clientRequestId: crypto.randomUUID(),
+        clientRequestId,
       });
     } catch (caught) {
       setRunning(false);
+      setMessages((current) => current.filter((message) => message.id !== temporaryUserId));
+      setDraft(content);
       setError(caught instanceof Error ? caught.message : "Could not send this message.");
+    } finally {
+      submittingRef.current = false;
     }
   }
 
@@ -714,7 +869,15 @@ export function ChatPage({ chatId }: { chatId: string }) {
             sections.current.get(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
           }}
         />
-        <div className="col-start-2 row-start-2 min-h-0 overflow-y-auto">
+        <div
+          ref={chatScrollRef}
+          className="col-start-2 row-start-2 min-h-0 overflow-y-auto"
+          onScroll={(event) => {
+            const element = event.currentTarget;
+            const atEnd = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
+            if (atEnd && latestQuestionId) setActiveSection(latestQuestionId);
+          }}
+        >
           {messagesQuery.isError ? (
             <div role="alert" className="mx-auto max-w-3xl px-5 py-10 text-sm text-red-300">
               Could not load this conversation. Is the backend running on port 8000?
@@ -823,9 +986,10 @@ export function ChatPage({ chatId }: { chatId: string }) {
               <label htmlFor="chat-message" className="sr-only">Ask anything about your data</label>
               <textarea
                 id="chat-message"
+                ref={textareaRef}
                 value={draft}
                 disabled={messagesQuery.isError}
-                onChange={(event) => { setDraft(event.target.value); setError(null); setComposerStatus(null); }}
+                onChange={(event) => { setDraft(event.target.value); resizeComposer(event.currentTarget); setError(null); setComposerStatus(null); }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
@@ -834,7 +998,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
                 }}
                 rows={1}
                 placeholder={running ? "Type a follow-up to queue or steer…" : "Ask anything about your data…"}
-                className="max-h-32 min-h-8 min-w-0 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-60"
+                className="min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm leading-5 outline-none placeholder:text-muted-foreground disabled:opacity-60"
               />
               <button type="submit" disabled={!draft.trim() || running || !selectedModel} aria-label="Send message" className="grid size-8 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground disabled:opacity-30">
                 {running ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
@@ -868,12 +1032,25 @@ export function ChatPage({ chatId }: { chatId: string }) {
             artifacts={artifactsQuery.data?.items ?? []}
             onClose={() => { setSelectedFile(null); setPanelOpen(false); }}
             onFileSelect={selectFile}
+            onLibraryToggle={toggleResourceLibrary}
           />
         </div>
       ) : null}
       {selectedFile ? (
-        <div className="absolute inset-y-0 right-0 z-50 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:w-[340px] xl:max-w-none">
-          <FilePreviewSidebar file={selectedFile} onBack={() => setSelectedFile(null)} onClose={() => setSelectedFile(null)} />
+        <div className={`absolute inset-y-0 right-0 z-50 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:max-w-none ${previewExpanded ? "xl:w-[min(75vw,1200px)]" : "xl:w-[min(52vw,820px)]"}`}>
+          <FilePreviewSidebar
+            file={selectedFile}
+            chatId={chatId}
+            workspaceId={chatQuery.data?.workspace_id ?? null}
+            expanded={previewExpanded}
+            onToggleExpanded={() => setPreviewExpanded((current) => !current)}
+            onBack={() => { setPreviewExpanded(false); setSelectedFile(null); }}
+            onClose={() => { setPreviewExpanded(false); setSelectedFile(null); }}
+            onResourceSaved={() => {
+              void queryClient.invalidateQueries({ queryKey: ["chat", chatId, "datasets"] });
+              void queryClient.invalidateQueries({ queryKey: ["chat", chatId, "artifacts"] });
+            }}
+          />
         </div>
       ) : null}
     </section>

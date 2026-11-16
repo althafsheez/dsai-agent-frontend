@@ -113,10 +113,12 @@ export function ConnectorsPage() {
       </div>
     </div>
 
+    {/* Featured banner is intentionally hidden for now.
     <section className="relative mt-7 overflow-hidden rounded-xl border border-slate/30 bg-[linear-gradient(120deg,#293547,#1b2636_55%,#172232)] px-7 py-7 sm:px-10 sm:py-8">
       <div className="relative z-10 max-w-xl"><p className="text-xs font-medium uppercase tracking-[0.12em] text-slate">Featured</p><h2 className="mt-2 text-2xl font-semibold">Data Analysis</h2><p className="mt-2 text-sm leading-relaxed text-foreground/75">Analyze, explore, and visualize your data with prepared skills, data sources, and productivity apps.</p><Button type="button" className="mt-4" onClick={() => setShowAddHelp(true)}>Add</Button></div>
       <div className="absolute -right-6 top-1/2 hidden -translate-y-1/2 items-end gap-4 opacity-80 sm:flex"><div className="relative h-28 w-24 rounded-[50%] border-2 border-slate/60 bg-slate/10 before:absolute before:inset-x-0 before:top-8 before:h-16 before:border-y-2 before:border-slate/50" /><div className="flex h-28 w-44 items-end justify-center gap-3 rounded-2xl border-2 border-slate/60 bg-slate/15 p-5 shadow-2xl">{[24, 44, 63, 86].map((height) => <span key={height} className="w-5 rounded-t bg-slate" style={{ height: `${height}%` }} />)}</div></div>
     </section>
+    */}
 
     {connectors.length ? <div className="mt-8 space-y-9">
       {popular.length > 0 && <section aria-labelledby="popular-connectors"><div className="mb-3 flex items-center justify-between"><h2 id="popular-connectors" className="text-base font-semibold">Popular connectors</h2><button type="button" onClick={() => { setCategory("all"); setQuery(""); setDataOnly(false); }} className="flex items-center gap-2 text-xs font-medium hover:text-slate">Show all <ArrowRight className="size-3.5" /></button></div><div className="grid gap-3 lg:grid-cols-2">{popular.map((connector) => <ConnectorRow key={connector.id} connector={connector} />)}</div></section>}

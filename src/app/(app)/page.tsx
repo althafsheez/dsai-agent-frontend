@@ -1,9 +1,9 @@
 import { WelcomeComposer } from "@/features/landing/components/welcome-composer";
+import { RecentChats } from "@/features/landing/components/recent-chats";
 import Link from "next/link";
 import {
   ArrowRight,
   BarChart3,
-  Clock3,
   Folder,
   Network,
   Pin,
@@ -14,39 +14,6 @@ const fraunces = Fraunces({
   subsets: ["latin"],
   weight: "400",
 });
-const recentActivity = [
-  {
-    title: "Q3 revenue cohort breakdown",
-    detail: "Group MRR by acquisition channel and compute…",
-    source: "STRIPE_CHARGES_20…",
-    time: "2h ago",
-  },
-  {
-    title: "Churn drivers — enterprise segment",
-    detail: "Which features correlate with 90-day retention…",
-    source: "AMPLITUDE_EVENTS",
-    time: "5h ago",
-  },
-  {
-    title: "Funnel anomaly w/o 2025-11-08",
-    detail: "Detect the drop in checkout completion and…",
-    source: "WAREHOUSE.CHECKOUT",
-    time: "yesterday",
-  },
-  {
-    title: "ARR forecast — bottoms-up",
-    detail: "Project next-quarter ARR by segment using…",
-    source: "SALESFORCE_OPPS",
-    time: "running",
-  },
-  {
-    title: "Marketing spend efficiency",
-    detail: "Compare CAC by channel against LTV cohorts…",
-    source: "GA4_ACQUISITION",
-    time: "2d ago",
-  },
-] as const;
-
 const pinnedItems = [
   {
     title: "Customer Churn Analysis",
@@ -112,30 +79,7 @@ export default function WelcomePage() {
               All activity <ArrowRight className="size-3.5" />
             </Link>
           </div>
-          <div className="space-y-0.5">
-            {recentActivity.map((item) => (
-              <div
-                key={item.title}
-                className="group grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-4 rounded-lg px-3 py-2.5 transition-colors hover:bg-surface sm:grid-cols-[minmax(0,1fr)_122px_74px]"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-[15px] font-medium text-foreground">
-                    {item.title}
-                  </p>
-                  <p className="mt-1 truncate text-[12px] text-muted-foreground">
-                    {item.detail}
-                  </p>
-                </div>
-                <p className="hidden self-center truncate font-mono text-[10px] uppercase text-muted-foreground sm:block">
-                  {item.source}
-                </p>
-                <p className="flex items-center justify-end gap-1.5 self-center whitespace-nowrap text-[12px] text-muted-foreground">
-                  <Clock3 className="size-3.5" />
-                  {item.time}
-                </p>
-              </div>
-            ))}
-          </div>
+          <RecentChats />
         </section>
 
         <section aria-labelledby="pinned-heading">

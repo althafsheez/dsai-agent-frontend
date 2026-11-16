@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "@fontsource-variable/inter";
+import "@univerjs/preset-sheets-core/lib/index.css";
 import "./globals.css";
 import { Providers } from "./providers";
 
@@ -10,4 +11,3 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return <html lang="en"><body><Providers>{children}</Providers></body></html>;
 }
-

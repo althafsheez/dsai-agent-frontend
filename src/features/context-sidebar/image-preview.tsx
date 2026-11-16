@@ -34,8 +34,8 @@ export function ImagePreview({ artifact }: ImagePreviewProps) {
   if (!url) return <div className="grid min-h-48 place-items-center rounded-md border border-dashed text-xs text-muted-foreground">Loading image preview…</div>;
 
   return (
-    <div className="relative min-h-56 w-full overflow-hidden rounded-md border bg-background">
-      <Image src={url} alt={`Preview of ${artifact.name}`} fill sizes="320px" className="object-contain" unoptimized />
+    <div className="relative min-h-[min(70vh,640px)] w-full overflow-hidden rounded-md border bg-background">
+      <Image src={url} alt={`Preview of ${artifact.name}`} fill sizes="(min-width: 1280px) 820px, 100vw" className="object-contain" unoptimized />
     </div>
   );
 }

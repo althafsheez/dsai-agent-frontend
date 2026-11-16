@@ -15,6 +15,7 @@ export function ContextSidebar({
   artifacts,
   onClose,
   onFileSelect,
+  onLibraryToggle,
 }: ContextSidebarProps) {
   const [tab, setTab] = useState<ContextTab>("datasets");
 
@@ -27,11 +28,11 @@ export function ContextSidebar({
         </button>
       </header>
       <ContextTabs value={tab} onValueChange={setTab} />
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 overflow-hidden">
         {tab === "datasets" ? (
-          <DatasetsPanel datasets={datasets} workspaceId={workspaceId} onFileSelect={onFileSelect} />
+          <DatasetsPanel datasets={datasets} workspaceId={workspaceId} onFileSelect={onFileSelect} onLibraryToggle={onLibraryToggle} />
         ) : (
-          <ArtifactsPanel artifacts={artifacts} onFileSelect={onFileSelect} />
+          <ArtifactsPanel artifacts={artifacts} onFileSelect={onFileSelect} onLibraryToggle={onLibraryToggle} />
         )}
       </div>
       <QuickAssistant key={`${chatId}:${workspaceId ?? "standalone"}`} chatId={chatId} workspaceId={workspaceId} />

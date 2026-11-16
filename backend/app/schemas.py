@@ -1,13 +1,22 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 class APIModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("*", when_used="json", check_fields=False)
+    def serialize_utc_datetimes(self, value: Any) -> Any:
+        """SQLite drops timezone metadata; API timestamps must still be unambiguous UTC."""
+        if not isinstance(value, datetime):
+            return value
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
 
 class UserResponse(APIModel):
@@ -19,6 +28,7 @@ class UserResponse(APIModel):
 class WorkspaceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     description: str | None = Field(default=None, max_length=4000)
+    ai_context: str | None = Field(default=None, max_length=100_000)
 
 
 class WorkspaceUpdate(BaseModel):
@@ -38,6 +48,47 @@ class WorkspaceResponse(APIModel):
     deleted_at: datetime | None
 
 
+class WorkspaceContextFileCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=240)
+    content: str = Field(default="", max_length=100_000)
+
+
+class WorkspaceContextFileUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=240)
+    content: str | None = Field(default=None, max_length=100_000)
+
+
+class WorkspaceContextFileResponse(APIModel):
+    id: str
+    workspace_id: str
+    name: str
+    content: str
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkflowCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=4000)
+
+
+class WorkflowResponse(APIModel):
+    id: str
+    workspace_id: str | None
+    created_by: str
+    name: str
+    description: str | None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkflowChatCreate(BaseModel):
+    chat_id: str
+    relation_type: Literal["referenced", "created_by_run"] = "referenced"
+
+
 class ChatCreate(BaseModel):
     workspace_id: str | None = None
     content: str = Field(min_length=1, max_length=100_000)
@@ -48,6 +99,7 @@ class ChatUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     workspace_id: str | None = None
     archived: bool | None = None
+    is_unread: bool | None = None
 
 
 class ChatResponse(APIModel):
@@ -61,6 +113,12 @@ class ChatResponse(APIModel):
     archived_at: datetime | None
     deleted_at: datetime | None
     first_run_at: datetime | None
+    is_unread: bool
+    active_run_status: str | None = None
+
+
+class ChatPresence(BaseModel):
+    viewing: bool
 
 
 class MessageResponse(APIModel):

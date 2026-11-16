@@ -20,6 +20,8 @@ class RunCoordinator:
 
     def __init__(self) -> None:
         self._cancellations: dict[str, str] = {}
+        self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._viewers: dict[str, set[str]] = {}
 
     def request_cancel(self, run_id: str, reason: str) -> None:
         self._cancellations[run_id] = reason
@@ -29,6 +31,27 @@ class RunCoordinator:
 
     def clear(self, run_id: str) -> None:
         self._cancellations.pop(run_id, None)
+
+    def start(self, run_id: str, coroutine) -> None:
+        existing = self._tasks.get(run_id)
+        if existing is not None and not existing.done():
+            coroutine.close()
+            return
+        task = asyncio.create_task(coroutine, name=f"agent-run:{run_id}")
+        self._tasks[run_id] = task
+        task.add_done_callback(lambda _task: self._tasks.pop(run_id, None))
+
+    def set_viewing(self, chat_id: str, user_id: str, viewing: bool) -> None:
+        viewers = self._viewers.setdefault(chat_id, set())
+        if viewing:
+            viewers.add(user_id)
+        else:
+            viewers.discard(user_id)
+        if not viewers:
+            self._viewers.pop(chat_id, None)
+
+    def is_viewing(self, chat_id: str) -> bool:
+        return bool(self._viewers.get(chat_id))
 
 
 def _validate_provider(provider: LLMProvider, model_id: str, effort: str | None) -> None:
@@ -92,6 +115,7 @@ def prepare_run(
     session.add(run)
     if chat.first_run_at is None:
         chat.first_run_at = utc_now()
+    chat.updated_at = utc_now()
     session.commit()
     session.refresh(run)
     return run
@@ -341,6 +365,9 @@ def _finalize_cancelled(session: Session, run: AgentRun, reason: str) -> Executi
         assistant.status = run.status
     if user_message is not None:
         user_message.status = run.status
+    chat = session.get(Chat, run.chat_id)
+    if chat is not None:
+        chat.updated_at = utc_now()
     session.commit()
     return _persist_event(
         session,
@@ -363,6 +390,9 @@ async def stream_run(
                 return
             run.status = "running"
             run.started_at = utc_now()
+            chat = session.get(Chat, run.chat_id)
+            if chat is not None:
+                chat.updated_at = utc_now()
             user_message = session.get(Message, run.user_message_id)
             assistant = session.get(Message, run.assistant_message_id)
             if user_message is not None:
@@ -485,6 +515,10 @@ async def stream_run(
             user_message = session.get(Message, run.user_message_id)
             run.status = "completed"
             run.finished_at = utc_now()
+            chat = session.get(Chat, run.chat_id)
+            if chat is not None:
+                chat.updated_at = utc_now()
+                chat.is_unread = not coordinator.is_viewing(run.chat_id)
             if user_message is not None:
                 user_message.status = "completed"
             if assistant is not None:
@@ -528,6 +562,10 @@ async def stream_run(
                     assistant.status = "failed"
                 if user_message is not None:
                     user_message.status = "failed"
+                chat = session.get(Chat, run.chat_id)
+                if chat is not None:
+                    chat.updated_at = utc_now()
+                    chat.is_unread = not coordinator.is_viewing(run.chat_id)
                 session.commit()
                 failed = _persist_event(
                     session,
@@ -550,6 +588,10 @@ async def stream_run(
                     assistant.status = "failed"
                 if user_message is not None:
                     user_message.status = "failed"
+                chat = session.get(Chat, run.chat_id)
+                if chat is not None:
+                    chat.updated_at = utc_now()
+                    chat.is_unread = not coordinator.is_viewing(run.chat_id)
                 session.commit()
                 failed = _persist_event(
                     session,
@@ -571,6 +613,57 @@ async def stream_run(
         coordinator.clear(run_id)
 
 
+async def execute_run_in_background(
+    session_factory: sessionmaker[Session],
+    run_id: str,
+    runner: AgentRunner,
+    coordinator: RunCoordinator,
+) -> None:
+    """Consume the execution generator independently from any browser connection."""
+    async for _ in stream_run(session_factory, run_id, runner, coordinator):
+        pass
+
+
+async def stream_persisted_events(
+    session_factory: sessionmaker[Session],
+    run_id: str,
+) -> AsyncIterator[str]:
+    """Subscribe to durable events; disconnecting does not stop execution."""
+    sequences: dict[str, int] = {}
+    terminal = {"completed", "failed", "cancelled", "interrupted"}
+    with session_factory() as session:
+        initial_run = session.get(AgentRun, run_id)
+        if initial_run is None:
+            return
+        chat_id = initial_run.chat_id
+        started_at = initial_run.created_at
+    while True:
+        with session_factory() as session:
+            runs = list(session.scalars(
+                select(AgentRun)
+                .where(AgentRun.chat_id == chat_id, AgentRun.created_at >= started_at)
+                .order_by(AgentRun.created_at, AgentRun.id)
+            ))
+            events: list[ExecutionEvent] = []
+            for run in runs:
+                events.extend(session.scalars(
+                    select(ExecutionEvent)
+                    .where(
+                        ExecutionEvent.run_id == run.id,
+                        ExecutionEvent.sequence > sequences.get(run.id, 0),
+                    )
+                    .order_by(ExecutionEvent.sequence)
+                ))
+            all_terminal = bool(runs) and all(run.status in terminal for run in runs)
+            initial_status = next((run.status for run in runs if run.id == run_id), None)
+        for event in events:
+            sequences[event.run_id] = event.sequence
+            yield _sse(event)
+        if (all_terminal or initial_status in {"failed", "cancelled", "interrupted"}) and not events:
+            return
+        await asyncio.sleep(0.1)
+
+
 def reconcile_stale_runs(session: Session) -> None:
     now = utc_now()
     for run in session.scalars(select(AgentRun).where(AgentRun.status == "running")):
@@ -578,6 +671,10 @@ def reconcile_stale_runs(session: Session) -> None:
         run.finished_at = now
         run.error_code = "backend_restart"
         run.error_detail = "Run was interrupted by a backend restart."
+        chat = session.get(Chat, run.chat_id)
+        if chat is not None:
+            chat.is_unread = True
+            chat.updated_at = now
     for run in session.scalars(select(AgentRun).where(AgentRun.status == "queued")):
         run.status = "cancelled"
         run.finished_at = now
