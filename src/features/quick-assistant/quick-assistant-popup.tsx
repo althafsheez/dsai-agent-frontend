@@ -16,6 +16,8 @@ interface QuickAssistantPopupProps {
   onMinimize: () => void;
   onRestore: () => void;
   onClose: () => void;
+  /** Asked once as soon as the assistant is ready, e.g. from the `/btw` slash command. */
+  autoAsk?: string;
 }
 interface QuickMessage { id: string; role: "user" | "assistant"; content: string; status: string; }
 
@@ -28,7 +30,7 @@ function compactText(content: string) {
     : part.startsWith("`") && part.endsWith("`") ? <code key={index} className="rounded bg-raised px-1 font-mono text-[11px]">{part.slice(1, -1)}</code> : part);
 }
 
-export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFileSelect, minimized, onMinimize, onRestore, onClose }: QuickAssistantPopupProps) {
+export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFileSelect, minimized, onMinimize, onRestore, onClose, autoAsk }: QuickAssistantPopupProps) {
   const inputId = useId();
   const titleId = useId();
   const [draft, setDraft] = useState("");
@@ -78,7 +80,19 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const question = draft.trim();
+    await ask(draft.trim());
+  }
+
+  const autoAsked = useRef(false);
+  useEffect(() => {
+    if (!autoAsk || autoAsked.current || !selectedModel || loadingHistory) return;
+    autoAsked.current = true;
+    void ask(autoAsk);
+    // ask reads the latest state when called; it is not a trigger for re-running this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAsk, selectedModel, loadingHistory]);
+
+  async function ask(question: string) {
     if (!question || !selectedModel || running) return;
     const requestId = crypto.randomUUID();
     const temporaryAssistantId = `quick-pending-${requestId}`;
