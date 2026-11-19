@@ -34,6 +34,21 @@ describe("QuickAssistantPopup", () => {
     );
   });
 
+  it("starts compact, expands after sending, and lets the user shrink it again", async () => {
+    const user = userEvent.setup();
+    render(<QuickAssistantPopup chatId="chat-1" snapshotMessageId={null} resources={[]} onFileSelect={vi.fn()} onClose={vi.fn()} />);
+    const dialog = screen.getByRole("dialog", { name: "Quick Assistant" });
+    expect(dialog).toHaveAttribute("data-expanded", "false");
+
+    await screen.findByPlaceholderText("Ask a side question…");
+    await user.type(screen.getByRole("textbox", { name: "Ask Quick Assistant" }), "Short question{Enter}");
+    expect(await screen.findByText("A concise side answer.")).toBeInTheDocument();
+    expect(dialog).toHaveAttribute("data-expanded", "true");
+
+    await user.click(screen.getByRole("button", { name: "Shrink Quick Assistant" }));
+    expect(dialog).toHaveAttribute("data-expanded", "false");
+  });
+
   it("closes from its button and Escape", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();

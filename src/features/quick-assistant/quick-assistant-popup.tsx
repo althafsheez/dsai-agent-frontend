@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp, Database, FileText, LoaderCircle, Sparkles, X } from "lucide-react";
+import { ArrowUp, Database, FileText, LoaderCircle, Maximize2, Minimize2, Sparkles, X } from "lucide-react";
 import { FormEvent, useEffect, useId, useRef, useState } from "react";
 import { getModels, getQuickAssistantMessages, streamQuickAssistantMessage, type ExecutionEvent } from "@/lib/api";
 import type { ContextFile } from "@/features/context-sidebar";
@@ -14,6 +14,9 @@ interface QuickAssistantPopupProps {
   onClose: () => void;
 }
 interface QuickMessage { id: string; role: "user" | "assistant"; content: string; status: string; }
+
+// A draft this long reads better in the larger panel, so typing it expands the popup before sending.
+const LONG_DRAFT_CHARS = 140;
 
 function compactText(content: string) {
   return content.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, index) => part.startsWith("**") && part.endsWith("**")
@@ -29,6 +32,9 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  // null follows the automatic rule (expand once a question is sent or the draft gets long); a boolean is the user's own choice.
+  const [expandedOverride, setExpandedOverride] = useState<boolean | null>(null);
+  const [sentThisSession, setSentThisSession] = useState(false);
   const [selectedModel, setSelectedModel] = useState<{ id: string; default_effort: string | null } | null>(null);
   const controller = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -46,7 +52,9 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
     return () => { active = false; };
   }, [chatId]);
   useEffect(() => () => controller.current?.abort(), []);
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  // The textarea stays disabled until a model loads, so focus once it is enabled; otherwise keys reach the header toggle.
+  const inputReady = selectedModel !== null && !running;
+  useEffect(() => { if (inputReady) inputRef.current?.focus(); }, [inputReady]);
   useEffect(() => {
     const viewport = scrollRef.current;
     if (viewport) viewport.scrollTop = viewport.scrollHeight;
@@ -64,7 +72,7 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
     const requestId = crypto.randomUUID();
     const temporaryAssistantId = `quick-pending-${requestId}`;
     setMessages((current) => [...current, { id: `quick-user-${requestId}`, role: "user", content: question, status: "completed" }, { id: temporaryAssistantId, role: "assistant", content: "", status: "running" }]);
-    setDraft(""); setError(null); setRunning(true);
+    setDraft(""); setError(null); setRunning(true); setSentThisSession(true);
     const activeController = new AbortController(); controller.current = activeController;
     let assistantId = temporaryAssistantId;
     try {
@@ -91,12 +99,15 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
     }
   }
 
+  const expanded = expandedOverride ?? (sentThisSession || draft.length > LONG_DRAFT_CHARS || draft.includes("\n"));
+
   return (
     <section
       role="dialog"
       aria-modal="false"
       aria-labelledby={titleId}
-      className="fixed right-4 top-16 z-[70] flex h-[min(440px,calc(100dvh-6rem))] w-[min(360px,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-border-strong bg-sidebar shadow-2xl"
+      data-expanded={expanded}
+      className={`fixed right-4 top-16 z-[70] flex origin-top-right animate-pop-in flex-col overflow-hidden rounded-xl border border-border-strong bg-sidebar shadow-2xl transition-[width,height] duration-300 ease-spring ${expanded ? "h-[min(640px,calc(100dvh-6rem))] w-[min(560px,calc(100vw-2rem))]" : "h-[min(440px,calc(100dvh-6rem))] w-[min(360px,calc(100vw-2rem))]"}`}
     >
       <header className="flex shrink-0 items-start gap-2 border-b px-4 py-3">
         <Sparkles className="mt-0.5 size-4 shrink-0 text-sage" />
@@ -104,6 +115,15 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
           <h2 id={titleId} className="text-sm font-medium text-foreground">Quick Assistant</h2>
           <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">Side questions about this chat so far. Not added to the main chat.</p>
         </div>
+        <button
+          type="button"
+          onClick={() => setExpandedOverride(!expanded)}
+          aria-label={expanded ? "Shrink Quick Assistant" : "Expand Quick Assistant"}
+          title={expanded ? "Shrink" : "Expand"}
+          className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground"
+        >
+          {expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+        </button>
         <button type="button" onClick={onClose} aria-label="Close Quick Assistant" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground">
           <X className="size-4" />
         </button>
@@ -133,12 +153,12 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
         <textarea
           ref={inputRef}
           id={inputId}
-          rows={1}
+          rows={expanded ? 2 : 1}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           placeholder={selectedModel ? "Ask a side question…" : "Assistant unavailable"}
           disabled={!selectedModel || running}
-          className="max-h-24 min-h-8 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-1.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+          className={`${expanded ? "max-h-40" : "max-h-24"} min-h-8 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-1.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed`}
           onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }}
         />
         <button type="submit" disabled={!draft.trim() || !selectedModel || running} aria-label="Send to Quick Assistant" className="grid size-8 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground transition-opacity disabled:opacity-30">
