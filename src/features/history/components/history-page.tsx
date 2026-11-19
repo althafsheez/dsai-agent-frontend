@@ -51,7 +51,18 @@ export function HistoryPage() {
         deleted_at: chat.deleted_at,
         is_unread: chat.is_unread,
       }));
-      return chatRecords;
+      const workspaceRecords: HistoryRecord[] = workspaceList.items.map((workspace) => ({
+        kind: "workspace",
+        id: workspace.id,
+        name: workspace.name,
+        workspace_id: null,
+        workspace_name: null,
+        author: currentDemoUser,
+        updated_at: workspace.updated_at,
+        archived_at: workspace.archived_at,
+        deleted_at: workspace.deleted_at,
+      }));
+      return [...chatRecords, ...workspaceRecords];
     },
     refetchInterval: 2000,
   });
@@ -92,8 +103,8 @@ export function HistoryPage() {
 
   return <section className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
     <header className="mb-6">
-      <h1 className="text-xl font-semibold tracking-tight">History</h1>
-      <p className="mt-1 text-xs text-muted-foreground">View and manage your chats</p>
+      <h1 className="text-xl font-semibold tracking-tight text-foreground">History</h1>
+      <p className="mt-1 text-xs text-muted-foreground">View and manage your chats and workspaces</p>
     </header>
     <HistoryToolbar filters={filters} options={options} onChange={updateFilters} />
     <HistoryTable
