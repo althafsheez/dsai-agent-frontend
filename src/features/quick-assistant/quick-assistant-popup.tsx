@@ -47,6 +47,7 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
   const controller = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const popupRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -73,7 +74,13 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
   }, [minimized]);
   useEffect(() => {
     if (minimized) return;
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") onMinimize(); };
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Escape already handled elsewhere (slash menu, dialogs) or typed in another field must not minimize this popup.
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const active = document.activeElement;
+      const typingElsewhere = active instanceof HTMLElement && active.closest("input, textarea, select, [contenteditable=true]") && !popupRef.current?.contains(active);
+      if (!typingElsewhere) onMinimize();
+    };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [minimized, onMinimize]);
@@ -129,6 +136,7 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
   return (
     <>
     <section
+      ref={popupRef}
       role="dialog"
       aria-modal="false"
       aria-labelledby={titleId}

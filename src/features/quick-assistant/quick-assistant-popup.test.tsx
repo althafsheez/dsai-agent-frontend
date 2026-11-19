@@ -77,4 +77,22 @@ describe("QuickAssistantPopup", () => {
     expect(screen.getByText("Keep me")).toBeInTheDocument();
     expect(screen.getByText("A concise side answer.")).toBeInTheDocument();
   });
+
+  it("ignores Escape that another control already handled or that was typed in another field", async () => {
+    const user = userEvent.setup();
+    const onMinimize = vi.fn();
+    render(<>
+      <textarea aria-label="Main composer" onKeyDown={(event) => { if (event.key === "Escape") event.preventDefault(); }} />
+      <input aria-label="Other field" />
+      <QuickAssistantPopup chatId="chat-1" snapshotMessageId={null} resources={[]} onFileSelect={vi.fn()} minimized={false} onMinimize={onMinimize} onRestore={vi.fn()} onClose={vi.fn()} />
+    </>);
+    await user.click(screen.getByLabelText("Main composer"));
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByLabelText("Other field"));
+    await user.keyboard("{Escape}");
+    expect(onMinimize).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("textbox", { name: "Ask Quick Assistant" }));
+    await user.keyboard("{Escape}");
+    expect(onMinimize).toHaveBeenCalledOnce();
+  });
 });
