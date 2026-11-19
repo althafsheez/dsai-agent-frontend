@@ -116,7 +116,7 @@ export async function deleteWorkspaceContextFile(workspaceId: string, fileId: st
   if (!response.ok) throw await apiError(response);
 }
 
-export function updateWorkspace(workspaceId: string, input: { name?: string; description?: string | null; archived?: boolean }): Promise<WorkspaceDto> {
+export function updateWorkspace(workspaceId: string, input: { name?: string; description?: string | null; archived?: boolean; pinned?: boolean }): Promise<WorkspaceDto> {
   return requestJson<WorkspaceDto>(`/workspaces/${encodeURIComponent(workspaceId)}`, {
     method: "PATCH",
     body: JSON.stringify(input),
@@ -157,7 +157,7 @@ export function getActivity(): Promise<ApiList<ChatDto>> {
   return requestJson<ApiList<ChatDto>>("/chats/activity/list");
 }
 
-export function updateChat(chatId: string, input: { title?: string; workspace_id?: string | null; archived?: boolean; is_unread?: boolean }): Promise<ChatDto> {
+export function updateChat(chatId: string, input: { title?: string; workspace_id?: string | null; archived?: boolean; pinned?: boolean; is_unread?: boolean }): Promise<ChatDto> {
   return requestJson<ChatDto>(`/chats/${encodeURIComponent(chatId)}`, {
     method: "PATCH",
     body: JSON.stringify(input),

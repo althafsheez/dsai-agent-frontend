@@ -39,6 +39,7 @@ class Workspace(TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pinned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     context_files: Mapped[list["WorkspaceContextFile"]] = relationship(
@@ -57,6 +58,7 @@ class Chat(TimestampMixin, Base):
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     client_request_id: Mapped[str] = mapped_column(String(100))
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pinned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     first_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_unread: Mapped[bool] = mapped_column(Boolean, default=False, index=True)

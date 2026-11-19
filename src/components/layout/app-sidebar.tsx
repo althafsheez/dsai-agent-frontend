@@ -11,6 +11,7 @@ import { SearchDialog } from "./search-dialog";
 import { SidebarSection } from "./sidebar-section";
 import { SidebarNavItem } from "./sidebar-nav-item";
 import { navigation } from "./navigation";
+import { SidebarPinnedList } from "@/features/pinning";
 
 export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
   const collapsed = useUiStore((state) => state.sidebarCollapsed);
@@ -78,9 +79,7 @@ export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
         {!compact && (
           <div className="px-0.5 mt-2">
             <SidebarSection title="Pinned">
-              <p className="text-[11px] leading-relaxed text-muted-foreground/90 py-1">
-                Keep important work close.<br />Your pinned items will appear here.
-              </p>
+              <SidebarPinnedList onNavigate={closeMobile} />
             </SidebarSection>
             <SidebarSection title="Activity">
               {activity.length ? (

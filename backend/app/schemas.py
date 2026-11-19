@@ -35,6 +35,7 @@ class WorkspaceUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=160)
     description: str | None = Field(default=None, max_length=4000)
     archived: bool | None = None
+    pinned: bool | None = None
 
 
 class WorkspaceResponse(APIModel):
@@ -45,6 +46,7 @@ class WorkspaceResponse(APIModel):
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
+    pinned_at: datetime | None
     deleted_at: datetime | None
 
 
@@ -99,6 +101,7 @@ class ChatUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     workspace_id: str | None = None
     archived: bool | None = None
+    pinned: bool | None = None
     is_unread: bool | None = None
 
 
@@ -111,6 +114,7 @@ class ChatResponse(APIModel):
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
+    pinned_at: datetime | None
     deleted_at: datetime | None
     first_run_at: datetime | None
     is_unread: bool

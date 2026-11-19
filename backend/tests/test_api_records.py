@@ -286,3 +286,27 @@ async def test_unread_chat_appears_in_activity_and_opening_marks_it_read(
     assert opened.status_code == 204
     assert (await client.get(f"/api/chats/{chat_id}", headers=demo_headers)).json()["is_unread"] is False
     assert (await client.get("/api/chats/activity/list", headers=demo_headers)).json()["items"] == []
+
+
+async def test_chat_and_workspace_pinning_does_not_reorder(
+    client: AsyncClient, demo_headers: dict[str, str]
+) -> None:
+    chat_id = (await create_chat(client, demo_headers))["chat"]["id"]
+    before = (await client.get(f"/api/chats/{chat_id}", headers=demo_headers)).json()
+
+    pinned = await client.patch(f"/api/chats/{chat_id}", headers=demo_headers, json={"pinned": True})
+    assert pinned.status_code == 200
+    assert pinned.json()["pinned_at"] is not None
+    assert pinned.json()["updated_at"] == before["updated_at"]
+
+    unpinned = await client.patch(f"/api/chats/{chat_id}", headers=demo_headers, json={"pinned": False})
+    assert unpinned.json()["pinned_at"] is None
+
+    workspace = await client.post("/api/workspaces", headers=demo_headers, json={"name": "Pinned workspace"})
+    workspace_id = workspace.json()["id"]
+    pinned_workspace = await client.patch(
+        f"/api/workspaces/{workspace_id}", headers=demo_headers, json={"pinned": True}
+    )
+    assert pinned_workspace.status_code == 200
+    assert pinned_workspace.json()["pinned_at"] is not None
+    assert pinned_workspace.json()["updated_at"] == workspace.json()["updated_at"]

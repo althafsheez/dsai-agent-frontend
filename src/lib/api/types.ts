@@ -24,6 +24,7 @@ export interface WorkspaceDto {
   created_at: string;
   updated_at: string;
   archived_at: string | null;
+  pinned_at: string | null;
   deleted_at: string | null;
 }
 
@@ -57,6 +58,7 @@ export interface ChatDto {
   created_at: string;
   updated_at: string;
   archived_at: string | null;
+  pinned_at: string | null;
   deleted_at: string | null;
   first_run_at: string | null;
   is_unread: boolean;
