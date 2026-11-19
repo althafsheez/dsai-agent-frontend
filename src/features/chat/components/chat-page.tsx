@@ -14,6 +14,7 @@ import {
   FileSearch,
   FileSpreadsheet,
   FileText,
+  Folder,
   Github,
   HardDrive,
   ListPlus,
@@ -55,6 +56,7 @@ import {
   setChatPresence,
   steerRun,
   streamChatRun,
+  updateChat,
   uploadResource,
   type ExecutionEvent,
   type MessageDto,
@@ -793,6 +795,20 @@ export function ChatPage({ chatId }: { chatId: string }) {
     void runMessage({ type: "resume-queue" });
   }
 
+  async function moveChatToWorkspace(newWorkspaceId: string) {
+    try {
+      await updateChat(chatId, { workspace_id: newWorkspaceId });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["chat", chatId] }),
+        queryClient.invalidateQueries({ queryKey: ["workspaces"] }),
+        queryClient.invalidateQueries({ queryKey: ["history"] }),
+      ]);
+      setComposerStatus("Chat moved to workspace.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not move chat to workspace.");
+    }
+  }
+
   return (
     <section className="relative flex min-h-0 flex-1 overflow-hidden">
       <div className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] bg-background">
@@ -940,15 +956,41 @@ export function ChatPage({ chatId }: { chatId: string }) {
               </button>
             </div>
             <input ref={fileInputRef} type="file" multiple accept=".csv,.xls,.xlsx,.parquet,.png,.jpg,.jpeg,.pdf,.txt,.md,.json" className="sr-only" aria-label="Add files to chat" onChange={(event) => { addFiles(event.target.files); event.currentTarget.value = ""; }} />
-            <div className="mt-1.5 flex items-center justify-end gap-2 border-t px-1 pt-2">
-              <label htmlFor="chat-model" className="text-[10px] text-muted-foreground">Model</label>
-              <select id="chat-model" aria-label="Model" value={selectedModel?.id ?? ""} disabled={running || !models.length} onChange={(event) => setModelId(event.target.value)} className="max-w-[180px] rounded border bg-raised px-2 py-1 text-[11px] outline-none focus:border-ring disabled:opacity-50">
-                {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
-              </select>
-              <label htmlFor="chat-effort" className="text-[10px] text-muted-foreground">Effort</label>
-              <select id="chat-effort" aria-label="Reasoning effort" value={effort} disabled={running || !supportedEfforts.length} onChange={(event) => setEffort(event.target.value)} className="rounded border bg-raised px-2 py-1 text-[11px] capitalize outline-none focus:border-ring disabled:opacity-50">
-                {supportedEfforts.map((option) => <option key={option} value={option}>{option}</option>)}
-              </select>
+            <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 px-1 pt-2">
+              <div className="flex items-center gap-1.5">
+                {!chatQuery.data?.workspace_id && (
+                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <Folder className="size-3.5 text-muted-foreground" />
+                    <select
+                      aria-label="Move chat to workspace"
+                      defaultValue=""
+                      disabled={running}
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          void moveChatToWorkspace(e.target.value);
+                          e.target.value = "";
+                        }
+                      }}
+                      className="max-w-[150px] rounded border border-border bg-raised px-2 py-0.5 text-[11px] outline-none text-muted-foreground hover:text-foreground focus:border-ring"
+                    >
+                      <option value="" disabled>Move to workspace…</option>
+                      {(workspacesQuery.data?.items ?? []).map((w) => (
+                        <option key={w.id} value={w.id}>{w.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <label htmlFor="chat-model" className="text-[10px] text-muted-foreground font-medium">Model</label>
+                <select id="chat-model" aria-label="Model" value={selectedModel?.id ?? ""} disabled={running || !models.length} onChange={(event) => setModelId(event.target.value)} className="max-w-[180px] rounded border border-border bg-raised px-2 py-1 text-[11px] outline-none focus:border-ring disabled:opacity-50 text-foreground">
+                  {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+                </select>
+                <label htmlFor="chat-effort" className="text-[10px] text-muted-foreground font-medium">Effort</label>
+                <select id="chat-effort" aria-label="Reasoning effort" value={effort} disabled={running || !supportedEfforts.length} onChange={(event) => setEffort(event.target.value)} className="rounded border border-border bg-raised px-2 py-1 text-[11px] capitalize outline-none focus:border-ring disabled:opacity-50 text-foreground">
+                  {supportedEfforts.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </div>
             </div>
           </div>
           <div className="mx-auto mt-1.5 min-h-4 max-w-3xl text-[11px] text-muted-foreground" aria-live="polite">
