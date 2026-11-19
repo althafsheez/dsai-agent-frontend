@@ -67,6 +67,7 @@ import { takePendingRun } from "../pending-run";
 import { useConversationScroll } from "../use-conversation-scroll";
 import { ChatHeader } from "./chat-header";
 import { QuickAssistantPopup } from "@/features/quick-assistant";
+import { ShareWorkspaceDialog } from "@/features/workspaces/components/share-workspace-dialog";
 import { ConversationNavigator } from "./conversation-navigator";
 import { MessageList } from "./message-list";
 
@@ -194,6 +195,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const conversationScroll = useConversationScroll(messages);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   // Holds the main-chat snapshot taken when Quick Assistant opened; null means closed.
   const [quickAssistant, setQuickAssistant] = useState<{ snapshotMessageId: string | null; minimized: boolean } | null>(null);
   const [selectedFile, setSelectedFile] = useState<ContextFile | null>(null);
@@ -833,6 +835,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
             onToggleRightPanel={togglePanel}
             quickAssistantOpen={quickAssistant !== null && !quickAssistant.minimized}
             onToggleQuickAssistant={toggleQuickAssistant}
+            onShare={chatQuery.data?.workspace_id ? () => setShareOpen(true) : undefined}
           />
         </div>
         <ConversationNavigator
@@ -1015,6 +1018,15 @@ export function ChatPage({ chatId }: { chatId: string }) {
         </form>
       </div>
 
+      {chatQuery.data?.workspace_id ? (
+        <ShareWorkspaceDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          workspaceId={chatQuery.data.workspace_id}
+          workspaceName={workspaceName ?? "this workspace"}
+          subject="chat"
+        />
+      ) : null}
       {quickAssistant ? (
         <QuickAssistantPopup
           key={chatId}

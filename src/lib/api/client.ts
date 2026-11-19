@@ -13,6 +13,8 @@ import type {
   SteeringInstructionDto,
   WorkspaceDto,
   WorkspaceContextFileDto,
+  WorkspaceInviteDto,
+  WorkspaceRole,
   WorkflowDto,
 } from "./types";
 import type { ArtifactResource, DatasetResource } from "@/features/context-sidebar/types";
@@ -89,6 +91,23 @@ export function getWorkspaceChats(workspaceId: string): Promise<ApiList<ChatDto>
 
 export function getWorkspaceContextFiles(workspaceId: string): Promise<ApiList<WorkspaceContextFileDto>> {
   return requestJson<ApiList<WorkspaceContextFileDto>>(`/workspaces/${encodeURIComponent(workspaceId)}/context-files`);
+}
+
+export function getWorkspaceInvites(workspaceId: string): Promise<ApiList<WorkspaceInviteDto>> {
+  return requestJson<ApiList<WorkspaceInviteDto>>(`/workspaces/${encodeURIComponent(workspaceId)}/invites`);
+}
+
+export function inviteToWorkspace(workspaceId: string, input: { email: string; role: WorkspaceRole }): Promise<WorkspaceInviteDto> {
+  return requestJson<WorkspaceInviteDto>(`/workspaces/${encodeURIComponent(workspaceId)}/invites`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function updateWorkspaceInvite(workspaceId: string, inviteId: string, role: WorkspaceRole): Promise<WorkspaceInviteDto> {
+  return requestJson<WorkspaceInviteDto>(`/workspaces/${encodeURIComponent(workspaceId)}/invites/${encodeURIComponent(inviteId)}`, { method: "PATCH", body: JSON.stringify({ role }) });
+}
+
+export async function removeWorkspaceInvite(workspaceId: string, inviteId: string): Promise<void> {
+  const response = await fetch(`${API_ROOT}/workspaces/${encodeURIComponent(workspaceId)}/invites/${encodeURIComponent(inviteId)}`, { method: "DELETE", headers: requestHeaders() });
+  if (!response.ok) throw await apiError(response);
 }
 
 export function getWorkspaceWorkflows(workspaceId: string): Promise<ApiList<WorkflowDto>> {

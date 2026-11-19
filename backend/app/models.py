@@ -83,6 +83,19 @@ class WorkspaceContextFile(TimestampMixin, Base):
     workspace: Mapped[Workspace] = relationship(back_populates="context_files")
 
 
+class WorkspaceInvite(TimestampMixin, Base):
+    """A person invited to a workspace by email. No mail is sent; demo auth cannot sign them in yet."""
+
+    __tablename__ = "workspace_invites"
+    __table_args__ = (UniqueConstraint("workspace_id", "email", name="uq_workspace_invite_email"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    email: Mapped[str] = mapped_column(String(320))
+    role: Mapped[str] = mapped_column(String(16))
+    invited_by: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+
+
 class Workflow(TimestampMixin, Base):
     """Small persisted workflow record; execution remains independent of chats."""
 

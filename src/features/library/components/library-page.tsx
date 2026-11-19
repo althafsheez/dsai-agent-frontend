@@ -18,10 +18,12 @@ import {
   Layers3,
   List,
   Search,
+  Share2,
   Trash2,
   X,
 } from "lucide-react";
 import { FilePreviewSidebar, type ContextFile } from "@/features/context-sidebar";
+import { ShareWorkspaceDialog } from "@/features/workspaces/components/share-workspace-dialog";
 import { formatBytes } from "@/features/context-sidebar/resource-utils";
 import {
   downloadResource,
@@ -183,6 +185,7 @@ export function LibraryPage() {
   const [view, setView] = useState<LibraryView>("grid");
   const [preview, setPreview] = useState<ContextFile | null>(null);
   const [openFolderId, setOpenFolderId] = useState<string | null>(null);
+  const [sharingFolder, setSharingFolder] = useState<LibraryFolder | null>(null);
 
   const libraryQuery = useQuery({ queryKey: ["library"], queryFn: getLibrary });
 
@@ -420,6 +423,9 @@ export function LibraryPage() {
                 <span className="text-muted-foreground/60">/</span>
                 <span className="inline-flex items-center gap-1.5 font-medium text-foreground"><Folder className="size-3.5 text-sage" />{openFolder.name}</span>
                 <span className="text-muted-foreground">· {openFolder.items.length} items</span>
+                <button type="button" onClick={() => setSharingFolder(openFolder)} className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground">
+                  <Share2 className="size-3.5" />Share folder
+                </button>
               </nav>
               {renderItems(openFolder.items)}
             </div>
@@ -430,12 +436,12 @@ export function LibraryPage() {
                   <h2 className="mb-3 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Workspace folders</h2>
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {folders.map((folder) => (
+                      <div key={folder.id} className="group relative">
                       <button
-                        key={folder.id}
                         type="button"
                         onClick={() => setOpenFolderId(folder.id)}
                         aria-label={`Open ${folder.name} folder`}
-                        className="group flex items-center gap-3 rounded-xl border bg-surface/50 p-3 text-left transition-[border-color,background-color,transform] duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:bg-surface"
+                        className="flex w-full items-center gap-3 rounded-xl border bg-surface/50 p-3 pr-12 text-left transition-[border-color,background-color,transform] duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:bg-surface"
                       >
                         <span className="relative grid size-11 shrink-0 place-items-center rounded-lg border bg-raised text-sage transition-colors group-hover:text-foreground">
                           <Folder className="size-5" strokeWidth={1.6} />
@@ -446,6 +452,16 @@ export function LibraryPage() {
                         </span>
                         <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => setSharingFolder(folder)}
+                        aria-label={`Share ${folder.name} folder`}
+                        title="Share folder"
+                        className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground opacity-100 transition-opacity hover:bg-raised hover:text-foreground sm:opacity-0 sm:focus-visible:opacity-100 sm:group-hover:opacity-100"
+                      >
+                        <Share2 className="size-3.5" />
+                      </button>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -475,6 +491,15 @@ export function LibraryPage() {
           </p>
         )}
       </section>
+      {sharingFolder ? (
+        <ShareWorkspaceDialog
+          open
+          onOpenChange={(open) => { if (!open) setSharingFolder(null); }}
+          workspaceId={sharingFolder.id}
+          workspaceName={sharingFolder.name}
+          subject="folder"
+        />
+      ) : null}
       {preview && (
         <div
           className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs"

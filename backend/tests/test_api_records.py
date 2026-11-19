@@ -336,3 +336,24 @@ async def test_library_items_report_their_workspace(client: AsyncClient, demo_he
     assert items["direct.csv"]["workspace_name"] == "Sales"
     assert items["via-chat.csv"]["workspace_id"] == workspace["id"]
     assert items["loose.csv"]["workspace_id"] is None
+
+
+async def test_workspace_invites_are_persisted_and_updatable(client: AsyncClient, demo_headers: dict[str, str]) -> None:
+    workspace = (await client.post("/api/workspaces", headers=demo_headers, json={"name": "Shared"})).json()
+    base = f"/api/workspaces/{workspace['id']}/invites"
+
+    created = await client.post(base, headers=demo_headers, json={"email": "Ana@Example.com", "role": "editor"})
+    assert created.status_code == 201, created.text
+    assert created.json()["email"] == "ana@example.com"
+    again = await client.post(base, headers=demo_headers, json={"email": "ana@example.com", "role": "viewer"})
+    assert again.json()["id"] == created.json()["id"]
+    assert again.json()["role"] == "viewer"
+    assert (await client.post(base, headers=demo_headers, json={"email": "not-an-email"})).status_code == 422
+
+    invite_id = created.json()["id"]
+    patched = await client.patch(f"{base}/{invite_id}", headers=demo_headers, json={"role": "editor"})
+    assert patched.json()["role"] == "editor"
+    assert [item["email"] for item in (await client.get(base, headers=demo_headers)).json()["items"]] == ["ana@example.com"]
+
+    assert (await client.delete(f"{base}/{invite_id}", headers=demo_headers)).status_code == 204
+    assert (await client.get(base, headers=demo_headers)).json()["items"] == []

@@ -28,6 +28,16 @@ export interface WorkspaceDto {
   deleted_at: string | null;
 }
 
+export type WorkspaceRole = "viewer" | "editor";
+
+export interface WorkspaceInviteDto {
+  id: string;
+  workspace_id: string;
+  email: string;
+  role: WorkspaceRole;
+  created_at: string;
+}
+
 export interface WorkspaceContextFileDto {
   id: string;
   workspace_id: string;

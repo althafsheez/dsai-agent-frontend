@@ -50,6 +50,26 @@ class WorkspaceResponse(APIModel):
     deleted_at: datetime | None
 
 
+WorkspaceRole = Literal["viewer", "editor"]
+
+
+class WorkspaceInviteCreate(BaseModel):
+    email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    role: WorkspaceRole = "viewer"
+
+
+class WorkspaceInviteUpdate(BaseModel):
+    role: WorkspaceRole
+
+
+class WorkspaceInviteResponse(APIModel):
+    id: str
+    workspace_id: str
+    email: str
+    role: WorkspaceRole
+    created_at: datetime
+
+
 class WorkspaceContextFileCreate(BaseModel):
     name: str = Field(min_length=1, max_length=240)
     content: str = Field(default="", max_length=100_000)

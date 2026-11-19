@@ -12,6 +12,7 @@ export function ChatHeader({
   onToggleRightPanel,
   quickAssistantOpen,
   onToggleQuickAssistant,
+  onShare,
 }: {
   title: string;
   workspaceName?: string;
@@ -20,6 +21,8 @@ export function ChatHeader({
   quickAssistantOpen?: boolean;
   /** Omitted before the chat exists: Quick Assistant needs a saved transcript to read. */
   onToggleQuickAssistant?: () => void;
+  /** Sharing works at workspace level, so standalone chats get a disabled button explaining why. */
+  onShare?: () => void;
 }) {
   const setMobileOpen = useUiStore((state) => state.setMobileSidebarOpen);
 
@@ -71,9 +74,10 @@ export function ChatHeader({
       <Button
         variant="ghost"
         size="sm"
-        disabled
-        title="Sharing will be connected later"
-        className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+        disabled={!onShare}
+        onClick={onShare}
+        title={onShare ? "Share this chat's workspace" : "Move this chat into a workspace to share it"}
+        className="h-8 gap-1.5 text-xs text-muted-foreground hover:bg-raised hover:text-foreground"
       >
         <Share2 className="size-3.5" />
         <span className="hidden sm:inline">Share</span>
