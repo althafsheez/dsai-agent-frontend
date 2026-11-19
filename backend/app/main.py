@@ -13,7 +13,7 @@ from .config import Settings, get_settings
 from .db import Base, make_engine, make_session_factory
 from .errors import APIError, api_error_handler
 from .providers import GeminiProvider, LLMProvider
-from .routes import chats, meta, resources, runs, workspaces
+from .routes import chats, meta, quick_assistant, resources, runs, workspaces
 from .services.identity import seed_demo_users
 from .services.runs import RunCoordinator, reconcile_stale_runs
 from .storage import LocalFileStorage
@@ -62,6 +62,7 @@ def create_app(settings: Settings | None = None, provider: LLMProvider | None = 
     app.include_router(resources.router)
     app.include_router(resources.catalog_router)
     app.include_router(runs.router)
+    app.include_router(quick_assistant.router)
     return app
 
 

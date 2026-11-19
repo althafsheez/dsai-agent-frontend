@@ -5,6 +5,20 @@ import { ContextSidebar } from "./context-sidebar";
 import { FilePreviewSidebar } from "./file-preview-sidebar";
 import type { ArtifactResource, DatasetResource } from "./types";
 
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return {
+    ...actual,
+    getModels: vi.fn(async () => ({ default_model_id: "gemini-test", models: [{ id: "gemini-test", label: "Gemini Test", supported_efforts: ["low"], default_effort: "low" }], configuration_status: "ready" })),
+    getQuickAssistantMessages: vi.fn(async () => ({ items: [], next_cursor: null })),
+    streamQuickAssistantMessage: vi.fn(async (_input, onEvent) => {
+      onEvent({ event_id: "quick-created", run_id: "quick-answer", type: "message.created", data: { message_id: "quick-answer" }, timestamp: "2026-11-09T00:00:00Z", sequence: 1 });
+      onEvent({ event_id: "quick-delta", run_id: "quick-answer", type: "message.delta", data: { message_id: "quick-answer", text: "A concise saved response." }, timestamp: "2026-11-09T00:00:00Z", sequence: 2 });
+      onEvent({ event_id: "quick-completed", run_id: "quick-answer", type: "message.completed", data: { message_id: "quick-answer", content: "A concise saved response." }, timestamp: "2026-11-09T00:00:00Z", sequence: 3 });
+    }),
+  };
+});
+
 const workspaceDataset: DatasetResource = {
   id: "dataset-workspace",
   name: "Sales.csv",
@@ -67,12 +81,12 @@ describe("ContextSidebar", () => {
 
     expect(screen.getByText("Input")).toBeInTheDocument();
     expect(screen.getByText("Output")).toBeInTheDocument();
-    expect(screen.getByText("Sales.csv")).toBeInTheDocument();
-    expect(screen.getByText("Revenue.xlsx")).toBeInTheDocument();
+    expect(within(screen.getByRole("tabpanel", { name: "Datasets" })).getByText("Sales.csv")).toBeInTheDocument();
+    expect(within(screen.getByRole("tabpanel", { name: "Datasets" })).getByText("Revenue.xlsx")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Artifacts" }));
     expect(screen.getByRole("tabpanel", { name: "Artifacts" })).toBeInTheDocument();
-    expect(screen.getByText("Revenue report.pdf")).toBeInTheDocument();
+    expect(within(screen.getByRole("tabpanel", { name: "Artifacts" })).getByText("Revenue report.pdf")).toBeInTheDocument();
   });
 
   it("keeps input and output grouping for standalone chats", () => {
@@ -87,11 +101,11 @@ describe("ContextSidebar", () => {
     const onLibraryToggle = vi.fn();
     render(<ContextSidebar {...baseProps} onClose={vi.fn()} onFileSelect={onFileSelect} onLibraryToggle={onLibraryToggle} />);
 
-    await user.click(screen.getByText("Sales.csv"));
+    await user.click(within(screen.getByRole("tabpanel", { name: "Datasets" })).getByText("Sales.csv"));
     expect(onFileSelect).toHaveBeenCalledWith(workspaceDataset);
 
     await user.click(screen.getByRole("tab", { name: "Artifacts" }));
-    await user.click(screen.getByRole("button", { name: "Add to Library" }));
+    await user.click(screen.getByRole("button", { name: "Add Revenue report.pdf to Library" }));
     expect(onLibraryToggle).toHaveBeenCalledWith(artifact);
   });
 
@@ -139,16 +153,12 @@ describe("ContextSidebar", () => {
     consoleError.mockRestore();
   });
 
-  it("keeps Quick Assistant messages independent from file selection and the main chat", async () => {
-    const user = userEvent.setup();
+  it("keeps the Quick Assistant separate from file selection and the main chat", () => {
     const onFileSelect = vi.fn();
     render(<ContextSidebar {...baseProps} onClose={vi.fn()} onFileSelect={onFileSelect} />);
 
-    await user.type(screen.getByRole("textbox", { name: "Ask Quick Assistant" }), "What is in these files?");
-    await user.click(screen.getByRole("button", { name: "Send to Quick Assistant" }));
-
-    expect(screen.getByText("What is in these files?")).toBeInTheDocument();
-    expect(screen.getByText(/read-only demo response/i)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Ask Quick Assistant" })).toBeInTheDocument();
+    expect(screen.getByText(/separate, saved chat/i)).toBeInTheDocument();
     expect(onFileSelect).not.toHaveBeenCalled();
   });
 

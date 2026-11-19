@@ -62,6 +62,7 @@ import {
 import type { AssistantMessage, ChatMessage, MessageBlock } from "../types";
 import { replayTrace } from "../execution-trace";
 import { takePendingRun } from "../pending-run";
+import { useConversationScroll } from "../use-conversation-scroll";
 import { ChatHeader } from "./chat-header";
 import { ConversationNavigator } from "./conversation-navigator";
 import { MessageList } from "./message-list";
@@ -188,6 +189,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const modelsQuery = useQuery({ queryKey: ["models"], queryFn: getModels });
   const workspacesQuery = useQuery({ queryKey: ["workspaces"], queryFn: getWorkspaces });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const conversationScroll = useConversationScroll(messages);
   const [panelOpen, setPanelOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<ContextFile | null>(null);
   const [previewExpanded, setPreviewExpanded] = useState(false);
@@ -205,7 +207,6 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [stopPending, setStopPending] = useState(false);
   const [composerStatus, setComposerStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<string>();
   const [traceEvents, setTraceEvents] = useState<ExecutionEvent[]>([]);
   const datasetsQuery = useQuery({
     queryKey: ["chat", chatId, "datasets"],
@@ -221,9 +222,6 @@ export function ChatPage({ chatId }: { chatId: string }) {
     enabled: Boolean(runsQuery.data?.items.length),
     queryFn: async () => (await Promise.all((runsQuery.data?.items ?? []).map(async (run) => (await getRunEvents(run.id)).items))).flat(),
   });
-  const sections = useRef(new Map<string, HTMLElement>());
-  const chatScrollRef = useRef<HTMLDivElement>(null);
-  const sectionVisibility = useRef(new Map<string, number>());
   const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -232,7 +230,6 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const streamController = useRef<AbortController | null>(null);
   const queuedQuestionsRef = useRef<QueuedQuestion[]>([]);
   const submittingRef = useRef(false);
-  const initiallyPositionedChatRef = useRef<string | null>(null);
   const models = useMemo(() => modelsQuery.data?.models ?? [], [modelsQuery.data?.models]);
   const selectedModel = models.find((model) => model.id === modelId) ?? models[0];
   const supportedEfforts = selectedModel?.supported_efforts ?? [];
@@ -248,48 +245,6 @@ export function ChatPage({ chatId }: { chatId: string }) {
     ...(artifactsQuery.data?.items ?? []),
   ].map((resource) => [resource.id, resource])), [artifactsQuery.data?.items, datasetsQuery.data?.items]);
   const traceReplay = useMemo(() => replayTrace(traceEvents), [traceEvents]);
-  const questionKey = useMemo(() => messages.filter((message) => message.role === "user").map((message) => message.id).join("\u0000"), [messages]);
-  const latestQuestionId = useMemo(
-    () => [...messages].reverse().find((message) => message.role === "user")?.id,
-    [messages],
-  );
-
-  useEffect(() => {
-    if (typeof IntersectionObserver === "undefined" || !questionKey) return;
-    const questionIds = questionKey.split("\u0000");
-    const visibility = sectionVisibility.current;
-    const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        const id = entry.target.id.replace(/^message-/, "");
-        if (entry.isIntersecting) visibility.set(id, entry.intersectionRatio);
-        else visibility.delete(id);
-      }
-      const scrollRoot = chatScrollRef.current;
-      if (scrollRoot && scrollRoot.scrollHeight - scrollRoot.scrollTop - scrollRoot.clientHeight < 24) {
-        const finalQuestionId = questionIds.at(-1);
-        if (finalQuestionId) setActiveSection((current) => current === finalQuestionId ? current : finalQuestionId);
-        return;
-      }
-      let nextId: string | undefined;
-      let bestRatio = -1;
-      for (const id of questionIds) {
-        const ratio = visibility.get(id) ?? -1;
-        if (ratio > bestRatio) {
-          bestRatio = ratio;
-          nextId = id;
-        }
-      }
-      if (nextId && bestRatio >= 0) setActiveSection((current) => current === nextId ? current : nextId);
-    }, { root: chatScrollRef.current, rootMargin: "-12% 0px -58% 0px", threshold: [0, 0.25, 0.5, 0.75, 1] });
-    for (const id of questionIds) {
-      const section = sections.current.get(id);
-      if (section) observer.observe(section);
-    }
-    return () => {
-      observer.disconnect();
-      visibility.clear();
-    };
-  }, [questionKey]);
 
   useEffect(() => {
     void setChatPresence(chatId, true).then(() => {
@@ -344,20 +299,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
       ));
       return [...hydrated, ...liveOnly];
     });
-    setActiveSection((current) => current ?? next.find((message) => message.role === "user")?.id);
   }, [messagesQuery.data, resources, traceReplay]);
-
-  useEffect(() => {
-    if (!messagesQuery.data || !latestQuestionId || initiallyPositionedChatRef.current === chatId) return;
-    const frame = requestAnimationFrame(() => {
-      const viewport = chatScrollRef.current;
-      if (!viewport) return;
-      viewport.scrollTop = viewport.scrollHeight;
-      setActiveSection(latestQuestionId);
-      initiallyPositionedChatRef.current = chatId;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [chatId, latestQuestionId, messagesQuery.data]);
 
   useEffect(() => {
     if (!models.length) return;
@@ -714,6 +656,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
     };
     // Show the question before the network request starts. Streaming assistant
     // content is deliberately added separately by runMessage.
+    conversationScroll.showLatest();
     setMessages((current) => appendMessageOnce(current, optimisticUser));
     setDraft("");
     setRunning(true);
@@ -863,20 +806,15 @@ export function ChatPage({ chatId }: { chatId: string }) {
         </div>
         <ConversationNavigator
           messages={messages}
-          activeId={activeSection}
-          onNavigate={(id) => {
-            setActiveSection(id);
-            sections.current.get(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-          }}
+          activeId={conversationScroll.activeId}
+          mainScrollEdge={conversationScroll.edge}
+          onNavigate={conversationScroll.navigate}
         />
         <div
-          ref={chatScrollRef}
+          ref={conversationScroll.viewportRef}
+          aria-label="Conversation messages"
           className="col-start-2 row-start-2 min-h-0 overflow-y-auto"
-          onScroll={(event) => {
-            const element = event.currentTarget;
-            const atEnd = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
-            if (atEnd && latestQuestionId) setActiveSection(latestQuestionId);
-          }}
+          onScroll={conversationScroll.onScroll}
         >
           {messagesQuery.isError ? (
             <div role="alert" className="mx-auto max-w-3xl px-5 py-10 text-sm text-red-300">
@@ -887,10 +825,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
               messages={messages}
               onFileSelect={selectFileById}
               onFileDownload={downloadFileById}
-              registerSection={(id, node) => {
-                if (node) sections.current.set(id, node);
-                else sections.current.delete(id);
-              }}
+              registerSection={conversationScroll.registerSection}
             />
           )}
         </div>

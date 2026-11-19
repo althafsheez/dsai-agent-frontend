@@ -1,7 +1,7 @@
 "use client";
 
 import * as Collapsible from "@radix-ui/react-collapsible";
-import { ChevronDown, Download, FileSpreadsheet } from "lucide-react";
+import { BookOpen, Check, ChevronDown, Download, FileSpreadsheet } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { downloadResource } from "@/lib/api";
@@ -35,8 +35,9 @@ function DatasetGroup({ label, datasets, onFileSelect, onLibraryToggle }: Datase
       <Collapsible.Content>
         {datasets.length ? (
           <ul className="pb-2">
-            {datasets.map((dataset) => (
-              <li key={dataset.id}>
+            {datasets.map((dataset) => {
+              const saved = dataset.in_library ?? dataset.saved ?? false;
+              return <li key={dataset.id}>
                 <div className="group flex w-full items-center gap-2.5 px-4 py-2 hover:bg-raised/70">
                   <button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" onClick={() => onFileSelect(dataset)}>
                   <span className="grid size-7 shrink-0 place-items-center rounded-md border bg-surface">
@@ -49,13 +50,15 @@ function DatasetGroup({ label, datasets, onFileSelect, onLibraryToggle }: Datase
                     </span>
                   </span>
                   </button>
-                  <button type="button" onClick={() => onLibraryToggle?.(dataset)} aria-pressed={dataset.in_library ?? false} className="rounded-md border px-2 py-1 text-[10px] text-muted-foreground hover:border-border-strong hover:text-foreground">
-                    {dataset.in_library ? "In Library" : "Add to Library"}
+                  <button type="button" onClick={() => onLibraryToggle?.(dataset)} aria-label={saved ? `Saved in Library: ${dataset.name}` : `Add ${dataset.name} to Library`} aria-pressed={saved} className="group/library relative grid size-8 shrink-0 place-items-center rounded-md border bg-surface text-muted-foreground hover:border-border-strong hover:text-foreground">
+                    <BookOpen className="size-4" />
+                    {saved ? <span className="absolute -bottom-0.5 -right-0.5 grid size-3.5 place-items-center rounded-full border border-sidebar bg-sage text-sidebar"><Check className="size-2.5 stroke-[3]" /></span> : null}
+                    <span role="tooltip" className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 w-max rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-[11px] text-foreground opacity-0 shadow-lg transition-opacity group-hover/library:opacity-100 after:absolute after:right-2.5 after:top-full after:border-x-4 after:border-t-4 after:border-x-transparent after:border-t-border-strong">{saved ? "Saved to Library" : "Add to Library"}</span>
                   </button>
-                  <button type="button" onClick={() => void downloadResource(dataset.download_url, dataset.name)} aria-label={`Download ${dataset.name}`} className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-surface hover:text-foreground"><Download className="size-3.5" /></button>
+                  <button type="button" onClick={() => void downloadResource(dataset.download_url, dataset.name)} aria-label={`Download ${dataset.name}`} className="group/download relative grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-surface hover:text-foreground"><Download className="size-4" /><span role="tooltip" className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 w-max rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-[11px] text-foreground opacity-0 shadow-lg transition-opacity group-hover/download:opacity-100 after:absolute after:right-2.5 after:top-full after:border-x-4 after:border-t-4 after:border-x-transparent after:border-t-border-strong">Download</span></button>
                 </div>
-              </li>
-            ))}
+              </li>;
+            })}
           </ul>
         ) : (
           <p className="px-9 pb-3 text-[11px] text-muted-foreground">No datasets in this scope.</p>

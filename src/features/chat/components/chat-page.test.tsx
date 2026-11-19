@@ -235,6 +235,7 @@ describe("live chat page", () => {
 
     expect(screen.getByText("Show this immediately")).toBeVisible();
     expect(screen.getByText("Stored question")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Go to question: Show this immediately" })).toHaveAttribute("aria-current", "location");
     resolvePendingCreate?.();
     expect(await screen.findByText("Streamed answer")).toBeVisible();
   });

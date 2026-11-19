@@ -5,6 +5,7 @@ import type {
   ExecutionEvent,
   AgentRunDto,
   MessageDto,
+  QuickMessageDto,
   ModelsResponse,
   QueueRunInput,
   QueueRunResponse,
@@ -267,6 +268,10 @@ export function getMessages(chatId: string): Promise<ApiList<MessageDto>> {
   return requestJson<ApiList<MessageDto>>(`/chats/${encodeURIComponent(chatId)}/messages`);
 }
 
+export function getQuickAssistantMessages(contextType: "chat" | "workspace", contextId: string): Promise<ApiList<QuickMessageDto>> {
+  return requestJson<ApiList<QuickMessageDto>>(`/quick-assistant/messages?context_type=${contextType}&context_id=${encodeURIComponent(contextId)}`);
+}
+
 export function getChatRuns(chatId: string): Promise<ApiList<AgentRunDto>> {
   return requestJson<ApiList<AgentRunDto>>(`/chats/${encodeURIComponent(chatId)}/runs`);
 }
@@ -376,6 +381,31 @@ export async function streamChatRun(
   if (!response.ok) throw await apiError(response);
   if (!response.body) throw new ApiError("The streaming response had no body.", 502, "empty_stream");
 
+  const parser = createSseParser(onEvent);
+  const decoder = new TextDecoder();
+  const reader = response.body.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parser.push(decoder.decode(value, { stream: true }));
+  }
+  parser.push(decoder.decode());
+  parser.finish();
+}
+
+export async function streamQuickAssistantMessage(
+  input: { context_type: "chat" | "workspace"; context_id: string; content: string; model_id: string; effort?: string; client_request_id: string },
+  onEvent: (event: ExecutionEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(`${API_ROOT}/quick-assistant/messages/stream`, {
+    method: "POST",
+    headers: requestHeaders(true),
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) throw await apiError(response);
+  if (!response.body) throw new ApiError("The Quick Assistant stream had no body.", 502, "empty_stream");
   const parser = createSseParser(onEvent);
   const decoder = new TextDecoder();
   const reader = response.body.getReader();

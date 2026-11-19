@@ -138,6 +138,26 @@ class MessageCreate(BaseModel):
     client_request_id: str = Field(min_length=1, max_length=100)
 
 
+class QuickMessageCreate(BaseModel):
+    context_type: Literal["chat", "workspace"]
+    context_id: str
+    content: str = Field(min_length=1, max_length=100_000)
+    model_id: str
+    effort: str | None = None
+    client_request_id: str = Field(min_length=1, max_length=100)
+
+
+class QuickMessageResponse(APIModel):
+    id: str
+    context_type: Literal["chat", "workspace"]
+    context_id: str
+    role: Literal["user", "assistant"]
+    content: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class ChatCreateResponse(BaseModel):
     chat: ChatResponse
     message: MessageResponse

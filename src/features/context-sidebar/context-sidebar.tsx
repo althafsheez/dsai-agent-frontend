@@ -35,7 +35,7 @@ export function ContextSidebar({
           <ArtifactsPanel artifacts={artifacts} onFileSelect={onFileSelect} onLibraryToggle={onLibraryToggle} />
         )}
       </div>
-      <QuickAssistant key={`${chatId}:${workspaceId ?? "standalone"}`} chatId={chatId} workspaceId={workspaceId} />
+      <QuickAssistant key={`${chatId}:${workspaceId ?? "standalone"}`} chatId={chatId} workspaceId={workspaceId} resources={[...datasets, ...artifacts]} onFileSelect={onFileSelect} />
     </aside>
   );
 }

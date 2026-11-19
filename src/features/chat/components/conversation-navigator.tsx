@@ -1,7 +1,6 @@
 "use client";
 
-import * as HoverCard from "@radix-ui/react-hover-card";
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, UserMessage } from "../types";
 import { cn } from "@/lib/utils";
 
@@ -27,11 +26,39 @@ function edgeMask(hasAbove: boolean, hasBelow: boolean): string | undefined {
   return undefined;
 }
 
-export const ConversationNavigator = memo(function ConversationNavigator({ messages, activeId, onNavigate }: { messages: ChatMessage[]; activeId?: string; onNavigate: (id: string) => void }) {
+export const ConversationNavigator = memo(function ConversationNavigator({ messages, activeId, onNavigate, mainScrollEdge = null }: { messages: ChatMessage[]; activeId?: string; onNavigate: (id: string) => void; mainScrollEdge?: "top" | "bottom" | null }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const markerRefs = useRef(new Map<string, HTMLButtonElement>());
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoveredId = useRef<string | null>(null);
   const markers = useMemo(() => conversationMarkers(messages), [messages]);
   const [fadedEdges, setFadedEdges] = useState({ above: false, below: false });
+  const [preview, setPreview] = useState<{ id: string; top: number; loading: boolean } | null>(null);
+  const hidePreview = useCallback(() => {
+    hoveredId.current = null;
+    if (previewTimer.current) clearTimeout(previewTimer.current);
+    previewTimer.current = null;
+    setPreview(null);
+  }, []);
+  const showPreview = useCallback((id: string) => {
+    if (hoveredId.current === id) return;
+    const marker = markerRefs.current.get(id);
+    const nav = viewportRef.current?.parentElement;
+    if (!marker || !nav) return;
+    hoveredId.current = id;
+    if (previewTimer.current) clearTimeout(previewTimer.current);
+    const markerBox = marker.getBoundingClientRect();
+    const navBox = nav.getBoundingClientRect();
+    const top = Math.max(0, Math.min(markerBox.top + markerBox.height / 2 - navBox.top - 64, navBox.height - 128));
+    setPreview({ id, top, loading: true });
+    previewTimer.current = setTimeout(() => {
+      setPreview((current) => current?.id === id ? { ...current, loading: false } : current);
+      previewTimer.current = null;
+    }, 90);
+  }, []);
+  useEffect(() => () => {
+    if (previewTimer.current) clearTimeout(previewTimer.current);
+  }, []);
   const updateFadedEdges = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
@@ -45,8 +72,12 @@ export const ConversationNavigator = memo(function ConversationNavigator({ messa
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     const marker = activeId ? markerRefs.current.get(activeId) : undefined;
-    if (viewport && marker) {
-      const markerTop = marker.offsetTop;
+    if (viewport && mainScrollEdge === "top") {
+      viewport.scrollTop = 0;
+    } else if (viewport && mainScrollEdge === "bottom") {
+      viewport.scrollTop = viewport.scrollHeight;
+    } else if (viewport && marker) {
+      const markerTop = marker.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop;
       const markerBottom = markerTop + marker.offsetHeight;
       const inset = 16;
       const visibleTop = viewport.scrollTop + inset;
@@ -58,31 +89,49 @@ export const ConversationNavigator = memo(function ConversationNavigator({ messa
     }
     const frame = requestAnimationFrame(updateFadedEdges);
     return () => cancelAnimationFrame(frame);
-  }, [activeId, markers.length, updateFadedEdges]);
+  }, [activeId, mainScrollEdge, markers.length, updateFadedEdges]);
 
   const mask = edgeMask(fadedEdges.above, fadedEdges.below);
 
-  return <nav aria-label="Conversation sections" className="col-start-1 row-start-2 hidden w-12 flex-col items-center justify-center bg-background sm:flex">
+  return <nav aria-label="Conversation sections" className="relative col-start-1 row-start-2 hidden w-12 flex-col items-center justify-center bg-background sm:flex">
     <div
       ref={viewportRef}
       onWheel={(event) => event.stopPropagation()}
       onScroll={updateFadedEdges}
+      onMouseMove={(event) => {
+        const target = event.target;
+        if (target instanceof HTMLButtonElement && target.dataset.questionId) {
+          showPreview(target.dataset.questionId);
+          return;
+        }
+        let closestId: string | null = null;
+        let closestDistance = Infinity;
+        for (const [id, marker] of markerRefs.current) {
+          const box = marker.getBoundingClientRect();
+          const distance = Math.abs(event.clientY - box.top - box.height / 2);
+          if (distance < closestDistance) { closestId = id; closestDistance = distance; }
+        }
+        if (closestId) showPreview(closestId);
+      }}
+      onMouseLeave={hidePreview}
       className="flex h-[300px] w-12 overscroll-contain overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       style={{ maskImage: mask, WebkitMaskImage: mask }}
     >
-    <div className="flex min-h-full w-full flex-col items-center justify-center gap-3 py-5">{markers.map(({ question, answerPreview }) => {
-      return <HoverCard.Root key={question.id} openDelay={180} closeDelay={80}>
-        <HoverCard.Trigger asChild><button ref={(node) => { if (node) markerRefs.current.set(question.id, node); else markerRefs.current.delete(question.id); }} onClick={() => onNavigate(question.id)} aria-label={`Go to question: ${question.content}`} aria-current={activeId === question.id ? "location" : undefined} className={cn("h-2 w-7 shrink-0 rounded-full bg-border-strong transition-colors hover:bg-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sage", activeId === question.id && "w-9 bg-sage")} /></HoverCard.Trigger>
-        <HoverCard.Portal><HoverCard.Content side="right" sideOffset={12} className="z-50 w-64 rounded-lg border bg-surface p-3 shadow-xl">
-          <p className="line-clamp-2 text-xs font-medium leading-5">{question.content}</p>
-          {answerPreview && <p className="mt-2 line-clamp-3 text-[11px] leading-5 text-muted-foreground">{answerPreview}</p>}
-          <time className="mt-2 block text-[10px] text-muted-foreground">{new Date(question.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
-        </HoverCard.Content></HoverCard.Portal>
-      </HoverCard.Root>;
+    <div className="flex min-h-full w-full flex-col items-center justify-start gap-3 py-4">{markers.map(({ question }) => {
+      return <button key={question.id} data-question-id={question.id} ref={(node) => { if (node) markerRefs.current.set(question.id, node); else markerRefs.current.delete(question.id); }} onClick={() => { hidePreview(); onNavigate(question.id); }} onMouseEnter={() => showPreview(question.id)} onFocus={() => showPreview(question.id)} onBlur={hidePreview} aria-label={`Go to question: ${question.content}`} aria-current={activeId === question.id ? "location" : undefined} className={cn("h-2 w-7 shrink-0 rounded-full bg-border-strong transition-colors hover:bg-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sage", activeId === question.id && "w-9 bg-sage")} />;
     })}</div></div>
+    {preview && (() => {
+      const marker = markers.find(({ question }) => question.id === preview.id);
+      if (!marker) return null;
+      return <div aria-label="Conversation preview" className="pointer-events-none absolute left-[calc(100%+10px)] z-50 h-32 w-72 overflow-hidden rounded-lg border bg-surface p-3 shadow-xl transition-[top] duration-100 ease-out" style={{ top: preview.top }}>
+        {preview.loading ? <div aria-label="Loading conversation preview" className="space-y-2.5"><span className="block h-3 w-4/5 animate-pulse rounded bg-muted" /><span className="block h-3 w-full animate-pulse rounded bg-muted" /><span className="block h-3 w-3/4 animate-pulse rounded bg-muted" /></div> : <><p className="line-clamp-2 text-xs font-medium leading-5">{marker.question.content}</p>{marker.answerPreview && <p className="mt-2 line-clamp-3 text-[11px] leading-5 text-muted-foreground">{marker.answerPreview}</p>}<time className="mt-2 block text-[10px] text-muted-foreground">{new Date(marker.question.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></>}
+      </div>;
+    })()}
   </nav>;
 }, (previous, next) => {
+  if (previous.onNavigate !== next.onNavigate) return false;
   if (previous.activeId !== next.activeId) return false;
+  if (previous.mainScrollEdge !== next.mainScrollEdge) return false;
   const previousMarkers = conversationMarkers(previous.messages);
   const nextMarkers = conversationMarkers(next.messages);
   return previousMarkers.length === nextMarkers.length && previousMarkers.every((marker, index) => {

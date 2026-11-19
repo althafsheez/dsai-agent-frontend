@@ -123,6 +123,26 @@ class Message(TimestampMixin, Base):
     chat: Mapped[Chat] = relationship(back_populates="messages")
 
 
+class QuickMessage(TimestampMixin, Base):
+    """A compact, independent read-only conversation for a chat or workspace."""
+
+    __tablename__ = "quick_messages"
+    __table_args__ = (
+        UniqueConstraint("context_type", "context_id", "user_id", "position", name="uq_quick_message_position"),
+        UniqueConstraint("context_type", "context_id", "user_id", "client_request_id", name="uq_quick_message_request"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    context_type: Mapped[str] = mapped_column(String(16), index=True)
+    context_id: Mapped[str] = mapped_column(String(36), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    role: Mapped[str] = mapped_column(String(16))
+    content: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(24), default="completed")
+    position: Mapped[int] = mapped_column(Integer)
+    client_request_id: Mapped[str | None] = mapped_column(String(100))
+
+
 class AgentRun(Base):
     __tablename__ = "agent_runs"
     __table_args__ = (UniqueConstraint("chat_id", "client_request_id", name="uq_run_request"),)

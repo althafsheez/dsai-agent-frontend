@@ -75,6 +75,17 @@ export interface MessageDto {
   attachment_refs: Array<{ resource_type: "dataset" | "artifact"; resource_id: string }>;
 }
 
+export interface QuickMessageDto {
+  id: string;
+  context_type: "chat" | "workspace";
+  context_id: string;
+  role: "user" | "assistant";
+  content: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CreateChatResponse {
   chat: ChatDto;
   message: MessageDto;
