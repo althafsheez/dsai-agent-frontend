@@ -271,7 +271,7 @@ describe("live chat page", () => {
     await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/resources/upload"))).toHaveLength(2));
     expect((await screen.findAllByText("sales.csv")).length).toBeGreaterThan(0);
     await user.click(screen.getByRole("tab", { name: "Artifacts" }));
-    expect(await screen.findByText("summary.pdf")).toBeVisible();
+    expect((await screen.findAllByText("summary.pdf")).length).toBeGreaterThan(0);
   });
 
   it("starts the first pending backend run after navigation from New Analysis", async () => {

@@ -682,7 +682,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
         });
         return [];
       });
-      if (attachments.length) {
+      if (submittedAttachments.length) {
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ["chat", chatId, "datasets"] }),
           queryClient.invalidateQueries({ queryKey: ["chat", chatId, "artifacts"] }),

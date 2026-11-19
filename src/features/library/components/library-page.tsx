@@ -58,6 +58,7 @@ function LibraryThumbnail({ item }: { item: LibraryResource }) {
     return () => { active = false; };
   }, [isCode, item.preview_url]);
 
+  // eslint-disable-next-line @next/next/no-img-element
   if (isImage && imageUrl) return <img src={imageUrl} alt="" className="size-full object-cover" />;
   if (item.resource_type === "dataset") {
     const columns = item.columns?.slice(0, 3) ?? [];
