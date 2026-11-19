@@ -6,7 +6,6 @@ import {
   BarChart3,
   BrainCircuit,
   Calculator,
-  CircleStop,
   ChevronRight,
   CirclePause,
   CornerDownRight,
@@ -280,6 +279,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
     } else if (!streamController.current) {
       setActiveRunId(null);
       setRunning(false);
+      setStopPending(false);
     }
   }, [runsQuery.data?.items]);
 
@@ -636,6 +636,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
       if (streamController.current === controller) streamController.current = null;
       setActiveRunId(null);
       setRunning(false);
+      setStopPending(false);
       await queryClient.invalidateQueries({ queryKey: ["chat", chatId, "messages"] });
       await queryClient.invalidateQueries({ queryKey: ["chat", chatId] });
       await queryClient.invalidateQueries({ queryKey: ["activity"] });
@@ -1105,12 +1106,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
               ))}
             </div>
           ) : null}
-          {running && activeRunId ? (
+          {running && activeRunId && draft.trim() ? (
             <div className="mx-auto mb-2 flex max-w-3xl items-center gap-2" aria-label="Active run actions">
-              <button type="button" onClick={() => void stopActiveRun()} disabled={stopPending} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-400/40 bg-red-950/20 px-3 text-xs font-medium text-red-200 hover:bg-red-950/40 disabled:opacity-40">
-                {stopPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <CircleStop className="size-3.5" />}
-                Stop
-              </button>
               {draft.trim() ? <>
               <button type="button" onClick={() => void queueDraft()} disabled={Boolean(composerPending)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border-strong bg-raised px-3 text-xs font-medium text-foreground hover:bg-surface disabled:opacity-40">
                 {composerPending === "queue" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ListPlus className="size-3.5" />}
@@ -1225,8 +1222,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
                 placeholder={running ? "Type a follow-up to queue or steer…" : "Ask anything about your data, or type / for commands"}
                 className="min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm leading-5 outline-none placeholder:text-muted-foreground disabled:opacity-60"
               />
-              <button type="submit" disabled={!draft.trim() || running || !selectedModel} aria-label="Send message" className="grid size-8 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground disabled:opacity-30">
-                {running ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
+              <button type={running ? "button" : "submit"} onClick={running ? () => void stopActiveRun() : undefined} disabled={running ? !activeRunId || stopPending : !draft.trim() || !selectedModel} aria-label={running ? "Stop" : "Send message"} className={`grid size-8 shrink-0 place-items-center rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${running ? "bg-[#292b30] text-white hover:bg-[#34363c] disabled:opacity-50" : "bg-primary text-primary-foreground disabled:opacity-30"}`}>
+                {running ? (stopPending ? <LoaderCircle className="size-4 animate-spin" /> : <span className="size-[13.5px] rounded-[2px] bg-white/85" />) : <ArrowUp className="size-4" />}
               </button>
             </div>
             <input ref={fileInputRef} type="file" multiple accept=".csv,.xls,.xlsx,.parquet,.png,.jpg,.jpeg,.pdf,.txt,.md,.json" className="sr-only" aria-label="Add files to chat" onChange={(event) => { addFiles(event.target.files); event.currentTarget.value = ""; }} />
