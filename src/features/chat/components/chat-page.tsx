@@ -195,7 +195,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const conversationScroll = useConversationScroll(messages);
   const [panelOpen, setPanelOpen] = useState(false);
   // Holds the main-chat snapshot taken when Quick Assistant opened; null means closed.
-  const [quickAssistant, setQuickAssistant] = useState<{ snapshotMessageId: string | null } | null>(null);
+  const [quickAssistant, setQuickAssistant] = useState<{ snapshotMessageId: string | null; minimized: boolean } | null>(null);
   const [selectedFile, setSelectedFile] = useState<ContextFile | null>(null);
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [draft, setDraft] = useState("");
@@ -578,9 +578,14 @@ export function ChatPage({ chatId }: { chatId: string }) {
     });
   }, [chatId, messagesQuery.data, runMessage]);
 
+  // The header button opens a fresh snapshot, or minimizes/restores an existing session without losing it.
   function toggleQuickAssistant() {
-    setQuickAssistant((current) => current ? null : { snapshotMessageId: messagesQuery.data?.items.at(-1)?.id ?? null });
+    setQuickAssistant((current) => current
+      ? { ...current, minimized: !current.minimized }
+      : { snapshotMessageId: messagesQuery.data?.items.at(-1)?.id ?? null, minimized: false });
   }
+  const minimizeQuickAssistant = useCallback(() => setQuickAssistant((current) => current && { ...current, minimized: true }), []);
+  const restoreQuickAssistant = useCallback(() => setQuickAssistant((current) => current && { ...current, minimized: false }), []);
   const closeQuickAssistant = useCallback(() => setQuickAssistant(null), []);
 
   function selectFile(file: ContextFile) {
@@ -826,7 +831,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
             workspaceName={workspaceName}
             panelOpen={panelOpen}
             onToggleRightPanel={togglePanel}
-            quickAssistantOpen={quickAssistant !== null}
+            quickAssistantOpen={quickAssistant !== null && !quickAssistant.minimized}
             onToggleQuickAssistant={toggleQuickAssistant}
           />
         </div>
@@ -1017,6 +1022,9 @@ export function ChatPage({ chatId }: { chatId: string }) {
           snapshotMessageId={quickAssistant.snapshotMessageId}
           resources={[...(datasetsQuery.data?.items ?? []), ...(artifactsQuery.data?.items ?? [])]}
           onFileSelect={selectFile}
+          minimized={quickAssistant.minimized}
+          onMinimize={minimizeQuickAssistant}
+          onRestore={restoreQuickAssistant}
           onClose={closeQuickAssistant}
         />
       ) : null}

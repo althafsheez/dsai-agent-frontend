@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp, Database, FileText, LoaderCircle, Maximize2, Minimize2, Sparkles, X } from "lucide-react";
+import { ArrowUp, Database, FileText, LoaderCircle, Maximize2, Minimize2, Minus, Sparkles, X } from "lucide-react";
 import { FormEvent, useEffect, useId, useRef, useState } from "react";
 import { getModels, getQuickAssistantMessages, streamQuickAssistantMessage, type ExecutionEvent } from "@/lib/api";
 import type { ContextFile } from "@/features/context-sidebar";
@@ -11,6 +11,10 @@ interface QuickAssistantPopupProps {
   snapshotMessageId: string | null;
   resources: ContextFile[];
   onFileSelect: (file: ContextFile) => void;
+  /** Minimized keeps this component mounted, so the conversation, draft and any running answer survive. */
+  minimized: boolean;
+  onMinimize: () => void;
+  onRestore: () => void;
   onClose: () => void;
 }
 interface QuickMessage { id: string; role: "user" | "assistant"; content: string; status: string; }
@@ -24,7 +28,7 @@ function compactText(content: string) {
     : part.startsWith("`") && part.endsWith("`") ? <code key={index} className="rounded bg-raised px-1 font-mono text-[11px]">{part.slice(1, -1)}</code> : part);
 }
 
-export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFileSelect, onClose }: QuickAssistantPopupProps) {
+export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFileSelect, minimized, onMinimize, onRestore, onClose }: QuickAssistantPopupProps) {
   const inputId = useId();
   const titleId = useId();
   const [draft, setDraft] = useState("");
@@ -36,6 +40,8 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
   const [expandedOverride, setExpandedOverride] = useState<boolean | null>(null);
   const [sentThisSession, setSentThisSession] = useState(false);
   const [selectedModel, setSelectedModel] = useState<{ id: string; default_effort: string | null } | null>(null);
+  const [unseenAnswer, setUnseenAnswer] = useState(false);
+  const minimizedRef = useRef(minimized);
   const controller = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -53,17 +59,22 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
   }, [chatId]);
   useEffect(() => () => controller.current?.abort(), []);
   // The textarea stays disabled until a model loads, so focus once it is enabled; otherwise keys reach the header toggle.
-  const inputReady = selectedModel !== null && !running;
+  const inputReady = selectedModel !== null && !running && !minimized;
   useEffect(() => { if (inputReady) inputRef.current?.focus(); }, [inputReady]);
   useEffect(() => {
     const viewport = scrollRef.current;
     if (viewport) viewport.scrollTop = viewport.scrollHeight;
   }, [messages]);
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    minimizedRef.current = minimized;
+    if (!minimized) setUnseenAnswer(false);
+  }, [minimized]);
+  useEffect(() => {
+    if (minimized) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") onMinimize(); };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, [minimized, onMinimize]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -88,7 +99,7 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
         const messageId = typeof event.data.message_id === "string" ? event.data.message_id : null;
         if (event.type === "message.created" && messageId) { assistantId = messageId; setMessages((current) => current.map((message) => message.id === temporaryAssistantId ? { ...message, id: messageId } : message)); }
         if (event.type === "message.delta") { const text = typeof event.data.text === "string" ? event.data.text : ""; if (text) setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, content: message.content + text } : message)); }
-        if (event.type === "message.completed") { const content = typeof event.data.content === "string" ? event.data.content : ""; setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, content, status: "completed" } : message)); }
+        if (event.type === "message.completed") { const content = typeof event.data.content === "string" ? event.data.content : ""; setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, content, status: "completed" } : message)); if (minimizedRef.current) setUnseenAnswer(true); }
         if (event.type === "agent.failed") { const failure = event.data.error; const detail = failure && typeof failure === "object" && "message" in failure ? String((failure as { message: unknown }).message) : "Quick Assistant could not answer that."; setError(detail); setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, status: "failed" } : message)); }
       }, activeController.signal);
     } catch (caught) {
@@ -102,12 +113,15 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
   const expanded = expandedOverride ?? (sentThisSession || draft.length > LONG_DRAFT_CHARS || draft.includes("\n"));
 
   return (
+    <>
     <section
       role="dialog"
       aria-modal="false"
       aria-labelledby={titleId}
       data-expanded={expanded}
-      className={`fixed right-4 top-16 z-[70] flex origin-top-right animate-pop-in flex-col overflow-hidden rounded-xl border border-border-strong bg-sidebar shadow-2xl transition-[width,height] duration-300 ease-spring ${expanded ? "h-[min(640px,calc(100dvh-6rem))] w-[min(560px,calc(100vw-2rem))]" : "h-[min(440px,calc(100dvh-6rem))] w-[min(360px,calc(100vw-2rem))]"}`}
+      aria-hidden={minimized || undefined}
+      inert={minimized || undefined}
+      className={`fixed right-4 top-16 z-[70] flex origin-top-right animate-pop-in flex-col overflow-hidden rounded-xl border border-border-strong bg-sidebar shadow-2xl transition-[width,height,opacity,transform,visibility] duration-300 ease-spring ${expanded ? "h-[min(640px,calc(100dvh-6rem))] w-[min(560px,calc(100vw-2rem))]" : "h-[min(440px,calc(100dvh-6rem))] w-[min(360px,calc(100vw-2rem))]"} ${minimized ? "invisible translate-y-2 scale-95 opacity-0" : "visible opacity-100"}`}
     >
       <header className="flex shrink-0 items-start gap-2 border-b px-4 py-3">
         <Sparkles className="mt-0.5 size-4 shrink-0 text-sage" />
@@ -123,6 +137,9 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
           className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground"
         >
           {expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+        </button>
+        <button type="button" onClick={onMinimize} aria-label="Minimize Quick Assistant" title="Minimize" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground">
+          <Minus className="size-4" />
         </button>
         <button type="button" onClick={onClose} aria-label="Close Quick Assistant" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground">
           <X className="size-4" />
@@ -166,5 +183,18 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
         </button>
       </form>
     </section>
+    {minimized ? (
+      <div className="fixed right-4 top-16 z-[70] flex animate-pop-in items-center gap-1 rounded-full border border-border-strong bg-sidebar py-1 pl-1 pr-1.5 shadow-xl">
+        <button type="button" onClick={onRestore} aria-label="Restore Quick Assistant" className="inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-xs text-foreground hover:bg-raised">
+          {running ? <LoaderCircle className="size-3.5 animate-spin text-sage" /> : <Sparkles className="size-3.5 text-sage" />}
+          Quick Assistant
+          {unseenAnswer ? <span className="size-1.5 rounded-full bg-sage" aria-label="New answer" /> : null}
+        </button>
+        <button type="button" onClick={onClose} aria-label="Close minimized Quick Assistant" className="grid size-6 place-items-center rounded-full text-muted-foreground hover:bg-raised hover:text-foreground">
+          <X className="size-3.5" />
+        </button>
+      </div>
+    ) : null}
+    </>
   );
 }
