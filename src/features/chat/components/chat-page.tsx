@@ -66,6 +66,7 @@ import { replayTrace } from "../execution-trace";
 import { takePendingRun } from "../pending-run";
 import { useConversationScroll } from "../use-conversation-scroll";
 import { ChatHeader } from "./chat-header";
+import { QuickAssistantPopup } from "@/features/quick-assistant";
 import { ConversationNavigator } from "./conversation-navigator";
 import { MessageList } from "./message-list";
 
@@ -193,6 +194,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const conversationScroll = useConversationScroll(messages);
   const [panelOpen, setPanelOpen] = useState(false);
+  // Holds the main-chat snapshot taken when Quick Assistant opened; null means closed.
+  const [quickAssistant, setQuickAssistant] = useState<{ snapshotMessageId: string | null } | null>(null);
   const [selectedFile, setSelectedFile] = useState<ContextFile | null>(null);
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [draft, setDraft] = useState("");
@@ -575,6 +578,11 @@ export function ChatPage({ chatId }: { chatId: string }) {
     });
   }, [chatId, messagesQuery.data, runMessage]);
 
+  function toggleQuickAssistant() {
+    setQuickAssistant((current) => current ? null : { snapshotMessageId: messagesQuery.data?.items.at(-1)?.id ?? null });
+  }
+  const closeQuickAssistant = useCallback(() => setQuickAssistant(null), []);
+
   function selectFile(file: ContextFile) {
     setSelectedFile(file);
     setPreviewExpanded(false);
@@ -818,6 +826,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
             workspaceName={workspaceName}
             panelOpen={panelOpen}
             onToggleRightPanel={togglePanel}
+            quickAssistantOpen={quickAssistant !== null}
+            onToggleQuickAssistant={toggleQuickAssistant}
           />
         </div>
         <ConversationNavigator
@@ -1000,10 +1010,19 @@ export function ChatPage({ chatId }: { chatId: string }) {
         </form>
       </div>
 
+      {quickAssistant ? (
+        <QuickAssistantPopup
+          key={chatId}
+          chatId={chatId}
+          snapshotMessageId={quickAssistant.snapshotMessageId}
+          resources={[...(datasetsQuery.data?.items ?? []), ...(artifactsQuery.data?.items ?? [])]}
+          onFileSelect={selectFile}
+          onClose={closeQuickAssistant}
+        />
+      ) : null}
       {panelOpen ? (
         <div className="absolute inset-y-0 right-0 z-40 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:static xl:z-auto xl:w-[340px] xl:max-w-none xl:shrink-0 xl:shadow-none">
           <ContextSidebar
-            chatId={chatId}
             workspaceId={chatQuery.data?.workspace_id ?? null}
             datasets={datasetsQuery.data?.items ?? []}
             artifacts={artifactsQuery.data?.items ?? []}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Folder, Menu, PanelRight, Share2 } from "lucide-react";
+import { Folder, Menu, PanelRight, Share2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useUiStore } from "@/stores/ui-store";
 import { cn } from "@/lib/utils";
@@ -10,11 +10,16 @@ export function ChatHeader({
   workspaceName,
   panelOpen,
   onToggleRightPanel,
+  quickAssistantOpen,
+  onToggleQuickAssistant,
 }: {
   title: string;
   workspaceName?: string;
   panelOpen: boolean;
   onToggleRightPanel: () => void;
+  quickAssistantOpen?: boolean;
+  /** Omitted before the chat exists: Quick Assistant needs a saved transcript to read. */
+  onToggleQuickAssistant?: () => void;
 }) {
   const setMobileOpen = useUiStore((state) => state.setMobileSidebarOpen);
 
@@ -46,6 +51,22 @@ export function ChatHeader({
       <span className="hidden rounded-full border border-border px-2.5 py-0.5 text-[10px] font-medium text-muted-foreground/90 sm:inline bg-surface/50">
         Live Gemini
       </span>
+
+      {onToggleQuickAssistant ? <Button
+        variant="ghost"
+        size="sm"
+        onClick={onToggleQuickAssistant}
+        aria-label="Quick Assistant"
+        aria-expanded={quickAssistantOpen ?? false}
+        title="Ask a side question without adding it to this chat"
+        className={cn(
+          "h-8 gap-1.5 text-xs transition-colors",
+          quickAssistantOpen ? "bg-raised text-foreground" : "text-muted-foreground hover:bg-raised hover:text-foreground"
+        )}
+      >
+        <Sparkles className="size-3.5 text-sage" />
+        <span className="hidden sm:inline">Quick Assistant</span>
+      </Button> : null}
 
       <Button
         variant="ghost"

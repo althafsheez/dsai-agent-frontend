@@ -5,20 +5,6 @@ import { ContextSidebar } from "./context-sidebar";
 import { FilePreviewSidebar } from "./file-preview-sidebar";
 import type { ArtifactResource, DatasetResource } from "./types";
 
-vi.mock("@/lib/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api")>();
-  return {
-    ...actual,
-    getModels: vi.fn(async () => ({ default_model_id: "gemini-test", models: [{ id: "gemini-test", label: "Gemini Test", supported_efforts: ["low"], default_effort: "low" }], configuration_status: "ready" })),
-    getQuickAssistantMessages: vi.fn(async () => ({ items: [], next_cursor: null })),
-    streamQuickAssistantMessage: vi.fn(async (_input, onEvent) => {
-      onEvent({ event_id: "quick-created", run_id: "quick-answer", type: "message.created", data: { message_id: "quick-answer" }, timestamp: "2026-11-09T00:00:00Z", sequence: 1 });
-      onEvent({ event_id: "quick-delta", run_id: "quick-answer", type: "message.delta", data: { message_id: "quick-answer", text: "A concise saved response." }, timestamp: "2026-11-09T00:00:00Z", sequence: 2 });
-      onEvent({ event_id: "quick-completed", run_id: "quick-answer", type: "message.completed", data: { message_id: "quick-answer", content: "A concise saved response." }, timestamp: "2026-11-09T00:00:00Z", sequence: 3 });
-    }),
-  };
-});
-
 const workspaceDataset: DatasetResource = {
   id: "dataset-workspace",
   name: "Sales.csv",
@@ -66,7 +52,6 @@ const artifact: ArtifactResource = {
 };
 
 const baseProps = {
-  chatId: "chat-1",
   workspaceId: "workspace-1",
   datasets: [workspaceDataset, chatDataset],
   artifacts: [artifact],
@@ -151,15 +136,6 @@ describe("ContextSidebar", () => {
     expect(within(screen.getByRole("table")).getAllByText("sepal_length")).toHaveLength(2);
     expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining("same key"));
     consoleError.mockRestore();
-  });
-
-  it("keeps the Quick Assistant separate from file selection and the main chat", () => {
-    const onFileSelect = vi.fn();
-    render(<ContextSidebar {...baseProps} onClose={vi.fn()} onFileSelect={onFileSelect} />);
-
-    expect(screen.getByRole("textbox", { name: "Ask Quick Assistant" })).toBeInTheDocument();
-    expect(screen.getByText(/separate, saved chat/i)).toBeInTheDocument();
-    expect(onFileSelect).not.toHaveBeenCalled();
   });
 
   it("closes context mode", async () => {

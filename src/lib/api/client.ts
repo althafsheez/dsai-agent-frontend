@@ -394,7 +394,15 @@ export async function streamChatRun(
 }
 
 export async function streamQuickAssistantMessage(
-  input: { context_type: "chat" | "workspace"; context_id: string; content: string; model_id: string; effort?: string; client_request_id: string },
+  input: {
+    context_type: "chat" | "workspace";
+    context_id: string;
+    content: string;
+    model_id: string;
+    effort?: string;
+    client_request_id: string;
+    context_until_message_id?: string;
+  },
   onEvent: (event: ExecutionEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {

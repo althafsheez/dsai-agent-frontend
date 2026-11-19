@@ -64,20 +64,20 @@ def _resource_context(session: Session, user: User, context_type: str, context_i
     return "\n".join(files) or "No datasets or artifacts are currently available in this context."
 
 
-def _main_chat_context(session: Session, chat: Chat | None) -> str:
-    """Give Quick Assistant a bounded, read-only view of the main transcript."""
+def _main_chat_context(session: Session, chat: Chat | None, until_message_id: str | None = None) -> str:
+    """Give Quick Assistant a bounded, read-only view of the main transcript up to when it was opened."""
     if chat is None:
         return "This Quick Assistant is scoped to a workspace; there is no single main chat transcript."
-    messages = list(session.scalars(
-        select(Message)
-        .where(Message.chat_id == chat.id, Message.kind == "normal")
-        .order_by(Message.position.desc(), Message.id.desc())
-        .limit(20)
-    ))
+    query = select(Message).where(Message.chat_id == chat.id, Message.kind == "normal")
+    if until_message_id is not None:
+        cutoff = session.get(Message, until_message_id)
+        if cutoff is not None and cutoff.chat_id == chat.id:
+            query = query.where(Message.position <= cutoff.position)
+    messages = list(session.scalars(query.order_by(Message.position.desc(), Message.id.desc()).limit(60)))
     if not messages:
         return "The main chat has no messages yet."
     transcript: list[str] = []
-    budget = 24_000
+    budget = 60_000
     for message in reversed(messages):
         content = message.content.strip()
         if not content:
@@ -109,7 +109,7 @@ async def _stream_answer(request: Request, user: User, data: QuickMessageCreate,
                 return
             history = _messages(session, user, data.context_type, data.context_id)
             resources = _resource_context(session, user, data.context_type, data.context_id, chat)
-            main_chat = _main_chat_context(session, chat)
+            main_chat = _main_chat_context(session, chat, data.context_until_message_id)
             assistant.status = "running"
             session.commit()
             turns = [ChatTurn(role="user", content=(
@@ -172,7 +172,11 @@ async def stream_quick_message(
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> StreamingResponse:
-    _require_context(session, user, data.context_type, data.context_id)
+    chat = _require_context(session, user, data.context_type, data.context_id)
+    if data.context_until_message_id is not None:
+        cutoff = session.get(Message, data.context_until_message_id)
+        if chat is None or cutoff is None or cutoff.chat_id != chat.id:
+            raise APIError(422, "invalid_context", "The Quick Assistant snapshot does not belong to this chat.")
     try:
         request.app.state.provider.validate_selection(data.model_id, data.effort)
     except ProviderError as exc:

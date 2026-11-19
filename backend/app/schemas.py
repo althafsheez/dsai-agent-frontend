@@ -149,6 +149,8 @@ class QuickMessageCreate(BaseModel):
     model_id: str
     effort: str | None = None
     client_request_id: str = Field(min_length=1, max_length=100)
+    # Main-chat messages after this one are hidden from Quick Assistant: it sees the chat as it was when opened.
+    context_until_message_id: str | None = Field(default=None, max_length=100)
 
 
 class QuickMessageResponse(APIModel):
