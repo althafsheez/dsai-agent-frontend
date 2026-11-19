@@ -90,6 +90,21 @@ def _main_chat_context(session: Session, chat: Chat | None, until_message_id: st
     return "\n\n".join(transcript) or "The main chat has no completed text yet."
 
 
+def _answered_history(history: list[QuickMessage], current_answer_id: str) -> list[QuickMessage]:
+    """Earlier question/answer pairs only: a question whose answer failed would otherwise be answered again."""
+    kept: list[QuickMessage] = []
+    for index, item in enumerate(history):
+        if item.id == current_answer_id or not item.content:
+            continue
+        if item.role == "user":
+            answer = history[index + 1] if index + 1 < len(history) else None
+            is_current = answer is not None and answer.id == current_answer_id
+            if not is_current and (answer is None or answer.role != "assistant" or not answer.content):
+                continue
+        kept.append(item)
+    return kept
+
+
 def _sse(message_id: str, event_type: str, data: dict, sequence: int) -> str:
     payload = {
         "event_id": str(uuid4()), "run_id": message_id, "type": event_type,
@@ -120,7 +135,7 @@ async def _stream_answer(request: Request, user: User, data: QuickMessageCreate,
                 f"Read-only main chat transcript:\n{main_chat}\n\n"
                 f"Available context files:\n{resources}"
             ))]
-            turns.extend(ChatTurn(role=item.role, content=item.content) for item in history if item.id != assistant_id and item.content)
+            turns.extend(ChatTurn(role=item.role, content=item.content) for item in _answered_history(history, assistant_id))
         yield _sse(assistant_id, "message.created", {"message_id": assistant_id, "role": "assistant"}, 1)
         sequence = 1
         async for text in provider.stream_text(turns, data.model_id, data.effort):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.providers import ProviderError
 from conftest import FakeProvider, create_chat
 
 
@@ -42,3 +43,16 @@ async def test_quick_assistant_rejects_snapshot_from_another_chat(client, demo_h
     second = await create_chat(client, demo_headers, "create-b")
     response = await _ask(client, demo_headers, first["chat"]["id"], "qa-x", second["message"]["id"])
     assert response.status_code == 422
+
+
+async def test_quick_assistant_drops_questions_whose_answer_failed(client, demo_headers, provider: FakeProvider):
+    created = await create_chat(client, demo_headers)
+    chat_id = created["chat"]["id"]
+    provider.failure = ProviderError("provider_error", "Gemini generation failed.")
+    await _ask(client, demo_headers, chat_id, "qa-fail", None)
+    provider.failure = None
+
+    body = {"context_type": "chat", "context_id": chat_id, "content": "Second question", "model_id": "gemini-test", "client_request_id": "qa-ok"}
+    assert (await client.post("/api/quick-assistant/messages/stream", headers=demo_headers, json=body)).status_code == 200
+    turns = provider.calls[-1][0]
+    assert [turn.content for turn in turns[1:]] == ["Second question"]
