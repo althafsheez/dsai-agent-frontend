@@ -61,8 +61,8 @@ import {
   type ExecutionEvent,
   type MessageDto,
 } from "@/lib/api";
-import type { AssistantMessage, ChatMessage, MessageBlock } from "../types";
-import { replayTrace } from "../execution-trace";
+import type { AssistantMessage, ChatMessage, MessageBlock, TraceStep } from "../types";
+import { asRecord, replayTrace, resources as extractTraceResources } from "../execution-trace";
 import { takePendingRun } from "../pending-run";
 import { useConversationScroll } from "../use-conversation-scroll";
 import { ChatHeader } from "./chat-header";
@@ -445,10 +445,16 @@ export function ChatPage({ chatId }: { chatId: string }) {
         const id = eventString(event, "tool_call_id");
         const name = eventString(event, "name");
         if (!id || !name) return;
-        updateAssistant((message) => ({
-          ...message,
-          trace: [...(message.trace ?? []), {
-            id: eventString(event, "step_id") ?? `${event.run_id}:${id}`,
+        const argumentsValue = asRecord(event.data.arguments) ?? {};
+        const stepId = eventString(event, "step_id") ?? `${event.run_id}:${id}`;
+        const code = typeof event.data.code === "string" ? event.data.code : typeof argumentsValue.code === "string" ? argumentsValue.code : undefined;
+        const sql = typeof event.data.sql === "string" ? event.data.sql : typeof argumentsValue.sql === "string" ? argumentsValue.sql : undefined;
+        const inputResources = extractTraceResources(event.data.input_resources ?? argumentsValue.input_resources);
+        updateAssistant((message) => {
+          const priorTrace = message.trace ?? [];
+          const existingStepIndex = priorTrace.findIndex((s) => s.id === stepId);
+          const newStep: TraceStep = {
+            id: stepId,
             runId: event.run_id,
             messageId: assistantId,
             label: toolLabel(name),
@@ -456,18 +462,49 @@ export function ChatPage({ chatId }: { chatId: string }) {
             detail: "Tool is running",
             status: "running",
             startedAt: event.timestamp,
-          }],
-        }));
+            code,
+            sql,
+            inputs: inputResources.length ? inputResources : undefined,
+          };
+          const nextTrace = existingStepIndex >= 0
+            ? priorTrace.map((s, idx) => idx === existingStepIndex ? { ...s, ...newStep } : s)
+            : [...priorTrace, newStep];
+          return {
+            ...message,
+            trace: nextTrace,
+          };
+        });
         return;
       }
       if (event.type === "tool.completed" || event.type === "tool.failed") {
         const id = eventString(event, "tool_call_id");
         if (!id) return;
         const failed = event.type === "tool.failed";
+        const stepId = eventString(event, "step_id") ?? `${event.run_id}:${id}`;
+        const output = asRecord(event.data.output) ?? {};
+        const outputResources = extractTraceResources(event.data.resources ?? output.resources);
+        const durationMs = typeof event.data.duration_ms === "number" ? event.data.duration_ms : undefined;
+        const results = output.rows ?? output.results ?? output.text;
+        const stdout = typeof output.stdout === "string" ? output.stdout : undefined;
+        const stderr = typeof output.stderr === "string" ? output.stderr : undefined;
+        const errorMessage = failed ? String(event.data.error ?? output.error ?? "Tool failed") : undefined;
+
         updateAssistant((message) => ({
           ...message,
-          trace: (message.trace ?? []).map((step) => step.id === (eventString(event, "step_id") ?? `${event.run_id}:${id}`)
-            ? { ...step, detail: failed ? eventString(event, "error") ?? "Tool failed" : "Completed", status: failed ? "failed" : "completed", completedAt: event.timestamp }
+          trace: (message.trace ?? []).map((step) => step.id === stepId
+            ? {
+                ...step,
+                status: failed ? "failed" : "completed",
+                detail: failed ? (errorMessage ?? "Tool failed") : "Completed",
+                summary: eventString(event, "summary") ?? step.summary,
+                completedAt: event.timestamp,
+                durationMs: durationMs ?? step.durationMs,
+                outputs: outputResources.length ? outputResources : step.outputs,
+                results: results !== undefined ? results : step.results,
+                stdout: stdout !== undefined ? stdout : step.stdout,
+                stderr: stderr !== undefined ? stderr : step.stderr,
+                error: errorMessage,
+              }
             : step),
         }));
         return;
@@ -519,12 +556,29 @@ export function ChatPage({ chatId }: { chatId: string }) {
           : "Gemini could not complete this response.";
         setError(message);
         setQueuedQuestions((current) => current.map((item) => ({ ...item, paused: true })));
-        updateAssistant((assistant) => ({ ...assistant, status: "failed" }));
+        updateAssistant((assistant) => ({
+          ...assistant,
+          status: "failed",
+          trace: (assistant.trace ?? []).map((step) =>
+            step.status === "running"
+              ? { ...step, status: "failed", detail: message, error: message }
+              : step
+          ),
+        }));
         return;
       }
       if (event.type === "agent.cancelled" || event.type === "agent.interrupted") {
+        const reason = event.type === "agent.cancelled" ? "Run stopped by user." : "Run interrupted.";
         setComposerStatus(event.type === "agent.cancelled" ? "Run stopped." : "Run interrupted.");
-        updateAssistant((message) => ({ ...message, status: "interrupted" }));
+        updateAssistant((message) => ({
+          ...message,
+          status: "interrupted",
+          trace: (message.trace ?? []).map((step) =>
+            step.status === "running"
+              ? { ...step, status: "failed", detail: "Interrupted", error: reason }
+              : step
+          ),
+        }));
       }
     }
 
@@ -541,11 +595,27 @@ export function ChatPage({ chatId }: { chatId: string }) {
       }
     } catch (caught) {
       if (controller.signal.aborted) {
-        updateAssistant((message) => ({ ...message, status: "interrupted" }));
+        updateAssistant((message) => ({
+          ...message,
+          status: "interrupted",
+          trace: (message.trace ?? []).map((step) =>
+            step.status === "running"
+              ? { ...step, status: "failed", detail: "Interrupted", error: "Run was cancelled by user." }
+              : step
+          ),
+        }));
       } else {
         const message = caught instanceof Error ? caught.message : "The Gemini request failed.";
         setError(message);
-        updateAssistant((assistant) => ({ ...assistant, status: "failed" }));
+        updateAssistant((assistant) => ({
+          ...assistant,
+          status: "failed",
+          trace: (assistant.trace ?? []).map((step) =>
+            step.status === "running"
+              ? { ...step, status: "failed", detail: message, error: message }
+              : step
+          ),
+        }));
       }
     } finally {
       if (streamController.current === controller) streamController.current = null;

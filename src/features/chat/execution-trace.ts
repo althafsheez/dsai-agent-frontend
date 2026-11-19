@@ -6,11 +6,11 @@ export type TraceReplay = {
   outputsByMessage: Map<string, TraceResourceReference[]>;
 };
 
-function asRecord(value: unknown): Record<string, unknown> | null {
+export function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
-function resources(value: unknown): TraceResourceReference[] {
+export function resources(value: unknown): TraceResourceReference[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
     const resource = asRecord(item);
