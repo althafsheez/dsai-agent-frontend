@@ -39,7 +39,7 @@ export function WorkflowCard({ workflow, list = false }: { workflow: WorkflowPre
 
     <button type="button" disabled aria-label={`Actions for ${workflow.name}`} title="Workflow actions are not connected in this preview" className="absolute right-3 top-3 grid size-7 place-items-center rounded-md border bg-raised text-muted-foreground disabled:cursor-not-allowed disabled:opacity-70"><MoreHorizontal className="size-4" /></button>
 
-    <div className={cn("mt-3 flex items-center gap-2 pl-12", list && "sm:mt-0 sm:pl-0")} aria-label={`${workflow.source.label} through Atelier AI to ${workflow.destination.label}`}>
+    <div className={cn("mt-3 flex items-center gap-2 pl-12", list && "sm:mt-0 sm:pl-0")} aria-label={`${workflow.source.label} through DSAI to ${workflow.destination.label}`}>
       <AppNode app={workflow.source} />
       <span aria-hidden="true" className="h-px w-4 bg-border-strong" />
       <span className="grid size-10 shrink-0 place-items-center rounded-lg border bg-raised text-slate"><Zap className="size-[18px]" /></span>
