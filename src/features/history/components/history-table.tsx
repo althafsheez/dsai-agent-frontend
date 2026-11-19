@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MessageSquare, Folder, Trash2, X } from "lucide-react";
+import { MessageSquare, Folder, Pin, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -18,6 +18,7 @@ interface HistoryTableProps {
   onArchive: (record: HistoryRecord, archived: boolean) => Promise<void>;
   onDelete: (record: HistoryRecord) => Promise<void>;
   onUnreadChange?: (record: HistoryRecord, isUnread: boolean) => Promise<void>;
+  onPinChange?: (record: HistoryRecord, pinned: boolean) => Promise<void>;
   onDeleteMany?: (records: HistoryRecord[]) => Promise<void>;
 }
 
@@ -25,7 +26,7 @@ function recordKey(record: HistoryRecord) {
   return `${record.kind}:${record.id}`;
 }
 
-export function HistoryTable({ records, loading, hasFilters, onClearFilters, onRename, onArchive, onDelete, onUnreadChange = async () => {}, onDeleteMany }: HistoryTableProps) {
+export function HistoryTable({ records, loading, hasFilters, onClearFilters, onRename, onArchive, onDelete, onUnreadChange = async () => {}, onPinChange, onDeleteMany }: HistoryTableProps) {
   const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
@@ -97,11 +98,11 @@ export function HistoryTable({ records, loading, hasFilters, onClearFilters, onR
           const Icon = record.kind === "chat" ? MessageSquare : Folder;
           return <tr key={key} className={`group border-t text-xs transition-colors hover:bg-surface ${selectedKeys.has(key) ? "bg-surface" : ""}`}>
             <td className="px-3 py-1"><input type="checkbox" aria-label={`Select ${record.name}`} checked={selectedKeys.has(key)} onChange={() => toggleSelected(key)} className="size-3.5 accent-[var(--primary)]" /></td>
-            <td className="p-0"><Link href={href} className="flex min-w-0 items-center gap-2.5 px-1 py-3 font-medium text-foreground outline-none focus-visible:bg-raised"><Icon className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate">{record.name}</span></Link></td>
+            <td className="p-0"><Link href={href} className="flex min-w-0 items-center gap-2.5 px-1 py-3 font-medium text-foreground outline-none focus-visible:bg-raised"><Icon className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate">{record.name}</span>{record.pinned_at && <Pin aria-label="Pinned" className="size-3 shrink-0 fill-current text-muted-foreground" />}</Link></td>
             <td className="truncate px-3 py-3 text-muted-foreground">{record.kind === "workspace" ? "—" : record.workspace_name ?? "Standalone"}</td>
             <td className="truncate px-3 py-3 text-muted-foreground">{record.author.name}</td>
             <td className="whitespace-nowrap px-3 py-3 text-muted-foreground"><time dateTime={record.updated_at}>{formatRelativeTime(record.updated_at)}</time></td>
-            <td className="px-2 py-1"><HistoryRowActions record={record} menuOpen={openMenuKey === key} onMenuOpenChange={(open) => setOpenMenuKey(open ? key : null)} onRename={(name) => onRename(record, name)} onArchive={(archived) => onArchive(record, archived)} onDelete={() => onDelete(record)} onUnreadChange={(isUnread) => onUnreadChange(record, isUnread)} /></td>
+            <td className="px-2 py-1"><HistoryRowActions record={record} menuOpen={openMenuKey === key} onMenuOpenChange={(open) => setOpenMenuKey(open ? key : null)} onRename={(name) => onRename(record, name)} onArchive={(archived) => onArchive(record, archived)} onDelete={() => onDelete(record)} onUnreadChange={(isUnread) => onUnreadChange(record, isUnread)} onPinChange={onPinChange ? (pinned) => onPinChange(record, pinned) : undefined} /></td>
           </tr>;
         })}
       </tbody>
