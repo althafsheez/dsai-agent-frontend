@@ -18,7 +18,6 @@ const CHATS_KEY = ["sidebar", "recent-chats"] as const;
 const WORKSPACES_KEY = ["workspaces"] as const;
 
 export function usePinnedItems() {
-  const queryClient = useQueryClient();
   const chatsQuery = useQuery({ queryKey: CHATS_KEY, queryFn: getChats, staleTime: 10_000 });
   const workspacesQuery = useQuery({ queryKey: WORKSPACES_KEY, queryFn: getWorkspaces, staleTime: 10_000 });
 
@@ -31,6 +30,20 @@ export function usePinnedItems() {
       .map((workspace) => ({ kind: "workspace" as const, id: workspace.id, title: workspace.name, href: `/workspaces/${workspace.id}`, pinnedAt: workspace.pinned_at! })),
   ].sort((left, right) => new Date(right.pinnedAt).getTime() - new Date(left.pinnedAt).getTime());
 
+  const { togglePin, isPending } = useTogglePin();
+
+  return {
+    items,
+    isLoading: chatsQuery.isLoading || workspacesQuery.isLoading,
+    isError: chatsQuery.isError || workspacesQuery.isError,
+    togglePin,
+    isPending,
+  };
+}
+
+/** Pin or unpin without loading the pinned lists, for pages that only need the action. */
+export function useTogglePin() {
+  const queryClient = useQueryClient();
   const toggle = useMutation({
     mutationFn: async ({ kind, id, pinned }: { kind: PinnedKind; id: string; pinned: boolean }): Promise<void> => {
       if (kind === "chat") await updateChat(id, { pinned });
@@ -49,9 +62,6 @@ export function usePinnedItems() {
   });
 
   return {
-    items,
-    isLoading: chatsQuery.isLoading || workspacesQuery.isLoading,
-    isError: chatsQuery.isError || workspacesQuery.isError,
     togglePin: (kind: PinnedKind, id: string, pinned: boolean) => toggle.mutate({ kind, id, pinned }),
     isPending: toggle.isPending,
   };

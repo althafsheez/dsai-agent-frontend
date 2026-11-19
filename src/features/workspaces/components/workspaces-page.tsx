@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Folder, Pin, PinOff, Search, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { deleteWorkspace, getWorkspaces, uploadResource, type WorkspaceDto } from "@/lib/api";
-import { usePinnedItems } from "@/features/pinning";
+import { useTogglePin } from "@/features/pinning";
 import { CreateWorkspaceDialog } from "./create-workspace-dialog";
 import { WorkspaceRowMenu } from "./workspace-row-menu";
 
@@ -29,7 +29,7 @@ export function WorkspacesPage() {
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const { togglePin } = usePinnedItems();
+  const { togglePin } = useTogglePin();
 
   const workspacesQuery = useQuery({ queryKey: ["workspaces"], queryFn: getWorkspaces });
 
