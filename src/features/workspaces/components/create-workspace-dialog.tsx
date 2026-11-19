@@ -62,7 +62,7 @@ export function CreateWorkspaceDialog({ onCreated }: CreateWorkspaceDialogProps)
 
   return <Dialog open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (!nextOpen && !submitting) reset(); }}>
     <DialogTrigger asChild><Button type="button"><Plus />New Workspace</Button></DialogTrigger>
-    <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[600px] overflow-y-auto bg-[#111315] p-0">
+    <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[600px] overflow-y-auto bg-popover p-0">
       <form onSubmit={submit}>
         <div className="border-b px-6 py-5 sm:px-7">
           <DialogTitle className="text-xl font-semibold tracking-tight">Create Workspace</DialogTitle>

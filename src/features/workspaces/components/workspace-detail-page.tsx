@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Database, FileText, Layers3, MessageSquare, Plus, Search, Workflow, X } from "lucide-react";
+import { ChevronRight, Database, FileText, Folder, MessageSquare, Plus, Search, Workflow, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   createWorkspaceWorkflow,
@@ -87,7 +87,15 @@ export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
   return <section className="mx-auto w-full max-w-[1440px] px-4 py-5 sm:px-6 lg:px-8">
     <nav aria-label="Breadcrumb" className="mb-4 flex items-center gap-1 text-xs text-muted-foreground"><Link href="/workspaces" className="hover:text-foreground">Workspaces</Link><ChevronRight className="size-3" /><span className="truncate text-foreground">{item.name}</span></nav>
     <header className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-start sm:justify-between">
-      <div className="flex min-w-0 items-start gap-3"><div className="grid size-12 shrink-0 place-items-center rounded-xl border bg-raised text-slate"><Layers3 className="size-6" /></div><div className="min-w-0"><h1 className="truncate text-2xl font-semibold tracking-tight">{item.name}</h1><p className="mt-1 max-w-3xl text-sm text-muted-foreground">{item.description || "No workspace description yet."}</p></div></div>
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="grid size-12 shrink-0 place-items-center rounded-xl border bg-raised text-slate">
+          <Folder className="size-6" />
+        </div>
+        <div className="min-w-0">
+          <h1 className="truncate text-2xl font-semibold tracking-tight">{item.name}</h1>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{item.description || "No workspace description yet."}</p>
+        </div>
+      </div>
       <WorkspaceAccessDialogs workspaceName={item.name} workspaceId={workspaceId} />
     </header>
     <h2 className="mt-5 text-xl font-semibold">Overview</h2>
