@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..dependencies import get_current_user, get_db
 from ..errors import APIError
-from ..models import FileObject, LibraryEntry, Message, Resource, ResourceLink, User
+from ..models import Chat, FileObject, LibraryEntry, Message, Resource, ResourceLink, User, Workspace
 from ..services.records import require_chat, require_workspace
 from ..services.dataset_preview import MAX_PREVIEW_ROWS, inspect_dataset
 from ..storage import LocalFileStorage
@@ -245,16 +245,49 @@ async def list_library(
         .where(LibraryEntry.user_id == user.id, Resource.created_by == user.id)
         .order_by(LibraryEntry.created_at.desc(), LibraryEntry.id.desc())
     ).all()
+    workspaces = _library_workspaces(session, user, [resource.id for _, resource, _ in rows])
     items = []
     for entry, resource, file_object in rows:
         item = _catalog_item(resource, file_object, "library", True)
+        workspace = workspaces.get(resource.id)
         items.append({
             **item,
             "resource_type": resource.resource_type,
             "library_category": _library_category(resource),
             "library_created_at": entry.created_at,
+            "workspace_id": workspace.id if workspace else None,
+            "workspace_name": workspace.name if workspace else None,
         })
     return {"items": items, "next_cursor": None}
+
+
+def _library_workspaces(session: Session, user: User, resource_ids: list[str]) -> dict[str, Workspace]:
+    """Map each saved resource to the live workspace it belongs to, directly or through a workspace chat."""
+    if not resource_ids:
+        return {}
+    links = session.execute(
+        select(ResourceLink.resource_id, ResourceLink.scope_type, ResourceLink.scope_id)
+        .where(ResourceLink.resource_id.in_(resource_ids), ResourceLink.scope_type.in_(("workspace", "chat")))
+        .order_by(ResourceLink.created_at)
+    ).all()
+    chat_ids = {scope_id for _, scope_type, scope_id in links if scope_type == "chat"}
+    chat_workspace = dict(session.execute(
+        select(Chat.id, Chat.workspace_id).where(Chat.id.in_(chat_ids), Chat.workspace_id.is_not(None))
+    ).all()) if chat_ids else {}
+    workspace_ids = {scope_id for _, scope_type, scope_id in links if scope_type == "workspace"} | set(chat_workspace.values())
+    live = {
+        workspace.id: workspace
+        for workspace in session.scalars(select(Workspace).where(
+            Workspace.id.in_(workspace_ids), Workspace.created_by == user.id, Workspace.deleted_at.is_(None),
+        ))
+    } if workspace_ids else {}
+    result: dict[str, Workspace] = {}
+    # A direct workspace link wins over one inherited from a chat.
+    for resource_id, scope_type, scope_id in sorted(links, key=lambda link: link[1] != "workspace"):
+        workspace_id = scope_id if scope_type == "workspace" else chat_workspace.get(scope_id)
+        if resource_id not in result and workspace_id in live:
+            result[resource_id] = live[workspace_id]
+    return result
 
 
 @router.post("/{resource_id}/library", status_code=status.HTTP_201_CREATED)

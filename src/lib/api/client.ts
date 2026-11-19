@@ -215,9 +215,17 @@ export function getArtifacts(chatId: string): Promise<ApiList<ArtifactResource>>
 export type LibraryCategory = "dataset" | "visual" | "code" | "report" | "other";
 
 /** A saved resource retains its dataset/artifact discriminator for preview rendering. */
+type LibraryFields = {
+  library_category: LibraryCategory;
+  library_created_at: string;
+  /** The live workspace the file belongs to, directly or through a workspace chat; null for standalone chats. */
+  workspace_id: string | null;
+  workspace_name: string | null;
+};
+
 export type LibraryResource =
-  | (DatasetResource & { resource_type: "dataset"; library_category: LibraryCategory; library_created_at: string })
-  | (ArtifactResource & { resource_type: "artifact"; library_category: LibraryCategory; library_created_at: string });
+  | (DatasetResource & LibraryFields & { resource_type: "dataset" })
+  | (ArtifactResource & LibraryFields & { resource_type: "artifact" });
 
 export function getLibrary(): Promise<ApiList<LibraryResource>> {
   return requestJson<ApiList<LibraryResource>>("/library");

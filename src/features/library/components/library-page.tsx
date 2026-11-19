@@ -5,12 +5,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3,
   Bookmark,
+  ChevronLeft,
+  ChevronRight,
   Code2,
   Database,
   Download,
   Eye,
   FileImage,
   FileText,
+  Folder,
   Grid2X2,
   Layers3,
   List,
@@ -38,6 +41,16 @@ function ResourceIcon({ item }: { item: LibraryResource }) {
 }
 
 type LibraryView = "grid" | "list";
+type LibraryFolder = { id: string; name: string; items: LibraryResource[] };
+
+// Workspaces with more saved items than this get their own folder; smaller ones stay inline to avoid one-file folders.
+const FOLDER_MIN_ITEMS = 4;
+
+function folderSummary(items: LibraryResource[]) {
+  const counts = new Map<string, number>();
+  for (const item of items) counts.set(categoryLabel(item.library_category), (counts.get(categoryLabel(item.library_category)) ?? 0) + 1);
+  return [...counts].map(([label, count]) => `${count} ${label.toLowerCase()}${count === 1 ? "" : "s"}`).join(" · ");
+}
 type Filter = "all" | LibraryResource["library_category"];
 
 const FILTERS: Array<{ id: Filter; label: string; icon: typeof Layers3 }> = [
@@ -169,6 +182,7 @@ export function LibraryPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [view, setView] = useState<LibraryView>("grid");
   const [preview, setPreview] = useState<ContextFile | null>(null);
+  const [openFolderId, setOpenFolderId] = useState<string | null>(null);
 
   const libraryQuery = useQuery({ queryKey: ["library"], queryFn: getLibrary });
 
@@ -191,6 +205,105 @@ export function LibraryPage() {
       return matchesSearch && (filter === "all" || item.library_category === filter);
     });
   }, [filter, libraryQuery.data?.items, query]);
+
+  function renderItems(list: LibraryResource[]) {
+    return (
+      <div
+        className={`grid gap-4 ${
+          view === "grid" ? "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" : "grid-cols-1"
+        }`}
+      >
+        {list.map((item) => (
+          <article
+            key={item.id}
+            className={`group min-w-0 overflow-hidden rounded-xl border bg-surface/50 transition-colors hover:border-border-strong hover:bg-surface ${
+              view === "list" ? "flex min-h-20 items-stretch" : ""
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => setPreview(item)}
+              aria-label={`Preview ${item.name}`}
+              className={`relative block shrink-0 overflow-hidden bg-raised text-left ${
+                view === "list" ? "h-20 w-28" : "aspect-[5/4] w-full"
+              }`}
+            >
+              <LibraryThumbnail item={item} />
+              {view === "grid" && (
+                <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 pb-2.5 pt-7 text-[10px] font-medium uppercase tracking-[0.12em] text-white/80">
+                  {categoryLabel(item.library_category)}
+                </span>
+              )}
+            </button>
+            <div className="flex min-w-0 flex-1 items-center justify-between gap-3 p-3">
+              <button
+                type="button"
+                onClick={() => setPreview(item)}
+                className="min-w-0 flex-1 text-left"
+              >
+                <h2 className="truncate text-xs font-medium text-foreground group-hover:text-foreground">
+                  {item.name}
+                </h2>
+                <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <span className="font-medium text-foreground/75">
+                    {categoryLabel(item.library_category)}
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  {formatBytes(item.size_bytes)}
+                </p>
+              </button>
+              <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                <button
+                  type="button"
+                  onClick={() => setPreview(item)}
+                  aria-label={`Preview ${item.name}`}
+                  className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-foreground"
+                >
+                  <Eye className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void downloadResource(item.download_url, item.name)}
+                  aria-label={`Download ${item.name}`}
+                  className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-foreground"
+                >
+                  <Download className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  disabled={removeMutation.isPending}
+                  onClick={() => removeMutation.mutate(item.id)}
+                  aria-label={`Remove ${item.name} from Library`}
+                  className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    );
+  }
+
+  // Search shows flat results across folders so a match is never hidden inside one.
+  const { folders, looseItems } = useMemo(() => {
+    if (query.trim()) return { folders: [] as LibraryFolder[], looseItems: items };
+    const byWorkspace = new Map<string, LibraryFolder>();
+    for (const item of items) {
+      if (!item.workspace_id) continue;
+      const folder = byWorkspace.get(item.workspace_id) ?? { id: item.workspace_id, name: item.workspace_name ?? "Workspace", items: [] };
+      folder.items.push(item);
+      byWorkspace.set(item.workspace_id, folder);
+    }
+    const grouped = [...byWorkspace.values()].filter((folder) => folder.items.length >= FOLDER_MIN_ITEMS);
+    const groupedIds = new Set(grouped.map((folder) => folder.id));
+    return {
+      folders: grouped.sort((a, b) => a.name.localeCompare(b.name)),
+      looseItems: items.filter((item) => !item.workspace_id || !groupedIds.has(item.workspace_id)),
+    };
+  }, [items, query]);
+  const openFolder = folders.find((folder) => folder.id === openFolderId) ?? null;
 
   return (
     <>
@@ -298,81 +411,53 @@ export function LibraryPage() {
             ))}
           </div>
         ) : items.length ? (
-          <div
-            className={`mt-6 grid gap-4 ${
-              view === "grid" ? "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" : "grid-cols-1"
-            }`}
-          >
-            {items.map((item) => (
-              <article
-                key={item.id}
-                className={`group min-w-0 overflow-hidden rounded-xl border bg-surface/50 transition-colors hover:border-border-strong hover:bg-surface ${
-                  view === "list" ? "flex min-h-20 items-stretch" : ""
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => setPreview(item)}
-                  aria-label={`Preview ${item.name}`}
-                  className={`relative block shrink-0 overflow-hidden bg-raised text-left ${
-                    view === "list" ? "h-20 w-28" : "aspect-[5/4] w-full"
-                  }`}
-                >
-                  <LibraryThumbnail item={item} />
-                  {view === "grid" && (
-                    <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 pb-2.5 pt-7 text-[10px] font-medium uppercase tracking-[0.12em] text-white/80">
-                      {categoryLabel(item.library_category)}
-                    </span>
-                  )}
+          openFolder ? (
+            <div className="mt-6 animate-pop-in">
+              <nav aria-label="Library folder" className="mb-4 flex items-center gap-1.5 text-xs">
+                <button type="button" onClick={() => setOpenFolderId(null)} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground hover:bg-raised hover:text-foreground">
+                  <ChevronLeft className="size-3.5" />Library
                 </button>
-                <div className="flex min-w-0 flex-1 items-center justify-between gap-3 p-3">
-                  <button
-                    type="button"
-                    onClick={() => setPreview(item)}
-                    className="min-w-0 flex-1 text-left"
-                  >
-                    <h2 className="truncate text-xs font-medium text-foreground group-hover:text-foreground">
-                      {item.name}
-                    </h2>
-                    <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                      <span className="font-medium text-foreground/75">
-                        {categoryLabel(item.library_category)}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      {formatBytes(item.size_bytes)}
-                    </p>
-                  </button>
-                  <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
-                    <button
-                      type="button"
-                      onClick={() => setPreview(item)}
-                      aria-label={`Preview ${item.name}`}
-                      className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-foreground"
-                    >
-                      <Eye className="size-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void downloadResource(item.download_url, item.name)}
-                      aria-label={`Download ${item.name}`}
-                      className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-foreground"
-                    >
-                      <Download className="size-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={removeMutation.isPending}
-                      onClick={() => removeMutation.mutate(item.id)}
-                      aria-label={`Remove ${item.name} from Library`}
-                      className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-destructive"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
+                <span className="text-muted-foreground/60">/</span>
+                <span className="inline-flex items-center gap-1.5 font-medium text-foreground"><Folder className="size-3.5 text-sage" />{openFolder.name}</span>
+                <span className="text-muted-foreground">· {openFolder.items.length} items</span>
+              </nav>
+              {renderItems(openFolder.items)}
+            </div>
+          ) : (
+            <>
+              {folders.length ? (
+                <div className="mt-6">
+                  <h2 className="mb-3 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Workspace folders</h2>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {folders.map((folder) => (
+                      <button
+                        key={folder.id}
+                        type="button"
+                        onClick={() => setOpenFolderId(folder.id)}
+                        aria-label={`Open ${folder.name} folder`}
+                        className="group flex items-center gap-3 rounded-xl border bg-surface/50 p-3 text-left transition-[border-color,background-color,transform] duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:bg-surface"
+                      >
+                        <span className="relative grid size-11 shrink-0 place-items-center rounded-lg border bg-raised text-sage transition-colors group-hover:text-foreground">
+                          <Folder className="size-5" strokeWidth={1.6} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs font-medium text-foreground">{folder.name}</span>
+                          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{folderSummary(folder.items)}</span>
+                        </span>
+                        <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                      </button>
+                    ))}
                   </div>
                 </div>
-              </article>
-            ))}
-          </div>
+              ) : null}
+              {looseItems.length ? (
+                <div className="mt-6">
+                  {folders.length ? <h2 className="mb-3 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Files</h2> : null}
+                  {renderItems(looseItems)}
+                </div>
+              ) : null}
+            </>
+          )
         ) : (
           <div className="mt-8 rounded-xl border border-dashed px-6 py-16 text-center">
             <Bookmark className="mx-auto size-7 text-muted-foreground" strokeWidth={1.5} />

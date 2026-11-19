@@ -310,3 +310,29 @@ async def test_chat_and_workspace_pinning_does_not_reorder(
     assert pinned_workspace.status_code == 200
     assert pinned_workspace.json()["pinned_at"] is not None
     assert pinned_workspace.json()["updated_at"] == workspace.json()["updated_at"]
+
+
+async def test_library_items_report_their_workspace(client: AsyncClient, demo_headers: dict[str, str]) -> None:
+    workspace = (await client.post("/api/workspaces", headers=demo_headers, json={"name": "Sales"})).json()
+    chat = await client.post("/api/chats", headers=demo_headers, json={
+        "content": "Analyze", "client_request_id": "library-workspace-chat", "workspace_id": workspace["id"],
+    })
+    standalone = await create_chat(client, demo_headers, "library-standalone")
+
+    async def upload(scope_type: str, scope_id: str, name: str) -> str:
+        response = await client.post("/api/resources/upload", headers=demo_headers, data={
+            "scope_type": scope_type, "scope_id": scope_id, "client_upload_id": name,
+        }, files={"file": (name, b"value\n1\n", "text/csv")})
+        assert response.status_code == 201, response.text
+        resource_id = response.json()["resource"]["id"]
+        assert (await client.post(f"/api/resources/{resource_id}/library", headers=demo_headers)).status_code == 201
+        return resource_id
+
+    await upload("workspace", workspace["id"], "direct.csv")
+    await upload("chat", chat.json()["chat"]["id"], "via-chat.csv")
+    await upload("chat", standalone["chat"]["id"], "loose.csv")
+
+    items = {item["name"]: item for item in (await client.get("/api/library", headers=demo_headers)).json()["items"]}
+    assert items["direct.csv"]["workspace_name"] == "Sales"
+    assert items["via-chat.csv"]["workspace_id"] == workspace["id"]
+    assert items["loose.csv"]["workspace_id"] is None
