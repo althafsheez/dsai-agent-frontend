@@ -385,3 +385,29 @@ async def test_workspace_dataset_zip(client: AsyncClient, demo_headers: dict[str
     with ZipFile(BytesIO(response.content)) as archive:
         assert sorted(archive.namelist()) == ["iris (2).csv", "iris.csv"]
         assert {archive.read(name) for name in archive.namelist()} == {b"value\n0\n", b"value\n1\n"}
+
+
+async def test_library_dataset_zip(client: AsyncClient, demo_headers: dict[str, str]) -> None:
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    workspace = (await client.post("/api/workspaces", headers=demo_headers, json={"name": "Folder"})).json()
+    url = "/api/library/datasets/download"
+    assert (await client.get(url, headers=demo_headers)).status_code == 404
+    for index, name in enumerate(["a.csv", "b.csv"]):
+        upload = await client.post("/api/resources/upload", headers=demo_headers, data={
+            "scope_type": "workspace" if index == 0 else "chat", "scope_id": workspace["id"] if index == 0 else
+            (await client.post("/api/chats", headers=demo_headers, json={"content": "x", "client_request_id": "lib-zip"})).json()["chat"]["id"],
+            "client_upload_id": f"lib-{index}",
+        }, files={"file": (name, f"v\n{index}\n".encode(), "text/csv")})
+        assert upload.status_code == 201, upload.text
+        resource_id = upload.json()["resource"]["id"]
+        assert (await client.post(f"/api/resources/{resource_id}/library", headers=demo_headers)).status_code == 201
+
+    response = await client.get(url, headers=demo_headers)
+    assert response.headers["content-type"] == "application/zip"
+    with ZipFile(BytesIO(response.content)) as archive:
+        assert sorted(archive.namelist()) == ["a.csv", "b.csv"]
+    folder = await client.get(f"{url}?workspace_id={workspace['id']}", headers=demo_headers)
+    with ZipFile(BytesIO(folder.content)) as archive:
+        assert archive.namelist() == ["a.csv"]

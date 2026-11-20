@@ -217,12 +217,42 @@ def download_workspace_datasets(
     rows = _workspace_datasets(session, workspace_id)
     if not rows:
         raise APIError(404, "no_datasets", "This workspace has no datasets.")
+    return _zip_datasets(request, [(resource, file_object) for resource, file_object, _ in rows], f"{workspace.name}-datasets.zip")
+
+
+@catalog_router.get("/library/datasets/download")
+def download_library_datasets(
+    request: Request,
+    workspace_id: str | None = None,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Zip the signed-in user's saved Library datasets, optionally only those in one workspace folder."""
+    rows = session.execute(
+        select(Resource, FileObject)
+        .join(LibraryEntry, LibraryEntry.resource_id == Resource.id)
+        .join(FileObject, FileObject.id == Resource.file_object_id)
+        .where(LibraryEntry.user_id == user.id, Resource.created_by == user.id, Resource.resource_type == "dataset")
+        .order_by(LibraryEntry.created_at.desc(), LibraryEntry.id.desc())
+    ).all()
+    label = "library"
+    if workspace_id:
+        workspace = require_workspace(session, user, workspace_id)
+        in_workspace = _library_workspaces(session, user, [resource.id for resource, _ in rows])
+        rows = [(resource, file_object) for resource, file_object in rows if in_workspace.get(resource.id) and in_workspace[resource.id].id == workspace_id]
+        label = workspace.name
+    if not rows:
+        raise APIError(404, "no_datasets", "There are no saved datasets to download.")
+    return _zip_datasets(request, list(rows), f"{label}-datasets.zip")
+
+
+def _zip_datasets(request: Request, rows: list[tuple[Resource, FileObject]], archive_name: str) -> Response:
     storage: LocalFileStorage = request.app.state.storage
     used_names: set[str] = set()
     archive = TemporaryFile()
     try:
         with ZipFile(archive, "w", compression=ZIP_DEFLATED, compresslevel=1) as bundle:
-            for resource, file_object, _ in rows:
+            for resource, file_object in rows:
                 original = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", resource.name).strip(" .") or "dataset"
                 path = Path(original)
                 name = original
@@ -233,7 +263,7 @@ def download_workspace_datasets(
                 used_names.add(name.casefold())
                 bundle.writestr(name, storage.read_bytes(file_object.relative_storage_path))
         archive.seek(0)
-        filename = quote(f"{workspace.name}-datasets.zip", safe="")
+        filename = quote(archive_name, safe="")
         return StreamingResponse(
             iter(lambda: archive.read(65536), b""), media_type="application/zip",
             headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
