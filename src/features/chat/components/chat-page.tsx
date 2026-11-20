@@ -63,7 +63,8 @@ import {
   type MessageDto,
 } from "@/lib/api";
 import type { AssistantMessage, ChatMessage, MessageBlock, TraceStep } from "../types";
-import { asRecord, replayTrace, resources as extractTraceResources } from "../execution-trace";
+import { asRecord, classifyError, replayTrace, resources as extractTraceResources } from "../execution-trace";
+import type { DataReferenceResource } from "./data-reference";
 import { takePendingRun } from "../pending-run";
 import { useConversationScroll } from "../use-conversation-scroll";
 import { ChatHeader } from "./chat-header";
@@ -569,11 +570,14 @@ export function ChatPage({ chatId }: { chatId: string }) {
         const message = failure && typeof failure === "object" && "message" in failure
           ? String((failure as { message: unknown }).message)
           : "Gemini could not complete this response.";
+        const errorType = classifyError(message);
         setError(message);
         setQueuedQuestions((current) => current.map((item) => ({ ...item, paused: true })));
         updateAssistant((assistant) => ({
           ...assistant,
           status: "failed",
+          error: message,
+          errorType,
           trace: (assistant.trace ?? []).map((step) =>
             step.status === "running"
               ? { ...step, status: "failed", detail: message, error: message }
@@ -588,6 +592,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
         updateAssistant((message) => ({
           ...message,
           status: "interrupted",
+          error: reason,
+          errorType: "recoverable",
           trace: (message.trace ?? []).map((step) =>
             step.status === "running"
               ? { ...step, status: "failed", detail: "Interrupted", error: reason }
@@ -613,6 +619,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
         updateAssistant((message) => ({
           ...message,
           status: "interrupted",
+          error: "Run was cancelled by user.",
+          errorType: "recoverable",
           trace: (message.trace ?? []).map((step) =>
             step.status === "running"
               ? { ...step, status: "failed", detail: "Interrupted", error: "Run was cancelled by user." }
@@ -621,10 +629,13 @@ export function ChatPage({ chatId }: { chatId: string }) {
         }));
       } else {
         const message = caught instanceof Error ? caught.message : "The Gemini request failed.";
+        const errorType = classifyError(message);
         setError(message);
         updateAssistant((assistant) => ({
           ...assistant,
           status: "failed",
+          error: message,
+          errorType,
           trace: (assistant.trace ?? []).map((step) =>
             step.status === "running"
               ? { ...step, status: "failed", detail: message, error: message }
@@ -1040,6 +1051,43 @@ export function ChatPage({ chatId }: { chatId: string }) {
       setError(caught instanceof Error ? caught.message : "Could not move chat to workspace.");
     }
   }
+
+  const handleRetry = useCallback((failedMessage: AssistantMessage) => {
+    if (running) return;
+    const assistantIndex = messages.findIndex((m) => m.id === failedMessage.id);
+    if (assistantIndex === -1) return;
+
+    let targetUserMessage: Extract<ChatMessage, { role: "user" }> | undefined;
+    for (let i = assistantIndex - 1; i >= 0; i--) {
+      const candidate = messages[i];
+      if (candidate.role === "user") {
+        targetUserMessage = candidate;
+        break;
+      }
+    }
+    if (!targetUserMessage) return;
+
+    setError(null);
+    setComposerStatus(null);
+    void runMessage({
+      type: "message",
+      userMessageId: targetUserMessage.id,
+      modelId,
+      effort: effort || null,
+      clientRequestId: crypto.randomUUID(),
+    });
+  }, [messages, running, modelId, effort, runMessage]);
+
+  const availableResources = useMemo<DataReferenceResource[]>(() => {
+    const list: DataReferenceResource[] = [];
+    (datasetsQuery.data?.items ?? []).forEach((d) =>
+      list.push({ id: d.id, name: d.name, resourceType: "dataset" })
+    );
+    (artifactsQuery.data?.items ?? []).forEach((a) =>
+      list.push({ id: a.id, name: a.name, resourceType: "artifact", kind: a.kind })
+    );
+    return list;
+  }, [datasetsQuery.data?.items, artifactsQuery.data?.items]);
 
   return (
     <section className="relative flex min-h-0 flex-1 overflow-hidden">

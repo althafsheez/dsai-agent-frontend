@@ -54,6 +54,8 @@ export type AssistantMessage = {
   status: ChatStatus;
   trace?: TraceStep[];
   retryOf?: string;
+  error?: string;
+  errorType?: "recoverable" | "unrecoverable";
 };
 
 export type ChatMessage = UserMessage | AssistantMessage;

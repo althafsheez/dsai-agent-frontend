@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import type { AgentRunDto } from "@/lib/api";
 import type { AssistantMessage as AssistantMessageType, ChatMessage } from "../types";
 import { AssistantMessage } from "./assistant-message";
+import type { DataReferenceResource } from "./data-reference";
 import { UserMessage } from "./user-message";
 
 export function MessageList({ messages, runs, onRetry, onFileSelect, onFileDownload, registerSection }: { messages: ChatMessage[]; runs?: AgentRunDto[]; onRetry?: (message: AssistantMessageType) => void; onFileSelect: (id: string) => void; onFileDownload?: (id: string) => void; registerSection: (id: string, node: HTMLElement | null) => void }) {
