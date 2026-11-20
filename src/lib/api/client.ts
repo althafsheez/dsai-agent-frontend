@@ -227,6 +227,12 @@ export function downloadWorkspaceDatasets(workspaceId: string, workspaceName: st
   return downloadResource(`/workspaces/${encodeURIComponent(workspaceId)}/datasets/download`, `${workspaceName}-datasets.zip`);
 }
 
+/** Zips the saved Library datasets; pass a workspace to download only that folder. */
+export function downloadLibraryDatasets(workspace?: { id: string; name: string }): Promise<void> {
+  const query = workspace ? `?workspace_id=${encodeURIComponent(workspace.id)}` : "";
+  return downloadResource(`/library/datasets/download${query}`, `${workspace?.name ?? "library"}-datasets.zip`);
+}
+
 export function getWorkspaceDatasets(workspaceId: string): Promise<ApiList<DatasetResource>> {
   return requestJson<ApiList<DatasetResource>>(`/datasets?workspace_id=${encodeURIComponent(workspaceId)}`);
 }
