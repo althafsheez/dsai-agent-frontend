@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+import asyncio
 import os
 import time
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
@@ -275,29 +276,40 @@ class ReActAgent:
             calls = []
             seen_ids = set()
             model_parts = []
-            try:
-                stream = await client.aio.models.generate_content_stream(
-                    model=model, contents=contents, config=turn_config,
-                )
-                async for chunk in stream:
-                    if is_cancelled and is_cancelled():
-                        return
-                    if not chunk.candidates or not chunk.candidates[0].content:
+            max_retries = 2
+            success = False
+            last_err = None
+            for attempt in range(max_retries):
+                try:
+                    stream = await client.aio.models.generate_content_stream(
+                        model=model, contents=contents, config=turn_config,
+                    )
+                    async for chunk in stream:
+                        if is_cancelled and is_cancelled():
+                            return
+                        if not chunk.candidates or not chunk.candidates[0].content:
+                            continue
+                        for part in chunk.candidates[0].content.parts or []:
+                            call = part.function_call
+                            if call is not None:
+                                if call.id and call.id in seen_ids:
+                                    continue
+                                if call.id:
+                                    seen_ids.add(call.id)
+                                calls.append(call)
+                            model_parts.append(part)
+                            if part.text and not part.thought:
+                                final_answer.append(part.text)
+                                yield {"type": "delta", "content": part.text}
+                    success = True
+                    break
+                except Exception as exc:
+                    last_err = exc
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(0.5)
                         continue
-                    for part in chunk.candidates[0].content.parts or []:
-                        call = part.function_call
-                        if call is not None:
-                            if call.id and call.id in seen_ids:
-                                continue
-                            if call.id:
-                                seen_ids.add(call.id)
-                            calls.append(call)
-                        model_parts.append(part)
-                        if part.text and not part.thought:
-                            final_answer.append(part.text)
-                            yield {"type": "delta", "content": part.text}
-            except Exception:
-                yield {"type": "error", "content": "Gemini generation failed."}
+            if not success:
+                yield {"type": "error", "content": f"Gemini generation failed: {type(last_err).__name__}: {str(last_err)}"}
                 return
             if not calls:
                 if not any(part.text and not part.thought for part in model_parts):
