@@ -420,3 +420,52 @@ async def test_paused_queue_can_be_resumed_after_a_failed_run(tmp_path, demo_hea
             with app.state.session_factory() as session:
                 statuses = list(session.scalars(select(AgentRun.status).order_by(AgentRun.created_at)))
                 assert statuses == ["failed", "completed"]
+
+
+async def test_chat_stream_runs_react_tool_turn_and_final_synthesis(tmp_path, demo_headers, monkeypatch):
+    from google.genai import models, types
+
+    from app.config import Settings
+    from app.main import create_app
+
+    calls = []
+
+    async def generate_stream(self, *, model, contents, config):
+        calls.append(config)
+        if len(calls) == 1:
+            assert config.tools
+            call = types.FunctionCall(name="load_memory", id="memory-1", args={})
+            parts = [types.Part(text="internal", thought=True), types.Part(function_call=call)]
+        else:
+            assert config.tool_config.function_calling_config.mode == "NONE"
+            response = contents[-2].parts[0].function_response
+            assert response.id == "memory-1"
+            assert response.response == {"memories": []}
+            parts = [types.Part.from_text(text="No saved memories.")]
+
+        async def chunks():
+            yield types.GenerateContentResponse(candidates=[
+                types.Candidate(content=types.Content(role="model", parts=parts)),
+            ])
+        return chunks()
+
+    monkeypatch.setattr(models.AsyncModels, "generate_content_stream", generate_stream)
+    app = create_app(Settings(
+        database_url=f"sqlite:///{tmp_path / 'react.db'}", storage_root=tmp_path / "storage",
+        gemini_models="test-model:low", gemini_api_key="test-key", max_agent_steps=1,
+    ))
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            created = await create_chat(client, demo_headers)
+            path = f"/api/chats/{created['chat']['id']}/messages"
+            response = await client.post(f"{path}/stream", headers=demo_headers, json={
+                "user_message_id": created["message"]["id"], "client_request_id": "react-run",
+                "model_id": "test-model", "effort": "low",
+            })
+            events = parse_sse(response.text)
+            assert [e["type"] for e in events if e["type"].startswith("tool.")] == ["tool.started", "tool.completed"]
+            assert events[-1]["type"] == "agent.completed"
+            assert "internal" not in response.text
+            messages = (await client.get(path, headers=demo_headers)).json()["items"]
+            assert messages[-1]["content"] == "No saved memories."
+            assert len(calls) == 2

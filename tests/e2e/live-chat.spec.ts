@@ -22,11 +22,11 @@ test("real Gemini streams an initial response, follow-up, and restores persisted
   await expect(page).toHaveURL(/\/chat\//, { timeout: 30_000 });
   await expect.poll(() => streamBodies.length, { timeout: 60_000 }).toBe(1);
   await expect(page.locator("article").filter({ hasText: /BROWSER STREAM OK/i })).toHaveCount(2, { timeout: 60_000 });
-  await expect(page.getByRole("textbox", { name: "Ask anything about your data" })).toBeEnabled({ timeout: 60_000 });
+  await expect(page.getByRole("combobox", { name: "Ask anything about your data" })).toBeEnabled({ timeout: 60_000 });
   expect(streamBodies[0]).toMatchObject({ effort: "high" });
   expect(streamBodies[0].model_id).toBeTruthy();
 
-  await page.getByRole("textbox", { name: "Ask anything about your data" }).fill("Reply briefly with FOLLOW-UP BROWSER OK.");
+  await page.getByRole("combobox", { name: "Ask anything about your data" }).fill("Reply briefly with FOLLOW-UP BROWSER OK.");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect.poll(() => streamBodies.length, { timeout: 60_000 }).toBe(2);
   await expect(page.locator("article").filter({ hasText: /FOLLOW-UP BROWSER OK/i })).toHaveCount(2, { timeout: 60_000 });

@@ -6,7 +6,6 @@ export { DatasetsPanel } from "./datasets-panel";
 export { FilePreviewSidebar } from "./file-preview-sidebar";
 export { ImagePreview } from "./image-preview";
 export { PDFPreview } from "./pdf-preview";
-export { QuickAssistant } from "./quick-assistant";
 export type {
   ArtifactKind,
   ArtifactResource,
