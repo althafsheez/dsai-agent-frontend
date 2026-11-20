@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowDownUp,
   ArrowRight,
   BarChart3,
+  Check,
   Database,
   FileSpreadsheet,
   Filter,
@@ -13,7 +14,6 @@ import {
   Mail,
   NotebookTabs,
   PanelsTopLeft,
-  Play,
   Plug,
   Plus,
   Search,
@@ -24,6 +24,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { dataSourceConnector } from "../catalog";
+import { readConnected, toggleId, writeConnected } from "../connection-store";
 
 type ConnectorCategory = "all" | "skill" | "data" | "app";
 type Sort = "popular" | "name";
@@ -62,7 +63,7 @@ function categoryLabel(category: ConnectorPreview["category"]) {
   return "App";
 }
 
-function ConnectorRow({ connector }: { connector: ConnectorPreview }) {
+function ConnectorRow({ connector, connected, onToggle }: { connector: ConnectorPreview; connected: boolean; onToggle: () => void }) {
   const Icon = connector.icon;
   return (
     <article className="flex min-w-0 items-center gap-3.5 rounded-xl border bg-surface/50 p-3.5 transition-colors hover:border-border-strong hover:bg-surface">
@@ -80,28 +81,28 @@ function ConnectorRow({ connector }: { connector: ConnectorPreview }) {
           {connector.description}
         </p>
       </div>
+      {connected ? <span className="hidden shrink-0 items-center gap-1 rounded-full border border-emerald-400/30 px-2 py-0.5 text-[10px] text-emerald-300 sm:inline-flex"><Check className="size-3" />Connected</span> : null}
       <button
         type="button"
-        disabled
-        title={`${connector.name} is coming soon`}
-        className="hidden h-8 shrink-0 cursor-not-allowed items-center gap-1.5 rounded-md bg-raised px-2.5 text-xs text-muted-foreground opacity-70 sm:flex"
+        aria-pressed={connected}
+        aria-label={`${connected ? "Disconnect" : "Connect"} ${connector.name}`}
+        onClick={onToggle}
+        className={`h-8 shrink-0 rounded-md px-3 text-xs transition-colors ${connected ? "bg-raised text-muted-foreground hover:text-foreground" : "bg-foreground text-background hover:opacity-90"}`}
       >
-        <Play className="size-3" /> Try
-      </button>
-      <button
-        type="button"
-        disabled
-        title={`${connector.name} is coming soon`}
-        aria-label={`Add ${connector.name} — coming soon`}
-        className="grid size-8 shrink-0 cursor-not-allowed place-items-center rounded-md bg-raised text-muted-foreground opacity-70"
-      >
-        <Plus className="size-3.5" />
+        {connected ? "Disconnect" : "Connect"}
       </button>
     </article>
   );
 }
 
 export function ConnectorsPage() {
+  const [connected, setConnected] = useState<string[]>([]);
+  useEffect(() => setConnected(readConnected()), []);
+  function toggleConnection(id: string) {
+    const next = toggleId(connected, id);
+    setConnected(next);
+    writeConnected(next);
+  }
   const [category, setCategory] = useState<ConnectorCategory>("all");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("popular");
@@ -261,7 +262,7 @@ export function ConnectorsPage() {
               </div>
               <div className="grid gap-3 lg:grid-cols-2">
                 {popular.map((connector) => (
-                  <ConnectorRow key={connector.id} connector={connector} />
+                  <ConnectorRow key={connector.id} connector={connector} connected={connected.includes(connector.id)} onToggle={() => toggleConnection(connector.id)} />
                 ))}
               </div>
             </section>
@@ -287,7 +288,7 @@ export function ConnectorsPage() {
               </div>
               <div className="grid gap-3 lg:grid-cols-2">
                 {yours.map((connector) => (
-                  <ConnectorRow key={connector.id} connector={connector} />
+                  <ConnectorRow key={connector.id} connector={connector} connected={connected.includes(connector.id)} onToggle={() => toggleConnection(connector.id)} />
                 ))}
               </div>
             </section>

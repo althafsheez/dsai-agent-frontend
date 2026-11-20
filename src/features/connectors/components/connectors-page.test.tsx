@@ -21,4 +21,13 @@ describe("connectors page", () => {
     await user.click(screen.getByRole("button", { name: "Add", expanded: false }));
     expect(screen.getByRole("status")).toHaveTextContent(/coming soon/i);
   });
+
+  it("connects and disconnects a connector (demo state)", async () => {
+    const user = userEvent.setup();
+    render(<ConnectorsPage />);
+    await user.click(screen.getByRole("button", { name: "Connect Snowflake" }));
+    expect(screen.getByRole("button", { name: "Disconnect Snowflake" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Disconnect Snowflake" }));
+    expect(screen.getByRole("button", { name: "Connect Snowflake" })).toBeVisible();
+  });
 });
