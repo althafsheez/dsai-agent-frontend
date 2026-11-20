@@ -61,10 +61,11 @@ const OWNERSHIP: Array<{ id: Ownership; label: string }> = [
   { id: "shared", label: "Shared with me" },
 ];
 
-type Filter = "all" | LibraryResource["library_category"];
+type Filter = "all" | "folders" | LibraryResource["library_category"];
 
 const FILTERS: Array<{ id: Filter; label: string; icon: typeof Layers3 }> = [
   { id: "all", label: "All", icon: Layers3 },
+  { id: "folders", label: "Folders", icon: Folder },
   { id: "dataset", label: "Datasets", icon: Database },
   { id: "report", label: "Reports", icon: FileText },
   { id: "visual", label: "Visuals", icon: BarChart3 },
@@ -83,7 +84,7 @@ function categoryLabel(category: LibraryResource["library_category"]) {
           : "File";
 }
 
-function LibraryThumbnail({ item }: { item: LibraryResource }) {
+function LibraryThumbnail({ item, compact }: { item: LibraryResource; compact: boolean }) {
   const isImage = item.resource_type === "artifact" && "kind" in item && (item.kind === "image" || item.kind === "chart");
   const isCode = item.library_category === "code";
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -128,29 +129,25 @@ function LibraryThumbnail({ item }: { item: LibraryResource }) {
     const columns = item.columns?.slice(0, 3) ?? [];
     const rows = item.preview_rows?.slice(0, 4) ?? [];
     return (
-      <div className="size-full overflow-hidden bg-[linear-gradient(145deg,oklch(0.23_0.025_155),oklch(0.16_0.01_260))] p-3 text-[9px] text-foreground/75">
-        <div className="mb-2 flex items-center gap-1.5 text-sage">
-          <Database className="size-3.5" />
-          <span className="font-medium tracking-wide">DATASET</span>
-        </div>
+      <div className={`flex size-full items-center overflow-hidden text-foreground/80 ${compact ? "p-1.5" : "px-3.5 pt-3.5"}`}>
         {columns.length ? (
-          <div className="overflow-hidden rounded border border-white/10">
-            <div className="grid grid-cols-3 bg-black/20 text-[8px] font-medium text-foreground/80">
+          <div className="w-full overflow-hidden rounded-lg border border-sage/20 bg-background/60">
+            <div className={`grid grid-cols-3 bg-sage/15 font-medium ${compact ? "text-[8px]" : "text-[10px]"}`}>
               {columns.map((column, index) => (
                 <span
                   key={`${column.name}-${index}`}
-                  className="truncate border-r border-white/10 px-1 py-1 last:border-r-0"
+                  className="truncate px-2 py-1"
                 >
                   {column.name}
                 </span>
               ))}
             </div>
             {rows.map((row, rowIndex) => (
-              <div key={rowIndex} className="grid grid-cols-3 border-t border-white/10">
+              <div key={rowIndex} className={`grid grid-cols-3 border-t border-white/[0.06] ${compact ? "text-[8px]" : "text-[10px]"}`}>
                 {columns.map((column, columnIndex) => (
                   <span
                     key={`${column.name}-${columnIndex}`}
-                    className="truncate border-r border-white/10 px-1 py-1 last:border-r-0"
+                    className="truncate px-2 py-1"
                   >
                     {row[columnIndex] == null ? "—" : String(row[columnIndex])}
                   </span>
@@ -159,7 +156,7 @@ function LibraryThumbnail({ item }: { item: LibraryResource }) {
             ))}
           </div>
         ) : (
-          <div className="grid h-[calc(100%-1.25rem)] place-items-center">
+          <div className="grid min-h-20 w-full place-items-center">
             <Database className="size-9 text-sage/70" />
           </div>
         )}
@@ -216,7 +213,7 @@ export function LibraryPage() {
     if (ownership === "shared") return [];
     return (libraryQuery.data?.items ?? []).filter((item) => {
       const matchesSearch = !search || item.name.toLowerCase().includes(search);
-      return matchesSearch && (filter === "all" || item.library_category === filter);
+      return matchesSearch && (filter === "all" || filter === "folders" || item.library_category === filter);
     });
   }, [filter, libraryQuery.data?.items, ownership, query]);
 
@@ -224,13 +221,13 @@ export function LibraryPage() {
     return (
       <div
         className={`grid gap-4 ${
-          view === "grid" ? "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" : "grid-cols-1"
+          view === "grid" ? "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" : "grid-cols-1 lg:grid-cols-2"
         }`}
       >
         {list.map((item) => (
           <article
             key={item.id}
-            className={`group min-w-0 overflow-hidden rounded-xl border bg-surface/50 transition-colors hover:border-border-strong hover:bg-surface ${
+            className={`group relative min-w-0 overflow-hidden rounded-xl border bg-gradient-to-br from-surface to-background transition-colors hover:border-border-strong hover:bg-surface ${
               view === "list" ? "flex min-h-20 items-stretch" : ""
             }`}
           >
@@ -238,35 +235,35 @@ export function LibraryPage() {
               type="button"
               onClick={() => setPreview(item)}
               aria-label={`Preview ${item.name}`}
-              className={`relative block shrink-0 overflow-hidden bg-raised text-left ${
-                view === "list" ? "h-20 w-28" : "aspect-[5/4] w-full"
+              className={`relative block shrink-0 overflow-hidden text-left ${
+                view === "list" ? "h-20 w-28" : item.resource_type === "dataset" ? "w-full" : "aspect-[5/4] w-full"
               }`}
             >
-              <LibraryThumbnail item={item} />
-              {view === "grid" && (
-                <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 pb-2.5 pt-7 text-[10px] font-medium uppercase tracking-[0.12em] text-white/80">
-                  {categoryLabel(item.library_category)}
-                </span>
-              )}
+              <LibraryThumbnail item={item} compact={view === "list"} />
             </button>
-            <div className="flex min-w-0 flex-1 items-center justify-between gap-3 p-3">
+            <div className="relative min-w-0 flex-1 p-3.5">
               <button
                 type="button"
                 onClick={() => setPreview(item)}
-                className="min-w-0 flex-1 text-left"
+                className="block w-full text-left"
               >
-                <h2 className="truncate text-xs font-medium text-foreground group-hover:text-foreground">
+                <h2 className="break-words text-base font-semibold leading-snug tracking-tight text-foreground [overflow-wrap:anywhere]">
                   {item.name}
                 </h2>
-                <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <span className="font-medium text-foreground/75">
+                <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                  <span aria-hidden="true" className="[&>svg]:size-3.5 [&>svg]:text-muted-foreground"><ResourceIcon item={item} /></span>
+                  <span>
                     {categoryLabel(item.library_category)}
                   </span>
                   <span aria-hidden="true">·</span>
                   {formatBytes(item.size_bytes)}
                 </p>
+                <p className="mt-3 inline-flex max-w-[calc(100%-5.75rem)] items-center gap-1.5 rounded-full bg-sage/10 px-2.5 py-1.5 text-[11px] font-medium leading-none text-sage">
+                  <BarChart3 aria-hidden="true" className="size-3 shrink-0" />
+                  <span className="truncate">From {item.workspace_name ?? (item.workspace_id ? "workspace" : "standalone chat")}</span>
+                </p>
               </button>
-              <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+              <div className="absolute bottom-3.5 right-3 flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
                 <button
                   type="button"
                   onClick={() => setPreview(item)}
@@ -302,7 +299,7 @@ export function LibraryPage() {
 
   // Search shows flat results across folders so a match is never hidden inside one.
   const { folders, looseItems } = useMemo(() => {
-    if (query.trim()) return { folders: [] as LibraryFolder[], looseItems: items };
+    if (filter !== "folders" || query.trim()) return { folders: [] as LibraryFolder[], looseItems: items };
     const byWorkspace = new Map<string, LibraryFolder>();
     for (const item of items) {
       if (!item.workspace_id) continue;
@@ -316,7 +313,7 @@ export function LibraryPage() {
       folders: grouped.sort((a, b) => a.name.localeCompare(b.name)),
       looseItems: items.filter((item) => !item.workspace_id || !groupedIds.has(item.workspace_id)),
     };
-  }, [items, query]);
+  }, [filter, items, query]);
   const openFolder = folders.find((folder) => folder.id === openFolderId) ?? null;
 
   return (
@@ -365,7 +362,7 @@ export function LibraryPage() {
                 type="button"
                 role="tab"
                 aria-selected={filter === id}
-                onClick={() => setFilter(id)}
+                onClick={() => { setFilter(id); setOpenFolderId(null); }}
                 className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors ${
                   filter === id
                     ? "bg-raised text-foreground shadow-sm"
@@ -441,7 +438,7 @@ export function LibraryPage() {
             <div className="mt-6 animate-pop-in">
               <nav aria-label="Library folder" className="mb-4 flex items-center gap-1.5 text-xs">
                 <button type="button" onClick={() => setOpenFolderId(null)} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground hover:bg-raised hover:text-foreground">
-                  <ChevronLeft className="size-3.5" />Library
+                  <ChevronLeft className="size-3.5" />Folders
                 </button>
                 <span className="text-muted-foreground/60">/</span>
                 <span className="inline-flex items-center gap-1.5 font-medium text-foreground"><Folder className="size-3.5 text-sage" />{openFolder.name}</span>

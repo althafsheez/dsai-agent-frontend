@@ -14,6 +14,17 @@ describe("HistoryTable", () => {
     expect(screen.getByRole("link", { name: "Research" })).toHaveAttribute("href", "/workspaces/research");
   });
 
+  it("shows activity on an archived chat as its run finishes and is read", () => {
+    const archived = { ...chat, archived_at: new Date().toISOString() };
+    const props = { records: [archived], loading: false, hasFilters: true, onClearFilters: vi.fn(), onRename: vi.fn(), onArchive: vi.fn(), onDelete: vi.fn() };
+    const { rerender } = render(<HistoryTable {...props} activity={[{ id: chat.id, active_run_status: "running" }]} />);
+    expect(screen.getByLabelText("Running")).toBeVisible();
+    rerender(<HistoryTable {...props} activity={[{ id: chat.id, active_run_status: null }]} />);
+    expect(screen.getByLabelText("Unread")).toBeVisible();
+    rerender(<HistoryTable {...props} activity={[]} />);
+    expect(screen.queryByLabelText("Unread")).not.toBeInTheDocument();
+  });
+
   it("invokes archive and restore actions", async () => {
     const user = userEvent.setup();
     const onArchive = vi.fn().mockResolvedValue(undefined);

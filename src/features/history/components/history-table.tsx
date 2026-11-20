@@ -215,8 +215,7 @@ export function HistoryTable({
                 />
               </th>
 
-              <th className="w-[37%] px-1 py-2 font-medium">Name</th>
-              <th className="w-[24%] px-3 py-2 font-medium">Workspace</th>
+              <th className="w-[61%] px-1 py-2 font-medium">Name</th>
               <th className="w-[18%] px-3 py-2 font-medium">Author</th>
               <th className="w-[13%] px-3 py-2 font-medium">Updated</th>
               <th className="w-10 px-2">
@@ -244,9 +243,7 @@ export function HistoryTable({
 
               const isRunning = status === "running" || status === "queued";
 
-              // A non-running status indicates recorded activity,
-              // not necessarily an unread message.
-              const hasActivity = Boolean(status && !isRunning);
+              const isUnread = !isRunning && record.kind === "chat" && (chatActivity || record.is_unread);
 
               return (
                 <tr
@@ -273,15 +270,15 @@ export function HistoryTable({
                       {/* Live execution indicator */}
                       {isRunning && (
                         <LoaderCircle
-                          aria-label="Running"
+                          aria-label={status === "queued" ? "Queued" : "Running"}
                           className="size-3 shrink-0 animate-spin text-sage"
                         />
                       )}
 
                       {/* Activity indicator */}
-                      {hasActivity && (
+                      {isUnread && (
                         <span
-                          aria-label="Activity"
+                          aria-label="Unread" title="Unread"
                           className="size-1.5 shrink-0 rounded-full bg-sage"
                         />
                       )}
@@ -297,12 +294,6 @@ export function HistoryTable({
                         />
                       )}
                     </Link>
-                  </td>
-
-                  <td className="truncate px-3 py-3 text-muted-foreground">
-                    {record.kind === "workspace"
-                      ? "—"
-                      : (record.workspace_name ?? "Standalone")}
                   </td>
 
                   <td className="truncate px-3 py-3 text-muted-foreground">

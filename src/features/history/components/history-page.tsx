@@ -3,8 +3,7 @@
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { deleteChat, getChats, getWorkspaces, updateChat, updateWorkspace } from "@/lib/api";
-import {  getActivity} from "@/lib/api";
+import { deleteChat, getActivity, getChats, updateChat } from "@/lib/api";
 import { filterHistory } from "../logic/filter-history";
 import { currentDemoUser, type HistoryFilters, type HistoryOwnership, type HistoryRecord, type HistorySort, type HistoryStatus, type HistoryTime } from "../types";
 import { HistoryTable } from "./history-table";
@@ -23,7 +22,7 @@ function readFilters(params: URLSearchParams): HistoryFilters {
     search: params.get("q") ?? "",
     time: (["day", "week", "month", "quarter"] as string[]).includes(time ?? "") ? time as HistoryTime : "any",
     authorId: params.get("author") ?? "all",
-    workspaceId: params.get("workspace") ?? "all",
+    workspaceId: "all",
     sort: (["updated_asc", "name_asc"] as string[]).includes(sort ?? "") ? sort as HistorySort : "updated_desc",
   };
 }
@@ -34,19 +33,17 @@ export function HistoryPage() {
   const pathname = usePathname();
   const queryClient = useQueryClient();
   const filters = useMemo(() => readFilters(new URLSearchParams(params.toString())), [params]);
-  const workspacesQuery = useQuery({ queryKey: ["workspaces"], queryFn: getWorkspaces });
   const activityQuery = useQuery({ queryKey: ["activity"], queryFn: getActivity, refetchInterval: 2000 });
   const historyQuery = useQuery({
     queryKey: historyKey,
     queryFn: async () => {
-      const [chatList, workspaceList] = await Promise.all([getChats(), getWorkspaces()]);
-      const workspaceNames = new Map(workspaceList.items.map((workspace) => [workspace.id, workspace.name]));
-      const chatRecords: HistoryRecord[] = chatList.items.map((chat) => ({
+      const chatList = await getChats();
+      return chatList.items.map((chat): HistoryRecord => ({
         kind: "chat",
         id: chat.id,
         name: chat.title,
         workspace_id: chat.workspace_id,
-        workspace_name: chat.workspace_id ? workspaceNames.get(chat.workspace_id) ?? "Unavailable workspace" : null,
+        workspace_name: null,
         author: currentDemoUser,
         updated_at: chat.updated_at,
         archived_at: chat.archived_at,
@@ -54,29 +51,15 @@ export function HistoryPage() {
         pinned_at: chat.pinned_at,
         is_unread: chat.is_unread,
       }));
-      const workspaceRecords: HistoryRecord[] = workspaceList.items.map((workspace) => ({
-        kind: "workspace",
-        id: workspace.id,
-        name: workspace.name,
-        workspace_id: null,
-        workspace_name: null,
-        author: currentDemoUser,
-        updated_at: workspace.updated_at,
-        archived_at: workspace.archived_at,
-        deleted_at: workspace.deleted_at,
-        pinned_at: workspace.pinned_at,
-      }));
-      return [...chatRecords, ...workspaceRecords];
+
     },
     refetchInterval: 2000,
   });
   const records = useMemo(() => filterHistory(historyQuery.data ?? [], filters), [filters, historyQuery.data]);
   const options = useMemo(() => ({
     authors: historyQuery.data?.length ? [currentDemoUser] : [],
-    workspaces: (workspacesQuery.data?.items ?? [])
-      .map((workspace) => ({ id: workspace.id, name: workspace.name }))
-      .sort((a, b) => a.name.localeCompare(b.name)),
-  }), [historyQuery.data?.length, workspacesQuery.data?.items]);
+    workspaces: [],
+  }), [historyQuery.data?.length]);
 
   const mutation = useMutation({
     mutationFn: async (operation: () => Promise<void>) => operation(),
@@ -132,8 +115,7 @@ export function HistoryPage() {
         await queryClient.invalidateQueries({ queryKey: ["activity"] });
       })}
       onPinChange={(record: HistoryRecord, pinned) => mutate(async () => {
-        if (record.kind === "chat") await updateChat(record.id, { pinned });
-        else await updateWorkspace(record.id, { pinned });
+        await updateChat(record.id, { pinned });
       })}
       onDeleteMany={(selectedRecords) => mutate(async () => {
         await Promise.all(selectedRecords.map((record) => deleteChat(record.id)));

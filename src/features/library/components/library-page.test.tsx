@@ -78,6 +78,12 @@ describe("library page", () => {
     const user = userEvent.setup();
     render(<QueryClientProvider client={client}><LibraryPage /></QueryClientProvider>);
 
+    expect(await screen.findByText("Q1.pdf")).toBeVisible();
+    expect(screen.getAllByText("From Sales")).toHaveLength(4);
+    expect(screen.queryByRole("button", { name: "Open Sales folder" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Reports" }));
+    expect(screen.getByText("Q1.pdf")).toBeVisible();
+    await user.click(screen.getByRole("tab", { name: "Folders" }));
     const folder = await screen.findByRole("button", { name: "Open Sales folder" });
     expect(screen.queryByRole("button", { name: "Open Small folder" })).not.toBeInTheDocument();
     expect(screen.getByText("Tiny.pdf")).toBeVisible();
@@ -87,7 +93,7 @@ describe("library page", () => {
     await user.click(folder);
     expect(screen.getByText("Q4.pdf")).toBeVisible();
     expect(screen.queryByText("Loose.pdf")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Library" }));
+    await user.click(screen.getByRole("button", { name: "Folders" }));
     expect(screen.getByText("Loose.pdf")).toBeVisible();
 
     await user.type(screen.getByRole("textbox", { name: "Search library" }), "Q2");

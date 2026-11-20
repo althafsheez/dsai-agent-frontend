@@ -10,7 +10,8 @@ from .agent import AgentRunner
 from .agent.default_tools import build_tool_registry
 from .agent.sandbox import E2BSandboxPool
 from .config import Settings, get_settings
-from .db import Base, make_engine, make_session_factory
+from .db import make_engine, make_session_factory
+from .migrations import upgrade_schema
 from .errors import APIError, api_error_handler
 from .providers import GeminiProvider, LLMProvider
 from .routes import chats, meta, quick_assistant, resources, runs, workspaces
@@ -31,7 +32,7 @@ def create_app(settings: Settings | None = None, provider: LLMProvider | None = 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if settings.auto_create_schema:
-            Base.metadata.create_all(engine)
+            upgrade_schema(engine)
         settings.storage_root.mkdir(parents=True, exist_ok=True)
         with session_factory() as session:
             seed_demo_users(session)

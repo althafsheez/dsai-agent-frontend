@@ -31,7 +31,7 @@ function SegmentedControl<T extends string>({ label, value, options, onChange }:
 function FiltersPopover({ filters, options, onChange }: HistoryToolbarProps) {
   const [open, setOpen] = useState(false);
   const container = useRef<HTMLDivElement>(null);
-  const activeCount = Number(filters.time !== "any") + Number(filters.authorId !== "all") + Number(filters.workspaceId !== "all");
+  const activeCount = Number(filters.time !== "any") + Number(filters.authorId !== "all");
 
   useEffect(() => {
     if (!open) return;
@@ -64,7 +64,6 @@ function FiltersPopover({ filters, options, onChange }: HistoryToolbarProps) {
           ["any", "Any time"], ["day", "Last 24 hours"], ["week", "Last 7 days"], ["month", "Last 30 days"], ["quarter", "Last 90 days"],
         ]} />
         <FilterSelect label="Author" value={filters.authorId} onChange={(authorId) => onChange({ authorId })} options={[["all", "All authors"], ...options.authors.map((author) => [author.id, author.name] as [string, string])]} />
-        <FilterSelect label="Workspace" value={filters.workspaceId} onChange={(workspaceId) => onChange({ workspaceId })} options={[["all", "All workspaces"], ["standalone", "Standalone"], ...options.workspaces.map((workspace) => [workspace.id, workspace.name] as [string, string])]} />
       </div>
     </div>}
   </div>;
