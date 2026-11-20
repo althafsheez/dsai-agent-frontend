@@ -14,6 +14,8 @@ cp -n backend/.env.example backend/.env
 backend/.venv/bin/uvicorn backend.app.main:app --reload --port 8000
 ```
 
+Library PDF thumbnails use Poppler’s `pdftocairo` executable (provided by `poppler-utils` on Ubuntu).
+
 By default startup applies Alembic upgrades before serving requests. Before upgrading an existing SQLite schema, it writes a consistent backup beside the database named `dsai.db.backup-<timestamp>-<id>` (using the configured database filename). Keep or remove backups according to your local retention needs. Set `DSAI_AUTO_CREATE_SCHEMA=false` when migrations are managed separately; in that case, back up the database and run Alembic manually before starting the app.
 
 Run tests:

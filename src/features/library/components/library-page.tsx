@@ -22,6 +22,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { SyntaxHighlightedCode } from "@/features/chat/components/syntax-highlighted-code";
 import { FilePreviewSidebar, type ContextFile } from "@/features/context-sidebar";
 import { ShareWorkspaceDialog } from "@/features/workspaces/components/share-workspace-dialog";
 import { formatBytes } from "@/features/context-sidebar/resource-utils";
@@ -34,12 +35,17 @@ import {
   type LibraryResource,
 } from "@/lib/api";
 
+const categoryStyle = {
+  dataset: { icon: Database, color: "text-sage", tint: "from-emerald-300/[0.085]" },
+  code: { icon: Code2, color: "text-violet-400", tint: "from-violet-300/[0.12]" },
+  report: { icon: FileText, color: "text-yellow-400", tint: "from-yellow-300/[0.095]" },
+  visual: { icon: FileImage, color: "text-blue-400", tint: "from-blue-300/[0.16]" },
+  other: { icon: FileText, color: "text-muted-foreground", tint: "from-white/[0.045]" },
+} satisfies Record<LibraryResource["library_category"], { icon: typeof Database; color: string; tint: string }>;
+
 function ResourceIcon({ item }: { item: LibraryResource }) {
-  if (item.resource_type === "dataset") return <Database className="size-5 text-sage" />;
-  if ("kind" in item && (item.kind === "image" || item.kind === "chart"))
-    return <FileImage className="size-5 text-sky-400" />;
-  if (item.library_category === "code") return <Code2 className="size-5 text-violet-400" />;
-  return <FileText className="size-5 text-amber-400" />;
+  const { icon: Icon, color } = categoryStyle[item.library_category];
+  return <Icon className={`size-5 ${color}`} />;
 }
 
 type LibraryView = "grid" | "list";
@@ -85,27 +91,29 @@ function categoryLabel(category: LibraryResource["library_category"]) {
 }
 
 function LibraryThumbnail({ item, compact }: { item: LibraryResource; compact: boolean }) {
-  const isImage = item.resource_type === "artifact" && "kind" in item && (item.kind === "image" || item.kind === "chart");
+  const isImage = item.resource_type === "artifact" && (item.kind === "image" || item.kind === "chart");
+  const isPdf = item.mime_type === "application/pdf";
   const isCode = item.library_category === "code";
+  const previewUrl = isPdf && item.preview_url ? `${item.preview_url}?thumbnail=true` : item.preview_url;
+  const { data: blob } = useQuery({
+    queryKey: ["library-thumbnail", previewUrl],
+    queryFn: () => getResourcePreview(previewUrl!),
+    enabled: Boolean(previewUrl && (isPdf || isImage)),
+    staleTime: 60_000,
+    retry: false,
+  });
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [codePreview, setCodePreview] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isImage || !item.preview_url) return;
-    let active = true;
-    let objectUrl: string | null = null;
-    void getResourcePreview(item.preview_url)
-      .then((blob) => {
-        if (!active) return;
-        objectUrl = URL.createObjectURL(blob);
-        setImageUrl(objectUrl);
-      })
-      .catch(() => setImageUrl(null));
-    return () => {
-      active = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [isImage, item.preview_url]);
+    if (!blob) {
+      setImageUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    setImageUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [blob]);
 
   useEffect(() => {
     if (!isCode || !item.preview_url) return;
@@ -113,7 +121,7 @@ function LibraryThumbnail({ item, compact }: { item: LibraryResource; compact: b
     setCodePreview(null);
     void getResourcePreviewText(item.preview_url)
       .then((text) => {
-        if (active) setCodePreview(text.split("\n").slice(0, 9).join("\n"));
+        if (active) setCodePreview(text.slice(0, 2000).split("\n").slice(0, 9).join("\n"));
       })
       .catch(() => {
         if (active) setCodePreview(null);
@@ -124,15 +132,16 @@ function LibraryThumbnail({ item, compact }: { item: LibraryResource; compact: b
   }, [isCode, item.preview_url]);
 
   // eslint-disable-next-line @next/next/no-img-element
-  if (isImage && imageUrl) return <img src={imageUrl} alt="" className="size-full object-cover" />;
+  if ((isImage || isPdf) && imageUrl) return <img src={imageUrl} alt="" className="size-full object-contain p-2" />;
   if (item.resource_type === "dataset") {
     const columns = item.columns?.slice(0, 3) ?? [];
-    const rows = item.preview_rows?.slice(0, 4) ?? [];
+    const rowCount = compact ? 2 : 4;
+    const gridStyle = { gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` };
     return (
-      <div className={`flex size-full items-center overflow-hidden text-foreground/80 ${compact ? "p-1.5" : "px-3.5 pt-3.5"}`}>
+      <div className={`flex size-full items-center overflow-hidden text-foreground/80 ${compact ? "p-1.5" : "p-3"}`}>
         {columns.length ? (
-          <div className="w-full overflow-hidden rounded-lg border border-sage/20 bg-background/60">
-            <div className={`grid grid-cols-3 bg-sage/15 font-medium ${compact ? "text-[8px]" : "text-[10px]"}`}>
+          <div className="w-full overflow-hidden rounded-md border border-white/10 bg-background/60">
+            <div style={gridStyle} className={`grid bg-white/[0.035] font-medium ${compact ? "text-[8px]" : "text-[10px]"}`}>
               {columns.map((column, index) => (
                 <span
                   key={`${column.name}-${index}`}
@@ -142,14 +151,14 @@ function LibraryThumbnail({ item, compact }: { item: LibraryResource; compact: b
                 </span>
               ))}
             </div>
-            {rows.map((row, rowIndex) => (
-              <div key={rowIndex} className={`grid grid-cols-3 border-t border-white/[0.06] ${compact ? "text-[8px]" : "text-[10px]"}`}>
+            {Array.from({ length: rowCount }, (_, rowIndex) => (
+              <div key={rowIndex} style={gridStyle} className={`grid border-t border-white/[0.06] ${compact ? "text-[8px]" : "text-[10px]"}`}>
                 {columns.map((column, columnIndex) => (
                   <span
                     key={`${column.name}-${columnIndex}`}
                     className="truncate px-2 py-1"
                   >
-                    {row[columnIndex] == null ? "—" : String(row[columnIndex])}
+                    {item.preview_rows?.[rowIndex] ? String(item.preview_rows[rowIndex][columnIndex] ?? "—") : "\u00a0"}
                   </span>
                 ))}
               </div>
@@ -165,17 +174,19 @@ function LibraryThumbnail({ item, compact }: { item: LibraryResource; compact: b
   }
   if (isCode && codePreview) {
     return (
-      <div className="size-full overflow-hidden bg-[linear-gradient(145deg,oklch(0.18_0.015_260),oklch(0.12_0.005_260))] p-3 font-mono text-[10px] leading-5 text-slate">
-        <div className="mb-2 flex items-center gap-1.5 font-sans text-[9px] font-medium uppercase tracking-[0.12em] text-violet-300">
-          <Code2 className="size-3.5" />
+      <div className="size-full overflow-hidden p-3 font-mono text-[10px] leading-5 text-slate">
+        <div className="mb-2 flex items-center gap-1.5 font-sans text-[9px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+          <Code2 className={`size-3.5 ${categoryStyle.code.color}`} />
           Code preview
         </div>
-        <pre className="whitespace-pre-wrap break-words text-foreground/75">{codePreview}</pre>
+        <pre className="whitespace-pre-wrap break-words">
+          <SyntaxHighlightedCode code={codePreview} language={item.name.split(".").pop() || "text"} />
+        </pre>
       </div>
     );
   }
   return (
-    <div className="grid size-full place-items-center bg-[linear-gradient(145deg,oklch(0.2_0.015_260),oklch(0.14_0.005_260))] text-muted-foreground">
+    <div className="grid size-full place-items-center text-muted-foreground">
       <div className="grid size-14 place-items-center rounded-xl border bg-background/60">
         <ResourceIcon item={item} />
       </div>
@@ -227,43 +238,43 @@ export function LibraryPage() {
         {list.map((item) => (
           <article
             key={item.id}
-            className={`group relative min-w-0 overflow-hidden rounded-xl border bg-gradient-to-br from-surface to-background transition-colors hover:border-border-strong hover:bg-surface ${
-              view === "list" ? "flex min-h-20 items-stretch" : ""
+            className={`group relative min-w-0 overflow-hidden rounded-xl border bg-background transition-colors hover:border-border-strong ${
+              view === "list" ? "flex min-h-20 items-stretch" : "flex flex-col"
             }`}
           >
             <button
               type="button"
               onClick={() => setPreview(item)}
               aria-label={`Preview ${item.name}`}
-              className={`relative block shrink-0 overflow-hidden text-left ${
-                view === "list" ? "h-20 w-28" : item.resource_type === "dataset" ? "w-full" : "aspect-[5/4] w-full"
+              className={`relative block shrink-0 overflow-hidden bg-gradient-to-br ${categoryStyle[item.library_category].tint} to-transparent text-left ${
+                view === "list" ? "h-20 w-28 self-center" : "aspect-[5/4] w-full border-b border-white/[0.06]"
               }`}
             >
               <LibraryThumbnail item={item} compact={view === "list"} />
             </button>
-            <div className="relative min-w-0 flex-1 p-3.5">
+            <div className={`relative min-w-0 shrink-0 p-3 ${view === "list" ? "flex-1" : ""}`}>
               <button
                 type="button"
                 onClick={() => setPreview(item)}
-                className="block w-full text-left"
+                className={`w-full text-left ${view === "grid" ? "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1" : "block"}`}
               >
-                <h2 className="break-words text-base font-semibold leading-snug tracking-tight text-foreground [overflow-wrap:anywhere]">
+                <h2 title={item.name} className="col-span-full truncate text-sm font-semibold leading-snug tracking-tight text-foreground [overflow-wrap:anywhere]">
                   {item.name}
                 </h2>
-                <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                  <span aria-hidden="true" className="[&>svg]:size-3.5 [&>svg]:text-muted-foreground"><ResourceIcon item={item} /></span>
+                <p className={`flex items-center gap-2 text-xs text-muted-foreground ${view === "list" ? "mt-1" : ""}`}>
+                  <span aria-hidden="true" className="[&>svg]:size-3.5"><ResourceIcon item={item} /></span>
                   <span>
                     {categoryLabel(item.library_category)}
                   </span>
                   <span aria-hidden="true">·</span>
                   {formatBytes(item.size_bytes)}
                 </p>
-                <p className="mt-3 inline-flex max-w-[calc(100%-5.75rem)] items-center gap-1.5 rounded-full bg-sage/10 px-2.5 py-1.5 text-[11px] font-medium leading-none text-sage">
+                <p className={`inline-flex min-w-0 items-center gap-1.5 text-[11px] font-medium leading-none text-muted-foreground ${view === "list" ? "mt-2 max-w-[calc(100%-5.75rem)] py-1" : "justify-self-end max-w-full"}`}>
                   <BarChart3 aria-hidden="true" className="size-3 shrink-0" />
                   <span className="truncate">From {item.workspace_name ?? (item.workspace_id ? "workspace" : "standalone chat")}</span>
                 </p>
               </button>
-              <div className="absolute bottom-3.5 right-3 flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+              <div className={`absolute right-3 flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100 ${view === "grid" ? "bottom-full mb-2" : "bottom-3.5"}`}>
                 <button
                   type="button"
                   onClick={() => setPreview(item)}
@@ -430,7 +441,7 @@ export function LibraryPage() {
             className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
           >
             {[0, 1, 2, 3, 4, 5].map((key) => (
-              <div key={key} className="aspect-[5/4] animate-pulse rounded-xl border bg-surface" />
+              <div key={key} className="aspect-[20/21] animate-pulse rounded-xl border bg-surface" />
             ))}
           </div>
         ) : items.length ? (

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import mimetypes
 import hashlib
 from pathlib import Path
@@ -376,9 +377,10 @@ async def download_resource(
 
 
 @router.get("/{resource_id}/preview")
-async def preview_resource(
+def preview_resource(
     resource_id: str,
     request: Request,
+    thumbnail: bool = False,
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
@@ -389,6 +391,17 @@ async def preview_resource(
         raise APIError(415, "preview_unavailable", "A browser preview is not available for this file.")
     storage: LocalFileStorage = request.app.state.storage
     content = storage.read_bytes(file_object.relative_storage_path)
+    if thumbnail:
+        if file_object.mime_type != "application/pdf":
+            raise APIError(415, "preview_unavailable", "Page thumbnails require a PDF.")
+        try:
+            page = subprocess.run(
+                ["pdftocairo", "-png", "-f", "1", "-l", "1", "-singlefile", "-scale-to", "640", "-", "-"],
+                input=content, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5, check=True,
+            )
+        except (OSError, subprocess.SubprocessError):
+            raise APIError(422, "preview_unavailable", "PDF thumbnail unavailable.")
+        return Response(content=page.stdout, media_type="image/png")
     if extension in CODE_EXTENSIONS | {".txt", ".md", ".json"}:
         content = content[:1_000_000]
     return Response(content=content, media_type=file_object.mime_type)
