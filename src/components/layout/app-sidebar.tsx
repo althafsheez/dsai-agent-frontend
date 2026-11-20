@@ -12,6 +12,7 @@ import { SidebarSection } from "./sidebar-section";
 import { SidebarNavItem } from "./sidebar-nav-item";
 import { navigation } from "./navigation";
 import { SidebarPinnedList } from "@/features/pinning";
+import { SidebarUsage } from "@/features/usage/sidebar-usage";
 
 export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
   const collapsed = useUiStore((state) => state.sidebarCollapsed);
@@ -115,6 +116,7 @@ export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
         )}
       </div>
 
+      {!compact && <SidebarUsage onNavigate={closeMobile} />}
       <div className={compact ? "flex flex-col items-center gap-2 border-t border-sidebar-border/40 py-3" : "flex items-center gap-2.5 border-t border-sidebar-border/40 px-3.5 py-3"}>
         <Link
           href="/login"
