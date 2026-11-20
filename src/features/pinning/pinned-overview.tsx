@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FolderKanban, MessageSquare, Pin } from "lucide-react";
+import { Pin } from "lucide-react";
 import { usePinnedItems } from "./use-pinned-items";
 
 const KIND_LABEL = { chat: "Analysis", workspace: "Workspace" } as const;
@@ -34,15 +34,11 @@ export function PinnedOverview() {
   return (
     <div className="space-y-2">
       {items.slice(0, 5).map((item) => {
-        const Icon = item.kind === "chat" ? MessageSquare : FolderKanban;
         return (
           <div
             key={`${item.kind}:${item.id}`}
             className="group relative flex items-center gap-3 rounded-lg border border-border bg-surface/60 px-3 py-2.5 transition-colors hover:border-border-strong hover:bg-surface"
           >
-            <div className="grid size-8 shrink-0 place-items-center rounded-md bg-raised text-slate">
-              <Icon className="size-4" strokeWidth={1.5} />
-            </div>
             <Link href={item.href} className="min-w-0 flex-1 after:absolute after:inset-0 focus-visible:outline-none">
               <p className="truncate text-xs font-medium text-foreground">{item.title}</p>
               <p className="mt-0.5 text-[11px] text-muted-foreground">{KIND_LABEL[item.kind]}</p>
