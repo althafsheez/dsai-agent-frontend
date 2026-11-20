@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3,
   Bookmark,
+  Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Code2,
@@ -66,6 +68,50 @@ const OWNERSHIP: Array<{ id: Ownership; label: string }> = [
   { id: "mine", label: "Mine" },
   { id: "shared", label: "Shared with me" },
 ];
+
+function OwnershipFilter({ value, onChange }: { value: Ownership; onChange: (value: Ownership) => void }) {
+  const [open, setOpen] = useState(false);
+  const container = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!container.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        trigger.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={container} className="relative shrink-0">
+      <button ref={trigger} type="button" aria-label={`Library ownership: ${OWNERSHIP.find((option) => option.id === value)?.label}`} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((previous) => !previous)} className="inline-flex h-10 items-center gap-2 rounded-md border bg-surface px-3 text-xs font-medium text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        {OWNERSHIP.find((option) => option.id === value)?.label}
+        <ChevronDown aria-hidden="true" className={`size-3.5 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div role="dialog" aria-label="Library ownership" className="absolute left-0 top-full z-30 mt-1.5 w-44 rounded-lg border bg-[var(--surface-raised)] p-1 shadow-xl">
+          {OWNERSHIP.map((option) => (
+            <button key={option.id} type="button" aria-pressed={value === option.id} onClick={() => { onChange(option.id); setOpen(false); trigger.current?.focus(); }} className={`flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-xs transition-colors hover:bg-surface hover:text-foreground focus-visible:bg-surface focus-visible:outline-none ${value === option.id ? "bg-surface text-foreground" : "text-muted-foreground"}`}>
+              {option.label}
+              {value === option.id && <Check aria-hidden="true" className="size-3.5 text-sage" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 type Filter = "all" | "folders" | LibraryResource["library_category"];
 
@@ -132,13 +178,14 @@ function LibraryThumbnail({ item, compact }: { item: LibraryResource; compact: b
   }, [isCode, item.preview_url]);
 
   // eslint-disable-next-line @next/next/no-img-element
-  if ((isImage || isPdf) && imageUrl) return <img src={imageUrl} alt="" className="size-full object-contain p-2" />;
+  if ((isImage || isPdf) && imageUrl) return <img src={imageUrl} alt="" className="size-full object-cover object-top" />;
   if (item.resource_type === "dataset") {
     const columns = item.columns?.slice(0, 3) ?? [];
     const rowCount = compact ? 2 : 4;
     const gridStyle = { gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` };
     return (
-      <div className={`flex size-full items-center overflow-hidden text-foreground/80 ${compact ? "p-1.5" : "p-3"}`}>
+      <div className={`flex size-full flex-col items-start overflow-hidden text-foreground/80 ${compact ? "justify-center p-1.5" : "p-3"}`}>
+        {!compact && <div className="mb-2 flex items-center gap-1.5 text-[9px] uppercase text-sage"><Database className="size-3.5" /> Dataset</div>}
         {columns.length ? (
           <div className="w-full overflow-hidden rounded-md border border-white/10 bg-background/60">
             <div style={gridStyle} className={`grid bg-white/[0.035] font-medium ${compact ? "text-[8px]" : "text-[10px]"}`}>
@@ -252,26 +299,28 @@ export function LibraryPage() {
             >
               <LibraryThumbnail item={item} compact={view === "list"} />
             </button>
+            {view === "grid" && <div className="pointer-events-none absolute inset-x-0 bottom-[64px] h-16 bg-gradient-to-t from-background/95 to-transparent" />}
+            {view === "grid" && <span className={`pointer-events-none absolute bottom-[78px] left-3 text-[10px] font-medium uppercase tracking-[0.12em] ${categoryStyle[item.library_category].color}`}>{categoryLabel(item.library_category)}</span>}
             <div className={`relative min-w-0 shrink-0 p-3 ${view === "list" ? "flex-1" : ""}`}>
               <button
                 type="button"
                 onClick={() => setPreview(item)}
-                className={`w-full text-left ${view === "grid" ? "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1" : "block"}`}
+                className="block w-full text-left"
               >
                 <h2 title={item.name} className="col-span-full truncate text-sm font-semibold leading-snug tracking-tight text-foreground [overflow-wrap:anywhere]">
                   {item.name}
                 </h2>
-                <p className={`flex items-center gap-2 text-xs text-muted-foreground ${view === "list" ? "mt-1" : ""}`}>
-                  <span aria-hidden="true" className="[&>svg]:size-3.5"><ResourceIcon item={item} /></span>
-                  <span>
+                <p className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                  <span className={`shrink-0 ${categoryStyle[item.library_category].color}`}>
                     {categoryLabel(item.library_category)}
                   </span>
                   <span aria-hidden="true">·</span>
-                  {formatBytes(item.size_bytes)}
-                </p>
-                <p className={`inline-flex min-w-0 items-center gap-1.5 text-[11px] font-medium leading-none text-muted-foreground ${view === "list" ? "mt-2 max-w-[calc(100%-5.75rem)] py-1" : "justify-self-end max-w-full"}`}>
-                  <BarChart3 aria-hidden="true" className="size-3 shrink-0" />
-                  <span className="truncate">From {item.workspace_name ?? (item.workspace_id ? "workspace" : "standalone chat")}</span>
+                  <span className="shrink-0">{formatBytes(item.size_bytes)}</span>
+                  <span aria-hidden="true">·</span>
+                  <span className="flex min-w-0 items-center gap-1" title={`From ${item.workspace_name ?? (item.workspace_id ? "workspace" : "standalone chat")}`}>
+                    <Folder aria-hidden="true" className="size-3 shrink-0" />
+                    <span className="truncate">From {item.workspace_name ?? (item.workspace_id ? "workspace" : "standalone chat")}</span>
+                  </span>
                 </p>
               </button>
               <div className={`absolute right-3 flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100 ${view === "grid" ? "bottom-full mb-2" : "bottom-3.5"}`}>
@@ -329,37 +378,18 @@ export function LibraryPage() {
 
   return (
     <>
-      <section className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
+      <section className="mx-auto w-full max-w-[1280px] px-4 py-8 sm:px-6 lg:px-8 lg:py-9">
         <header className="mb-6 flex items-start justify-between gap-5">
           <div className="flex items-start gap-3.5">
             <div className="grid size-11 shrink-0 place-items-center rounded-xl border bg-raised text-slate">
-              <Bookmark className="size-5" strokeWidth={1.5} />
+              <Layers3 className="size-6" strokeWidth={1.5} />
             </div>
             <div>
-              <div className="flex items-center gap-2.5">
-                <h1 className="text-xl font-semibold tracking-tight">Library</h1>
-                <span className="rounded border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-muted-foreground">
-                  Saved Assets
-                </span>
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Datasets, charts, and reports saved across your analyses
-              </p>
+              <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
+              <p className="mt-1 text-sm text-muted-foreground">Files saved from your analyses.</p>
             </div>
           </div>
         </header>
-
-        <div aria-label="Library ownership" className="mb-3 inline-flex h-8 rounded-md border bg-surface p-0.5">
-          {OWNERSHIP.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              aria-pressed={ownership === option.id}
-              onClick={() => setOwnership(option.id)}
-              className={`rounded px-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground ${ownership === option.id ? "bg-raised text-foreground" : ""}`}
-            >{option.label}</button>
-          ))}
-        </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div
@@ -386,15 +416,16 @@ export function LibraryPage() {
             ))}
           </div>
 
-          <div className="flex items-center gap-2">
-            <label className="relative block w-full sm:w-72">
+          <div className="flex min-w-0 items-center gap-2">
+            <OwnershipFilter value={ownership} onChange={setOwnership} />
+            <label className="relative block min-w-0 w-full sm:w-72">
               <span className="sr-only">Search library</span>
               <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search library..."
-                className="h-9 w-full rounded-md border bg-surface pl-9 pr-9 text-xs outline-none placeholder:text-muted-foreground focus:border-border-strong"
+                className="h-10 w-full rounded-md border bg-surface pl-9 pr-9 text-xs outline-none placeholder:text-muted-foreground focus:border-border-strong"
               />
               {query && (
                 <button
