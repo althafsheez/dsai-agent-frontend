@@ -16,6 +16,8 @@ interface QuickAssistantPopupProps {
   onMinimize: () => void;
   onRestore: () => void;
   onClose: () => void;
+  /** The context panel is open on the right; the popup moves left of it instead of covering it. */
+  contextOpen?: boolean;
   /** Asked once as soon as the assistant is ready, e.g. from the `/btw` slash command. */
   autoAsk?: string;
 }
@@ -30,7 +32,7 @@ function compactText(content: string) {
     : part.startsWith("`") && part.endsWith("`") ? <code key={index} className="rounded bg-raised px-1 font-mono text-[11px]">{part.slice(1, -1)}</code> : part);
 }
 
-export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFileSelect, minimized, onMinimize, onRestore, onClose, autoAsk }: QuickAssistantPopupProps) {
+export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFileSelect, minimized, onMinimize, onRestore, onClose, autoAsk, contextOpen = false }: QuickAssistantPopupProps) {
   const inputId = useId();
   const titleId = useId();
   const [draft, setDraft] = useState("");
@@ -143,7 +145,7 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
       data-expanded={expanded}
       aria-hidden={minimized || undefined}
       inert={minimized || undefined}
-      className={`fixed right-4 top-16 z-[70] flex origin-top-right animate-pop-in flex-col overflow-hidden rounded-xl border border-border-strong bg-sidebar shadow-2xl transition-[width,height,opacity,transform,visibility] duration-300 ease-spring ${expanded ? "h-[min(640px,calc(100dvh-6rem))] w-[min(560px,calc(100vw-2rem))]" : "h-[min(440px,calc(100dvh-6rem))] w-[min(360px,calc(100vw-2rem))]"} ${minimized ? "invisible translate-y-2 scale-95 opacity-0" : "visible opacity-100"}`}
+      className={`fixed right-4 top-16 z-[70] flex origin-top-right ${contextOpen ? "sm:right-[calc(360px+1rem)] xl:right-[calc(340px+1rem)] sm:max-w-[calc(100vw-360px-2rem)] xl:max-w-none" : ""} animate-pop-in flex-col overflow-hidden rounded-xl border border-border-strong bg-sidebar shadow-2xl transition-[width,height,opacity,transform,visibility] duration-300 ease-spring ${expanded ? "h-[min(640px,calc(100dvh-6rem))] w-[min(560px,calc(100vw-2rem))]" : "h-[min(440px,calc(100dvh-6rem))] w-[min(360px,calc(100vw-2rem))]"} ${minimized ? "invisible translate-y-2 scale-95 opacity-0" : "visible opacity-100"}`}
     >
       <header className="flex shrink-0 items-start gap-2 border-b px-4 py-3">
         <Sparkles className="mt-0.5 size-4 shrink-0 text-sage" />
@@ -206,7 +208,7 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
       </form>
     </section>
     {minimized ? (
-      <div className="fixed right-4 top-16 z-[70] flex animate-pop-in items-center gap-1 rounded-full border border-border-strong bg-sidebar py-1 pl-1 pr-1.5 shadow-xl">
+      <div className={`fixed right-4 top-16 z-[70] flex animate-pop-in items-center gap-1 rounded-full border border-border-strong bg-sidebar py-1 pl-1 pr-1.5 shadow-xl ${contextOpen ? "sm:right-[calc(360px+1rem)] xl:right-[calc(340px+1rem)]" : ""}`}>
         <button type="button" onClick={onRestore} aria-label="Restore Quick Assistant" className="inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-xs text-foreground hover:bg-raised">
           {running ? <LoaderCircle className="size-3.5 animate-spin text-sage" /> : <Sparkles className="size-3.5 text-sage" />}
           Quick Assistant

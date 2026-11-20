@@ -1225,6 +1225,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
           onMinimize={minimizeQuickAssistant}
           onRestore={restoreQuickAssistant}
           onClose={closeQuickAssistant}
+          contextOpen={panelOpen}
         />
       ) : null}
       {panelOpen ? (
