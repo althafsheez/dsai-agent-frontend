@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Database, Download, Plus, Search } from "lucide-react";
+import { Database, Download, Plus, Search, Share2 } from "lucide-react";
 import type { DatasetResource } from "@/features/context-sidebar/types";
+import { ShareWorkspaceDialog } from "./share-workspace-dialog";
 import { downloadResource, downloadWorkspaceDatasets } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -22,6 +23,7 @@ type Props = {
 export function WorkspaceDatasets({ workspaceId, workspaceName, datasets, onUpload, uploadFailed }: Props) {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const selected = datasets.find((dataset) => dataset.id === selectedId);
   const visible = datasets.filter((dataset) => dataset.name.toLowerCase().includes(search.toLowerCase()));
   const fileDownload = useMutation({
@@ -44,6 +46,9 @@ export function WorkspaceDatasets({ workspaceId, workspaceName, datasets, onUplo
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search datasets…" className="h-9 w-44 rounded-md border bg-background pl-9 pr-3 text-xs" />
           </label>
+          <button type="button" onClick={() => setShareOpen(true)} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-xs">
+            <Share2 className="size-4" />Share
+          </button>
           <button type="button" disabled={!datasets.length || zipDownload.isPending} onClick={() => zipDownload.mutate()} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-xs disabled:opacity-50">
             <Download className="size-4" />{zipDownload.isPending ? "Preparing ZIP…" : "Download all (.zip)"}
           </button>
@@ -95,6 +100,7 @@ export function WorkspaceDatasets({ workspaceId, workspaceName, datasets, onUplo
           <p className="mt-1 text-xs text-muted-foreground">Its metadata and schema will appear here.</p>
         </div>}
       </aside>
+      <ShareWorkspaceDialog open={shareOpen} onOpenChange={setShareOpen} workspaceId={workspaceId} workspaceName={workspaceName} subject="datasets" />
     </section>
   );
 }

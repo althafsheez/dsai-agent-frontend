@@ -35,12 +35,13 @@ interface ShareWorkspaceDialogProps {
   workspaceId: string;
   workspaceName: string;
   /** What the person is sharing; a Library folder and a chat both share their workspace. */
-  subject?: "workspace" | "folder" | "chat";
+  subject?: "workspace" | "folder" | "chat" | "datasets";
 }
 
 const SUBJECT_COPY: Record<NonNullable<ShareWorkspaceDialogProps["subject"]>, { title: string; description: (name: string) => string }> = {
   workspace: { title: "Share workspace", description: (name) => `Invite people to ${name}. Access covers its chats, datasets and saved files.` },
   folder: { title: "Share folder", description: (name) => `Sharing this folder gives access to the ${name} workspace and every file in it.` },
+  datasets: { title: "Share datasets", description: (name) => `Sharing these datasets gives access to the ${name} workspace and every file in it.` },
   chat: { title: "Share chat", description: (name) => `This chat lives in ${name}. Invited people get access to the whole workspace.` },
 };
 
