@@ -53,6 +53,14 @@ function folderSummary(items: LibraryResource[]) {
   for (const item of items) counts.set(categoryLabel(item.library_category), (counts.get(categoryLabel(item.library_category)) ?? 0) + 1);
   return [...counts].map(([label, count]) => `${count} ${label.toLowerCase()}${count === 1 ? "" : "s"}`).join(" · ");
 }
+type Ownership = "all" | "mine" | "shared";
+
+const OWNERSHIP: Array<{ id: Ownership; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "mine", label: "Mine" },
+  { id: "shared", label: "Shared with me" },
+];
+
 type Filter = "all" | LibraryResource["library_category"];
 
 const FILTERS: Array<{ id: Filter; label: string; icon: typeof Layers3 }> = [
@@ -182,6 +190,7 @@ export function LibraryPage() {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [ownership, setOwnership] = useState<Ownership>("all");
   const [view, setView] = useState<LibraryView>("grid");
   const [preview, setPreview] = useState<ContextFile | null>(null);
   const [openFolderId, setOpenFolderId] = useState<string | null>(null);
@@ -203,11 +212,13 @@ export function LibraryPage() {
 
   const items = useMemo(() => {
     const search = query.trim().toLowerCase();
+    // The Library only holds the signed-in user's own saves; nothing is shared into it yet.
+    if (ownership === "shared") return [];
     return (libraryQuery.data?.items ?? []).filter((item) => {
       const matchesSearch = !search || item.name.toLowerCase().includes(search);
       return matchesSearch && (filter === "all" || item.library_category === filter);
     });
-  }, [filter, libraryQuery.data?.items, query]);
+  }, [filter, libraryQuery.data?.items, ownership, query]);
 
   function renderItems(list: LibraryResource[]) {
     return (
@@ -329,6 +340,18 @@ export function LibraryPage() {
             </div>
           </div>
         </header>
+
+        <div aria-label="Library ownership" className="mb-3 inline-flex h-8 rounded-md border bg-surface p-0.5">
+          {OWNERSHIP.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              aria-pressed={ownership === option.id}
+              onClick={() => setOwnership(option.id)}
+              className={`rounded px-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground ${ownership === option.id ? "bg-raised text-foreground" : ""}`}
+            >{option.label}</button>
+          ))}
+        </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div
@@ -478,10 +501,12 @@ export function LibraryPage() {
           <div className="mt-8 rounded-xl border border-dashed px-6 py-16 text-center">
             <Bookmark className="mx-auto size-7 text-muted-foreground" strokeWidth={1.5} />
             <p className="mt-3 text-sm font-medium">
-              {query ? "No matching files" : "Your Library is empty"}
+              {ownership === "shared" ? "Nothing shared with you yet" : query ? "No matching files" : "Your Library is empty"}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Save or star datasets and artifacts from any chat to access them across all analyses.
+              {ownership === "shared"
+                ? "Files other people share with you will appear here."
+                : "Save or star datasets and artifacts from any chat to access them across all analyses."}
             </p>
           </div>
         )}
