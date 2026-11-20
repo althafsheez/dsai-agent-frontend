@@ -10,14 +10,19 @@ import { Brand } from "./brand";
 import { SearchDialog } from "./search-dialog";
 import { SidebarSection } from "./sidebar-section";
 import { SidebarNavItem } from "./sidebar-nav-item";
+import { SidebarUsageStats } from "./sidebar-usage-stats";
 import { navigation } from "./navigation";
+import { useAuth } from "@/features/auth";
 
 export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
+  const { user } = useAuth();
   const collapsed = useUiStore((state) => state.sidebarCollapsed);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
   const setMobileOpen = useUiStore((state) => state.setMobileSidebarOpen);
   const compact = collapsed && !mobile;
   const closeMobile = () => { if (mobile) setMobileOpen(false); };
+  const userInitials = user?.avatarInitials ?? "DU";
+  const userName = user?.name ?? "Demo user";
   const activityQuery = useQuery({
     queryKey: ["activity"],
     queryFn: getActivity,
@@ -116,26 +121,29 @@ export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
         )}
       </div>
 
-      <div className={compact ? "flex flex-col items-center gap-2 border-t border-sidebar-border/40 py-3" : "flex items-center gap-2.5 border-t border-sidebar-border/40 px-3.5 py-3"}>
-        <Link
-          href="/login"
-          onClick={closeMobile}
-          aria-label="Demo user account"
-          className="grid size-7 shrink-0 place-items-center rounded-full border border-border-strong bg-raised text-[10px] font-semibold text-foreground hover:border-foreground/30 transition-colors"
-        >
-          DU
-        </Link>
-        {!compact && (
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-foreground truncate">Demo user</p>
-            <p className="text-[10px] text-muted-foreground truncate">Personal workspace</p>
-          </div>
-        )}
-        <Button asChild variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-foreground">
-          <Link href="/settings" onClick={closeMobile} aria-label="Settings">
-            <Settings className="size-4" strokeWidth={1.5} />
+      <div className="mt-auto border-t border-sidebar-border/40 pt-2.5">
+        <SidebarUsageStats compact={compact} />
+        <div className={compact ? "flex flex-col items-center gap-2 py-2" : "flex items-center gap-2.5 px-3.5 py-2.5"}>
+          <Link
+            href="/login"
+            onClick={closeMobile}
+            aria-label={`${userName} account`}
+            className="grid size-7 shrink-0 place-items-center rounded-full border border-border-strong bg-raised text-[10px] font-semibold text-foreground hover:border-foreground/30 transition-colors"
+          >
+            {userInitials}
           </Link>
-        </Button>
+          {!compact && (
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium text-foreground truncate">{userName}</p>
+              <p className="text-[10px] text-muted-foreground truncate">{user?.role ?? "Personal workspace"}</p>
+            </div>
+          )}
+          <Button asChild variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-foreground">
+            <Link href="/settings" onClick={closeMobile} aria-label="Settings">
+              <Settings className="size-4" strokeWidth={1.5} />
+            </Link>
+          </Button>
+        </div>
       </div>
     </div>
   );
