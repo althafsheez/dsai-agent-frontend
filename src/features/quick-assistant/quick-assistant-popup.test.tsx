@@ -95,4 +95,25 @@ describe("QuickAssistantPopup", () => {
     await user.keyboard("{Escape}");
     expect(onMinimize).toHaveBeenCalledOnce();
   });
+
+  it("opens full screen from its button and exits again", async () => {
+    const user = userEvent.setup();
+    render(<QuickAssistantPopup chatId="chat-1" snapshotMessageId={null} resources={[]} onFileSelect={vi.fn()} minimized={false} onMinimize={vi.fn()} onRestore={vi.fn()} onClose={vi.fn()} />);
+    const dialog = screen.getByRole("dialog", { name: "Quick Assistant" });
+    expect(dialog).toHaveAttribute("data-fullscreen", "false");
+    expect(screen.getByRole("separator", { name: "Resize Quick Assistant" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open Quick Assistant full screen" }));
+    expect(dialog).toHaveAttribute("data-fullscreen", "true");
+    expect(screen.queryByRole("separator", { name: "Resize Quick Assistant" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Exit full screen" }));
+    expect(dialog).toHaveAttribute("data-fullscreen", "false");
+  });
+
+  it("stays left of the right-hand panel", () => {
+    render(<QuickAssistantPopup chatId="chat-1" snapshotMessageId={null} resources={[]} onFileSelect={vi.fn()} minimized={false} onMinimize={vi.fn()} onRestore={vi.fn()} onClose={vi.fn()} rightInset={400} />);
+    const dialog = screen.getByRole("dialog", { name: "Quick Assistant" });
+    const left = parseFloat(dialog.style.left);
+    const width = parseFloat(dialog.style.width);
+    expect(left + width).toBeLessThanOrEqual(window.innerWidth - 400);
+  });
 });

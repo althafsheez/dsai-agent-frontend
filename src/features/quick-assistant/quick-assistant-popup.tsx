@@ -1,7 +1,8 @@
 "use client";
 
-import { ArrowUp, Database, FileText, LoaderCircle, Maximize2, Minimize2, Minus, Sparkles, X } from "lucide-react";
+import { ArrowUp, Database, Expand, FileText, LoaderCircle, Maximize2, Minimize2, Minus, Shrink, Sparkles, X } from "lucide-react";
 import { FormEvent, useEffect, useId, useRef, useState } from "react";
+import { useFloatingFrame } from "./use-floating-frame";
 import { getModels, getQuickAssistantMessages, streamQuickAssistantMessage, type ExecutionEvent } from "@/lib/api";
 import type { ContextFile } from "@/features/context-sidebar";
 
@@ -16,8 +17,8 @@ interface QuickAssistantPopupProps {
   onMinimize: () => void;
   onRestore: () => void;
   onClose: () => void;
-  /** The context panel is open on the right; the popup moves left of it instead of covering it. */
-  contextOpen?: boolean;
+  /** Width in px of the context/file panel open on the right; the popup stays clear of it. */
+  rightInset?: number;
   /** Asked once as soon as the assistant is ready, e.g. from the `/btw` slash command. */
   autoAsk?: string;
 }
@@ -32,7 +33,7 @@ function compactText(content: string) {
     : part.startsWith("`") && part.endsWith("`") ? <code key={index} className="rounded bg-raised px-1 font-mono text-[11px]">{part.slice(1, -1)}</code> : part);
 }
 
-export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFileSelect, minimized, onMinimize, onRestore, onClose, autoAsk, contextOpen = false }: QuickAssistantPopupProps) {
+export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFileSelect, minimized, onMinimize, onRestore, onClose, autoAsk, rightInset = 0 }: QuickAssistantPopupProps) {
   const inputId = useId();
   const titleId = useId();
   const [draft, setDraft] = useState("");
@@ -134,6 +135,7 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
   }
 
   const expanded = expandedOverride ?? (sentThisSession || draft.length > LONG_DRAFT_CHARS || draft.includes("\n"));
+  const frame = useFloatingFrame({ ref: popupRef, rightInset, expanded });
 
   return (
     <>
@@ -143,11 +145,13 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
       aria-modal="false"
       aria-labelledby={titleId}
       data-expanded={expanded}
+      data-fullscreen={frame.fullscreen}
       aria-hidden={minimized || undefined}
       inert={minimized || undefined}
-      className={`fixed right-4 top-16 z-[70] flex origin-top-right ${contextOpen ? "sm:right-[calc(360px+1rem)] xl:right-[calc(340px+1rem)] sm:max-w-[calc(100vw-360px-2rem)] xl:max-w-none" : ""} animate-pop-in flex-col overflow-hidden rounded-xl border border-border-strong bg-sidebar shadow-2xl transition-[width,height,opacity,transform,visibility] duration-300 ease-spring ${expanded ? "h-[min(640px,calc(100dvh-6rem))] w-[min(560px,calc(100vw-2rem))]" : "h-[min(440px,calc(100dvh-6rem))] w-[min(360px,calc(100vw-2rem))]"} ${minimized ? "invisible translate-y-2 scale-95 opacity-0" : "visible opacity-100"}`}
+      style={frame.style}
+      className={`absolute z-[70] flex origin-top-left animate-pop-in flex-col overflow-hidden rounded-xl border border-border-strong bg-sidebar shadow-2xl ${frame.interacting ? "" : "transition-[left,top,width,height,opacity,transform,visibility] duration-300 ease-spring"} ${minimized ? "invisible translate-y-2 scale-95 opacity-0" : "visible opacity-100"}`}
     >
-      <header className="flex shrink-0 items-start gap-2 border-b px-4 py-3">
+      <header {...frame.dragProps} className={`flex shrink-0 touch-none select-none items-start gap-2 border-b px-4 py-3 ${frame.fullscreen ? "" : "cursor-grab active:cursor-grabbing"}`}>
         <Sparkles className="mt-0.5 size-4 shrink-0 text-sage" />
         <div className="min-w-0 flex-1">
           <h2 id={titleId} className="text-sm font-medium text-foreground">Quick Assistant</h2>
@@ -155,12 +159,22 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
         </div>
         <button
           type="button"
-          onClick={() => setExpandedOverride(!expanded)}
+          onClick={() => { setExpandedOverride(!expanded); frame.resetSize(); }}
           aria-label={expanded ? "Shrink Quick Assistant" : "Expand Quick Assistant"}
           title={expanded ? "Shrink" : "Expand"}
           className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground"
         >
           {expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+        </button>
+        <button
+          type="button"
+          onClick={frame.toggleFullscreen}
+          aria-label={frame.fullscreen ? "Exit full screen" : "Open Quick Assistant full screen"}
+          title={frame.fullscreen ? "Exit full screen" : "Full screen"}
+          aria-pressed={frame.fullscreen}
+          className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground"
+        >
+          {frame.fullscreen ? <Shrink className="size-3.5" /> : <Expand className="size-3.5" />}
         </button>
         <button type="button" onClick={onMinimize} aria-label="Minimize Quick Assistant" title="Minimize" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground">
           <Minus className="size-4" />
@@ -206,9 +220,17 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
           <ArrowUp className="size-4" />
         </button>
       </form>
+      {frame.fullscreen ? null : (
+        <div
+          {...frame.resizeProps}
+          role="separator"
+          aria-label="Resize Quick Assistant"
+          className="absolute bottom-0 right-0 size-4 cursor-nwse-resize touch-none after:absolute after:bottom-1 after:right-1 after:size-2 after:rounded-br-sm after:border-b-2 after:border-r-2 after:border-muted-foreground/60"
+        />
+      )}
     </section>
     {minimized ? (
-      <div className={`fixed right-4 top-16 z-[70] flex animate-pop-in items-center gap-1 rounded-full border border-border-strong bg-sidebar py-1 pl-1 pr-1.5 shadow-xl ${contextOpen ? "sm:right-[calc(360px+1rem)] xl:right-[calc(340px+1rem)]" : ""}`}>
+      <div style={{ left: frame.box.left, top: frame.box.top }} className="absolute z-[70] flex animate-pop-in items-center gap-1 rounded-full border border-border-strong bg-sidebar py-1 pl-1 pr-1.5 shadow-xl">
         <button type="button" onClick={onRestore} aria-label="Restore Quick Assistant" className="inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-xs text-foreground hover:bg-raised">
           {running ? <LoaderCircle className="size-3.5 animate-spin text-sage" /> : <Sparkles className="size-3.5 text-sage" />}
           Quick Assistant

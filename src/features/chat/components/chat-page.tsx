@@ -220,6 +220,19 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
   const [selectedFile, setSelectedFile] = useState<ContextFile | null>(null);
   const [previewExpanded, setPreviewExpanded] = useState(false);
+  // Quick Assistant is a floating window, so it needs to know how much of the right edge the open panel occupies.
+  const contextPanelRef = useRef<HTMLDivElement>(null);
+  const previewPanelRef = useRef<HTMLDivElement>(null);
+  const [rightInset, setRightInset] = useState(0);
+  useEffect(() => {
+    const panels = [previewPanelRef.current, contextPanelRef.current];
+    const measure = () => setRightInset((panels[0] ?? panels[1])?.getBoundingClientRect().width ?? 0);
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    panels.forEach((panel) => panel && observer?.observe(panel));
+    window.addEventListener("resize", measure);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", measure); };
+  }, [panelOpen, selectedFile, previewExpanded]);
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
@@ -1588,11 +1601,11 @@ export function ChatPage({ chatId }: { chatId: string }) {
           onMinimize={minimizeQuickAssistant}
           onRestore={restoreQuickAssistant}
           onClose={closeQuickAssistant}
-          contextOpen={panelOpen}
+          rightInset={rightInset}
         />
       ) : null}
       {panelOpen ? (
-        <div className="absolute inset-y-0 right-0 z-40 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:static xl:z-auto xl:w-[340px] xl:max-w-none xl:shrink-0 xl:shadow-none">
+        <div ref={contextPanelRef} className="absolute inset-y-0 right-0 z-40 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:static xl:z-auto xl:w-[340px] xl:max-w-none xl:shrink-0 xl:shadow-none">
           <ContextSidebar
             workspaceId={chatQuery.data?.workspace_id ?? null}
             datasets={datasetsQuery.data?.items ?? []}
@@ -1604,7 +1617,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
         </div>
       ) : null}
       {selectedFile ? (
-        <div className={`absolute inset-y-0 right-0 z-50 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:max-w-none ${previewExpanded ? "xl:w-[min(75vw,1200px)]" : "xl:w-[min(52vw,820px)]"}`}>
+        <div ref={previewPanelRef} className={`absolute inset-y-0 right-0 z-50 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:max-w-none ${previewExpanded ? "xl:w-[min(75vw,1200px)]" : "xl:w-[min(52vw,820px)]"}`}>
           <FilePreviewSidebar
             file={selectedFile}
             chatId={chatId}
