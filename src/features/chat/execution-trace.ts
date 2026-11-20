@@ -94,3 +94,31 @@ export function replayTrace(events: ExecutionEvent[]): TraceReplay {
   for (const step of steps.values()) stepsByMessage.set(step.messageId, [...(stepsByMessage.get(step.messageId) ?? []), step]);
   return { stepsByMessage, outputsByMessage };
 }
+
+/** Classifies an error message into a recoverable (retryable) vs unrecoverable failure for hybrid recovery */
+export function classifyError(error: unknown): "recoverable" | "unrecoverable" {
+  const message = error instanceof Error
+    ? error.message.toLowerCase()
+    : typeof error === "string"
+      ? error.toLowerCase()
+      : typeof error === "object" && error !== null && "message" in error
+        ? String((error as { message: unknown }).message).toLowerCase()
+        : "";
+
+  if (
+    message.includes("safety") ||
+    message.includes("policy") ||
+    message.includes("permission") ||
+    message.includes("unauthorized") ||
+    message.includes("forbidden") ||
+    message.includes("not found") ||
+    message.includes("context length") ||
+    message.includes("token limit") ||
+    message.includes("invalid argument")
+  ) {
+    return "unrecoverable";
+  }
+
+  // Network drops, timeouts, 429 rate limits, 503 service unavailable, aborted runs are recoverable
+  return "recoverable";
+}
