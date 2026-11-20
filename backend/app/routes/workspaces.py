@@ -7,13 +7,17 @@ from ..dependencies import get_current_user, get_db
 from ..models import User
 from sqlalchemy import select
 
-from ..models import Chat, Workflow, WorkflowChat, WorkspaceContextFile
+from ..errors import APIError
+from ..models import Chat, Workflow, WorkflowChat, WorkspaceContextFile, WorkspaceInvite
 from ..schemas import (
     ChatResponse,
     WorkspaceContextFileCreate,
     WorkspaceContextFileResponse,
     WorkspaceContextFileUpdate,
     WorkspaceCreate,
+    WorkspaceInviteCreate,
+    WorkspaceInviteResponse,
+    WorkspaceInviteUpdate,
     WorkspaceResponse,
     WorkspaceUpdate,
     WorkflowChatCreate,
@@ -138,6 +142,77 @@ async def delete_context_file(
     if item is not None and item.workspace_id == workspace_id and item.created_by == user.id:
         session.delete(item)
         session.commit()
+
+
+@router.get("/{workspace_id}/invites")
+async def get_workspace_invites(
+    workspace_id: str,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    require_workspace(session, user, workspace_id)
+    invites = session.scalars(
+        select(WorkspaceInvite).where(WorkspaceInvite.workspace_id == workspace_id).order_by(WorkspaceInvite.created_at)
+    )
+    return {"items": [WorkspaceInviteResponse.model_validate(item) for item in invites], "next_cursor": None}
+
+
+@router.post("/{workspace_id}/invites", response_model=WorkspaceInviteResponse, status_code=status.HTTP_201_CREATED)
+async def post_workspace_invite(
+    workspace_id: str,
+    data: WorkspaceInviteCreate,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceInviteResponse:
+    require_workspace(session, user, workspace_id)
+    email = data.email.strip().lower()
+    invite = session.scalar(select(WorkspaceInvite).where(
+        WorkspaceInvite.workspace_id == workspace_id, WorkspaceInvite.email == email,
+    ))
+    # Inviting the same address again updates its role instead of failing.
+    if invite is None:
+        invite = WorkspaceInvite(workspace_id=workspace_id, email=email, role=data.role, invited_by=user.id)
+        session.add(invite)
+    else:
+        invite.role = data.role
+    session.commit()
+    session.refresh(invite)
+    return WorkspaceInviteResponse.model_validate(invite)
+
+
+def _require_invite(session: Session, workspace_id: str, invite_id: str) -> WorkspaceInvite:
+    invite = session.get(WorkspaceInvite, invite_id)
+    if invite is None or invite.workspace_id != workspace_id:
+        raise APIError(404, "invite_not_found", "That invitation does not exist.")
+    return invite
+
+
+@router.patch("/{workspace_id}/invites/{invite_id}", response_model=WorkspaceInviteResponse)
+async def patch_workspace_invite(
+    workspace_id: str,
+    invite_id: str,
+    data: WorkspaceInviteUpdate,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceInviteResponse:
+    require_workspace(session, user, workspace_id)
+    invite = _require_invite(session, workspace_id, invite_id)
+    invite.role = data.role
+    session.commit()
+    session.refresh(invite)
+    return WorkspaceInviteResponse.model_validate(invite)
+
+
+@router.delete("/{workspace_id}/invites/{invite_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workspace_invite(
+    workspace_id: str,
+    invite_id: str,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    require_workspace(session, user, workspace_id)
+    session.delete(_require_invite(session, workspace_id, invite_id))
+    session.commit()
 
 
 @router.get("/{workspace_id}/workflows")

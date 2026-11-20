@@ -19,6 +19,7 @@ export interface HistoryRecord {
   updated_at: string;
   archived_at: string | null;
   deleted_at: string | null;
+  pinned_at?: string | null;
   is_unread?: boolean;
 }
 

@@ -53,3 +53,9 @@ backend/**/__pycache__/
 
 .worktrees//.next-dev/
 /.worktrees/
+
+# local secrets and tooling
+backend/.env
+.remember/
+.claude/launch.json
+.claude/settings.local.json

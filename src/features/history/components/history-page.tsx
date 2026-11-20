@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { deleteChat, getChats, getWorkspaces, updateChat } from "@/lib/api";
+import { deleteChat, getChats, getWorkspaces, updateChat, updateWorkspace } from "@/lib/api";
 import { filterHistory } from "../logic/filter-history";
 import { currentDemoUser, type HistoryFilters, type HistoryOwnership, type HistoryRecord, type HistorySort, type HistoryStatus, type HistoryTime } from "../types";
 import { HistoryTable } from "./history-table";
@@ -49,6 +49,7 @@ export function HistoryPage() {
         updated_at: chat.updated_at,
         archived_at: chat.archived_at,
         deleted_at: chat.deleted_at,
+        pinned_at: chat.pinned_at,
         is_unread: chat.is_unread,
       }));
       const workspaceRecords: HistoryRecord[] = workspaceList.items.map((workspace) => ({
@@ -61,6 +62,7 @@ export function HistoryPage() {
         updated_at: workspace.updated_at,
         archived_at: workspace.archived_at,
         deleted_at: workspace.deleted_at,
+        pinned_at: workspace.pinned_at,
       }));
       return [...chatRecords, ...workspaceRecords];
     },
@@ -80,6 +82,7 @@ export function HistoryPage() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: historyKey }),
         queryClient.invalidateQueries({ queryKey: ["sidebar", "recent-chats"] }),
+        queryClient.invalidateQueries({ queryKey: ["workspaces"] }),
       ]);
     },
   });
@@ -124,6 +127,10 @@ export function HistoryPage() {
       onUnreadChange={(record: HistoryRecord, isUnread) => mutate(async () => {
         await updateChat(record.id, { is_unread: isUnread });
         await queryClient.invalidateQueries({ queryKey: ["activity"] });
+      })}
+      onPinChange={(record: HistoryRecord, pinned) => mutate(async () => {
+        if (record.kind === "chat") await updateChat(record.id, { pinned });
+        else await updateWorkspace(record.id, { pinned });
       })}
       onDeleteMany={(selectedRecords) => mutate(async () => {
         await Promise.all(selectedRecords.map((record) => deleteChat(record.id)));

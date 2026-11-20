@@ -6,6 +6,9 @@ import type { MessageDto } from "@/lib/api";
 import { savePendingRun } from "../pending-run";
 import { ChatPage } from "./chat-page";
 
+const push = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+
 const chat = {
   id: "chat-real",
   title: "Stored conversation",
@@ -207,7 +210,7 @@ describe("live chat page", () => {
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Model" }), "gemini-pro");
     await user.selectOptions(screen.getByRole("combobox", { name: "Reasoning effort" }), "low");
-    await user.type(screen.getByRole("textbox", { name: "Ask anything about your data" }), "Follow up");
+    await user.type(screen.getByRole("combobox", { name: "Ask anything about your data" }), "Follow up");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(await screen.findByText("Streamed answer")).toBeInTheDocument();
@@ -230,7 +233,7 @@ describe("live chat page", () => {
     await screen.findByText("Stored question");
     pendingCreate = new Promise<void>((resolve) => { resolvePendingCreate = resolve; });
 
-    await user.type(screen.getByRole("textbox", { name: "Ask anything about your data" }), "Show this immediately");
+    await user.type(screen.getByRole("combobox", { name: "Ask anything about your data" }), "Show this immediately");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(screen.getByText("Show this immediately")).toBeVisible();
@@ -264,7 +267,7 @@ describe("live chat page", () => {
     const attachments = screen.getByLabelText("Selected chat attachments");
     expect(within(attachments).getByText("sales.csv")).toBeVisible();
     expect(within(attachments).getByText("summary.pdf")).toBeVisible();
-    await user.type(screen.getByRole("textbox", { name: "Ask anything about your data" }), "Analyze these files");
+    await user.type(screen.getByRole("combobox", { name: "Ask anything about your data" }), "Analyze these files");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(await screen.findByRole("complementary", { name: "Analysis context" })).toBeVisible();
@@ -299,7 +302,7 @@ describe("live chat page", () => {
     holdStreamOpen = true;
     const user = userEvent.setup();
     renderChat();
-    const composer = await screen.findByRole("textbox", { name: "Ask anything about your data" });
+    const composer = await screen.findByRole("combobox", { name: "Ask anything about your data" });
 
     await user.type(composer, "Start a long analysis");
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -332,7 +335,7 @@ describe("live chat page", () => {
     holdStreamOpen = true;
     const user = userEvent.setup();
     renderChat();
-    const composer = await screen.findByRole("textbox", { name: "Ask anything about your data" });
+    const composer = await screen.findByRole("combobox", { name: "Ask anything about your data" });
 
     await user.type(composer, "Start a cancellable analysis");
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -343,5 +346,19 @@ describe("live chat page", () => {
     expect(JSON.parse(String(cancelCall?.[1]?.body))).toEqual({ reason: "user" });
     expect(await screen.findByText("Stopping the active run…")).toBeVisible();
     openStreamController?.close();
+  });
+
+  it("opens the slash command picker and runs /status without sending a message", async () => {
+    const user = userEvent.setup();
+    renderChat();
+    const composer = await screen.findByRole("combobox", { name: "Ask anything about your data" });
+    await waitFor(() => expect(composer).toBeEnabled());
+    await user.type(composer, "/sta");
+    const menu = screen.getByRole("listbox", { name: "Slash commands" });
+    expect(within(menu).getByRole("option", { selected: true })).toHaveTextContent("/status");
+    await user.keyboard("{Enter}");
+    expect(await screen.findByText(/· idle · 0 queued/)).toBeVisible();
+    expect(composer).toHaveValue("");
+    expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
   });
 });

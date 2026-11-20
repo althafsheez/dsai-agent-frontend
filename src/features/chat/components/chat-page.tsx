@@ -35,6 +35,8 @@ import {
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { useUiStore } from "@/stores/ui-store";
 import { ContextSidebar, FilePreviewSidebar, type ContextFile } from "@/features/context-sidebar";
 import {
   addResourceToLibrary,
@@ -66,6 +68,11 @@ import { replayTrace } from "../execution-trace";
 import { takePendingRun } from "../pending-run";
 import { useConversationScroll } from "../use-conversation-scroll";
 import { ChatHeader } from "./chat-header";
+import { QuickAssistantPopup } from "@/features/quick-assistant";
+import { ShareWorkspaceDialog } from "@/features/workspaces/components/share-workspace-dialog";
+import { parseSlashCommand, suggestSlashCommands, type SlashCommand } from "../slash-commands/commands";
+import { SlashCommandMenu, slashOptionId } from "../slash-commands/slash-command-menu";
+import { assistantText, transcriptMarkdown } from "../slash-commands/transcript";
 import { ConversationNavigator } from "./conversation-navigator";
 import { MessageList } from "./message-list";
 
@@ -193,6 +200,14 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const conversationScroll = useConversationScroll(messages);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  // Holds the main-chat snapshot taken when Quick Assistant opened; null means closed.
+  const [quickAssistant, setQuickAssistant] = useState<{ snapshotMessageId: string | null; minimized: boolean; autoAsk?: string; session: number } | null>(null);
+  const [slashIndex, setSlashIndex] = useState(0);
+  // The draft the user pressed Escape on; the picker stays closed until the draft changes.
+  const [slashDismissedFor, setSlashDismissedFor] = useState<string | null>(null);
+  const router = useRouter();
+  const toggleSidebar = useUiStore((state) => state.toggleSidebar);
   const [selectedFile, setSelectedFile] = useState<ContextFile | null>(null);
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [draft, setDraft] = useState("");
@@ -575,6 +590,152 @@ export function ChatPage({ chatId }: { chatId: string }) {
     });
   }, [chatId, messagesQuery.data, runMessage]);
 
+  // The header button opens a fresh snapshot, or minimizes/restores an existing session without losing it.
+  function toggleQuickAssistant() {
+    setQuickAssistant((current) => current
+      ? { ...current, minimized: !current.minimized }
+      : { snapshotMessageId: messagesQuery.data?.items.at(-1)?.id ?? null, minimized: false, session: Date.now() });
+  }
+  const minimizeQuickAssistant = useCallback(() => setQuickAssistant((current) => current && { ...current, minimized: true }), []);
+  const restoreQuickAssistant = useCallback(() => setQuickAssistant((current) => current && { ...current, minimized: false }), []);
+  const closeQuickAssistant = useCallback(() => setQuickAssistant(null), []);
+
+  const slashSuggestions = slashDismissedFor === draft ? null : suggestSlashCommands(draft);
+  const slashMenuOpen = slashSuggestions !== null;
+  const activeSlashIndex = slashSuggestions?.length ? Math.min(slashIndex, slashSuggestions.length - 1) : 0;
+
+  function clearDraft(status: string | null) {
+    setDraft("");
+    setComposerStatus(status);
+    setError(null);
+    window.requestAnimationFrame(() => resizeComposer(textareaRef.current));
+  }
+
+  function pickSlashCommand(command: SlashCommand) {
+    if (command.args && !command.args.startsWith("[")) {
+      setDraft(`/${command.name} `);
+      setSlashIndex(0);
+      textareaRef.current?.focus();
+      return;
+    }
+    void runSlashCommand(command, "");
+  }
+
+  async function runSlashCommand(command: SlashCommand | null, args: string, typedName?: string) {
+    setSlashIndex(0);
+    if (!command) return clearDraft(`Unknown command /${typedName}. Type / to see every command.`);
+    if (command.unavailable) return clearDraft(`/${command.name}: ${command.unavailable}`);
+    const lastAssistant = [...messages].reverse().find((message): message is AssistantMessage => message.role === "assistant");
+    switch (command.name) {
+      case "help":
+        setDraft("/");
+        setSlashDismissedFor(null);
+        setComposerStatus("Pick a command, or keep typing to filter.");
+        return;
+      case "btw": {
+        if (!args) return clearDraft("Add your side question after /btw.");
+        setQuickAssistant({ snapshotMessageId: messagesQuery.data?.items.at(-1)?.id ?? null, minimized: false, autoAsk: args, session: Date.now() });
+        return clearDraft("Asked in Quick Assistant. It won't be added to this chat.");
+      }
+      case "recap":
+        if (running) return clearDraft("Wait for the current run to finish, then try /recap again.");
+        setDraft("Give me a short recap of this analysis so far: key findings, the files used, and open questions.");
+        // Let React commit the new draft before the normal submit path reads it.
+        window.setTimeout(() => textareaRef.current?.form?.requestSubmit(), 0);
+        return;
+      case "rename": {
+        if (!args) return clearDraft("Add the new title after /rename.");
+        try {
+          await updateChat(chatId, { title: args.slice(0, 160) });
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["chat", chatId] }),
+            queryClient.invalidateQueries({ queryKey: ["sidebar", "recent-chats"] }),
+            queryClient.invalidateQueries({ queryKey: ["history"] }),
+          ]);
+          return clearDraft(`Renamed this chat to “${args.slice(0, 160)}”.`);
+        } catch (caught) {
+          return clearDraft(caught instanceof Error ? caught.message : "Could not rename this chat.");
+        }
+      }
+      case "copy": {
+        const text = lastAssistant ? assistantText(lastAssistant) : "";
+        if (!text) return clearDraft("There is no answer to copy yet.");
+        await navigator.clipboard.writeText(text);
+        return clearDraft("Copied the latest answer.");
+      }
+      case "export": {
+        const title = chatQuery.data?.title ?? "Conversation";
+        const url = URL.createObjectURL(new Blob([transcriptMarkdown(title, messages)], { type: "text/markdown" }));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${title.replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "conversation"}.md`;
+        link.click();
+        URL.revokeObjectURL(url);
+        return clearDraft("Downloaded this conversation as Markdown.");
+      }
+      case "context":
+        setSelectedFile(null);
+        setPanelOpen(true);
+        return clearDraft(null);
+      case "focus":
+        toggleSidebar();
+        return clearDraft("Toggled focus mode. Run /focus again to bring the sidebar back.");
+      case "clear":
+      case "exit":
+        clearDraft(null);
+        router.push("/");
+        return;
+      case "model": {
+        if (!args) return clearDraft(`Model: ${selectedModel?.label ?? "none"}. Available: ${models.map((model) => model.id).join(", ")}.`);
+        const next = models.find((model) => model.id.toLowerCase() === args.toLowerCase() || model.label.toLowerCase() === args.toLowerCase());
+        if (!next) return clearDraft(`No model named “${args}”. Available: ${models.map((model) => model.id).join(", ")}.`);
+        if (running) return clearDraft("Change the model after the current run finishes.");
+        setModelId(next.id);
+        return clearDraft(`Switched to ${next.label}.`);
+      }
+      case "effort": {
+        if (!args) return clearDraft(`Effort: ${effort || "default"}. Supported: ${supportedEfforts.join(", ") || "none"}.`);
+        const level = args.toLowerCase();
+        if (!supportedEfforts.includes(level)) return clearDraft(`${selectedModel?.label ?? "This model"} supports: ${supportedEfforts.join(", ") || "no effort levels"}.`);
+        if (running) return clearDraft("Change the effort after the current run finishes.");
+        setEffort(level);
+        return clearDraft(`Effort set to ${level}.`);
+      }
+      case "status":
+        return clearDraft(`${selectedModel?.label ?? "No model"} · effort ${effort || "default"} · ${running ? "running" : "idle"} · ${queuedQuestions.length} queued`);
+      case "tasks":
+        return clearDraft(running || queuedQuestions.length
+          ? `${running ? "1 analysis running" : "Nothing running"}${queuedQuestions.length ? ` · queued: ${queuedQuestions.map((item) => `“${item.content.slice(0, 40)}”`).join(", ")}` : ""}`
+          : "No running or queued questions.");
+      case "agents":
+        return clearDraft("One analysis agent works on this chat: Gemini with a Python sandbox. Quick Assistant is a separate read-only helper.");
+      case "stop":
+        if (!running || !activeRunId) return clearDraft("Nothing is running.");
+        clearDraft(null);
+        await stopActiveRun();
+        return;
+      case "resume":
+        clearDraft(null);
+        router.push("/history");
+        return;
+      case "workflows":
+      case "workflow-authoring":
+        clearDraft(null);
+        router.push("/workflows");
+        return;
+      case "mcp":
+      case "skills":
+        clearDraft(null);
+        router.push("/connectors");
+        return;
+      case "memory":
+        if (!chatQuery.data?.workspace_id) return clearDraft("Memory lives in a workspace's AI context. Move this chat into a workspace first.");
+        clearDraft(null);
+        router.push(`/workspaces/${chatQuery.data.workspace_id}`);
+        return;
+    }
+  }
+
   function selectFile(file: ContextFile) {
     setSelectedFile(file);
     setPreviewExpanded(false);
@@ -818,6 +979,9 @@ export function ChatPage({ chatId }: { chatId: string }) {
             workspaceName={workspaceName}
             panelOpen={panelOpen}
             onToggleRightPanel={togglePanel}
+            quickAssistantOpen={quickAssistant !== null && !quickAssistant.minimized}
+            onToggleQuickAssistant={toggleQuickAssistant}
+            onShare={chatQuery.data?.workspace_id ? () => setShareOpen(true) : undefined}
           />
         </div>
         <ConversationNavigator
@@ -890,6 +1054,15 @@ export function ChatPage({ chatId }: { chatId: string }) {
             </div>
           ) : null}
           <div ref={composerRef} className="relative mx-auto max-w-3xl rounded-lg border border-border-strong bg-surface p-2 focus-within:border-ring">
+            {slashMenuOpen ? (
+              <SlashCommandMenu
+                id="slash-command-menu"
+                commands={slashSuggestions}
+                activeIndex={activeSlashIndex}
+                onHover={setSlashIndex}
+                onPick={pickSlashCommand}
+              />
+            ) : null}
             {attachments.length ? (
               <div aria-label="Selected chat attachments" className="mb-2 flex gap-2 overflow-x-auto pb-1">
                 {attachments.map((attachment) => (
@@ -941,14 +1114,45 @@ export function ChatPage({ chatId }: { chatId: string }) {
                 value={draft}
                 disabled={messagesQuery.isError}
                 onChange={(event) => { setDraft(event.target.value); resizeComposer(event.currentTarget); setError(null); setComposerStatus(null); }}
+                role="combobox"
+                aria-expanded={slashMenuOpen}
+                aria-controls={slashMenuOpen ? "slash-command-menu" : undefined}
+                aria-autocomplete="list"
+                aria-activedescendant={slashMenuOpen && slashSuggestions.length ? slashOptionId("slash-command-menu", activeSlashIndex) : undefined}
                 onKeyDown={(event) => {
+                  if (slashMenuOpen) {
+                    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                      event.preventDefault();
+                      const step = event.key === "ArrowDown" ? 1 : -1;
+                      setSlashIndex((activeSlashIndex + step + slashSuggestions.length) % Math.max(slashSuggestions.length, 1));
+                      return;
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setSlashDismissedFor(draft);
+                      return;
+                    }
+                    if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") {
+                      const picked = slashSuggestions[activeSlashIndex];
+                      if (picked) {
+                        event.preventDefault();
+                        pickSlashCommand(picked);
+                        return;
+                      }
+                    }
+                  }
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
+                    const slash = parseSlashCommand(draft);
+                    if (slash) {
+                      void runSlashCommand(slash.command, slash.args, slash.name);
+                      return;
+                    }
                     event.currentTarget.form?.requestSubmit();
                   }
                 }}
                 rows={1}
-                placeholder={running ? "Type a follow-up to queue or steer…" : "Ask anything about your data…"}
+                placeholder={running ? "Type a follow-up to queue or steer…" : "Ask anything about your data, or type / for commands"}
                 className="min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm leading-5 outline-none placeholder:text-muted-foreground disabled:opacity-60"
               />
               <button type="submit" disabled={!draft.trim() || running || !selectedModel} aria-label="Send message" className="grid size-8 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground disabled:opacity-30">
@@ -1000,10 +1204,33 @@ export function ChatPage({ chatId }: { chatId: string }) {
         </form>
       </div>
 
+      {chatQuery.data?.workspace_id ? (
+        <ShareWorkspaceDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          workspaceId={chatQuery.data.workspace_id}
+          workspaceName={workspaceName ?? "this workspace"}
+          subject="chat"
+        />
+      ) : null}
+      {quickAssistant ? (
+        <QuickAssistantPopup
+          key={`${chatId}:${quickAssistant.session}`}
+          autoAsk={quickAssistant.autoAsk}
+          chatId={chatId}
+          snapshotMessageId={quickAssistant.snapshotMessageId}
+          resources={[...(datasetsQuery.data?.items ?? []), ...(artifactsQuery.data?.items ?? [])]}
+          onFileSelect={selectFile}
+          minimized={quickAssistant.minimized}
+          onMinimize={minimizeQuickAssistant}
+          onRestore={restoreQuickAssistant}
+          onClose={closeQuickAssistant}
+          contextOpen={panelOpen}
+        />
+      ) : null}
       {panelOpen ? (
         <div className="absolute inset-y-0 right-0 z-40 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:static xl:z-auto xl:w-[340px] xl:max-w-none xl:shrink-0 xl:shadow-none">
           <ContextSidebar
-            chatId={chatId}
             workspaceId={chatQuery.data?.workspace_id ?? null}
             datasets={datasetsQuery.data?.items ?? []}
             artifacts={artifactsQuery.data?.items ?? []}

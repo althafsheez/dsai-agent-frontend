@@ -5,20 +5,25 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3,
   Bookmark,
+  ChevronLeft,
+  ChevronRight,
   Code2,
   Database,
   Download,
   Eye,
   FileImage,
   FileText,
+  Folder,
   Grid2X2,
   Layers3,
   List,
   Search,
+  Share2,
   Trash2,
   X,
 } from "lucide-react";
 import { FilePreviewSidebar, type ContextFile } from "@/features/context-sidebar";
+import { ShareWorkspaceDialog } from "@/features/workspaces/components/share-workspace-dialog";
 import { formatBytes } from "@/features/context-sidebar/resource-utils";
 import {
   downloadResource,
@@ -38,6 +43,24 @@ function ResourceIcon({ item }: { item: LibraryResource }) {
 }
 
 type LibraryView = "grid" | "list";
+type LibraryFolder = { id: string; name: string; items: LibraryResource[] };
+
+// Workspaces with more saved items than this get their own folder; smaller ones stay inline to avoid one-file folders.
+const FOLDER_MIN_ITEMS = 4;
+
+function folderSummary(items: LibraryResource[]) {
+  const counts = new Map<string, number>();
+  for (const item of items) counts.set(categoryLabel(item.library_category), (counts.get(categoryLabel(item.library_category)) ?? 0) + 1);
+  return [...counts].map(([label, count]) => `${count} ${label.toLowerCase()}${count === 1 ? "" : "s"}`).join(" · ");
+}
+type Ownership = "all" | "mine" | "shared";
+
+const OWNERSHIP: Array<{ id: Ownership; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "mine", label: "Mine" },
+  { id: "shared", label: "Shared with me" },
+];
+
 type Filter = "all" | LibraryResource["library_category"];
 
 const FILTERS: Array<{ id: Filter; label: string; icon: typeof Layers3 }> = [
@@ -167,8 +190,11 @@ export function LibraryPage() {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [ownership, setOwnership] = useState<Ownership>("all");
   const [view, setView] = useState<LibraryView>("grid");
   const [preview, setPreview] = useState<ContextFile | null>(null);
+  const [openFolderId, setOpenFolderId] = useState<string | null>(null);
+  const [sharingFolder, setSharingFolder] = useState<LibraryFolder | null>(null);
 
   const libraryQuery = useQuery({ queryKey: ["library"], queryFn: getLibrary });
 
@@ -186,11 +212,112 @@ export function LibraryPage() {
 
   const items = useMemo(() => {
     const search = query.trim().toLowerCase();
+    // The Library only holds the signed-in user's own saves; nothing is shared into it yet.
+    if (ownership === "shared") return [];
     return (libraryQuery.data?.items ?? []).filter((item) => {
       const matchesSearch = !search || item.name.toLowerCase().includes(search);
       return matchesSearch && (filter === "all" || item.library_category === filter);
     });
-  }, [filter, libraryQuery.data?.items, query]);
+  }, [filter, libraryQuery.data?.items, ownership, query]);
+
+  function renderItems(list: LibraryResource[]) {
+    return (
+      <div
+        className={`grid gap-4 ${
+          view === "grid" ? "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" : "grid-cols-1"
+        }`}
+      >
+        {list.map((item) => (
+          <article
+            key={item.id}
+            className={`group min-w-0 overflow-hidden rounded-xl border bg-surface/50 transition-colors hover:border-border-strong hover:bg-surface ${
+              view === "list" ? "flex min-h-20 items-stretch" : ""
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => setPreview(item)}
+              aria-label={`Preview ${item.name}`}
+              className={`relative block shrink-0 overflow-hidden bg-raised text-left ${
+                view === "list" ? "h-20 w-28" : "aspect-[5/4] w-full"
+              }`}
+            >
+              <LibraryThumbnail item={item} />
+              {view === "grid" && (
+                <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 pb-2.5 pt-7 text-[10px] font-medium uppercase tracking-[0.12em] text-white/80">
+                  {categoryLabel(item.library_category)}
+                </span>
+              )}
+            </button>
+            <div className="flex min-w-0 flex-1 items-center justify-between gap-3 p-3">
+              <button
+                type="button"
+                onClick={() => setPreview(item)}
+                className="min-w-0 flex-1 text-left"
+              >
+                <h2 className="truncate text-xs font-medium text-foreground group-hover:text-foreground">
+                  {item.name}
+                </h2>
+                <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <span className="font-medium text-foreground/75">
+                    {categoryLabel(item.library_category)}
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  {formatBytes(item.size_bytes)}
+                </p>
+              </button>
+              <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                <button
+                  type="button"
+                  onClick={() => setPreview(item)}
+                  aria-label={`Preview ${item.name}`}
+                  className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-foreground"
+                >
+                  <Eye className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void downloadResource(item.download_url, item.name)}
+                  aria-label={`Download ${item.name}`}
+                  className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-foreground"
+                >
+                  <Download className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  disabled={removeMutation.isPending}
+                  onClick={() => removeMutation.mutate(item.id)}
+                  aria-label={`Remove ${item.name} from Library`}
+                  className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    );
+  }
+
+  // Search shows flat results across folders so a match is never hidden inside one.
+  const { folders, looseItems } = useMemo(() => {
+    if (query.trim()) return { folders: [] as LibraryFolder[], looseItems: items };
+    const byWorkspace = new Map<string, LibraryFolder>();
+    for (const item of items) {
+      if (!item.workspace_id) continue;
+      const folder = byWorkspace.get(item.workspace_id) ?? { id: item.workspace_id, name: item.workspace_name ?? "Workspace", items: [] };
+      folder.items.push(item);
+      byWorkspace.set(item.workspace_id, folder);
+    }
+    const grouped = [...byWorkspace.values()].filter((folder) => folder.items.length >= FOLDER_MIN_ITEMS);
+    const groupedIds = new Set(grouped.map((folder) => folder.id));
+    return {
+      folders: grouped.sort((a, b) => a.name.localeCompare(b.name)),
+      looseItems: items.filter((item) => !item.workspace_id || !groupedIds.has(item.workspace_id)),
+    };
+  }, [items, query]);
+  const openFolder = folders.find((folder) => folder.id === openFolderId) ?? null;
 
   return (
     <>
@@ -213,6 +340,18 @@ export function LibraryPage() {
             </div>
           </div>
         </header>
+
+        <div aria-label="Library ownership" className="mb-3 inline-flex h-8 rounded-md border bg-surface p-0.5">
+          {OWNERSHIP.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              aria-pressed={ownership === option.id}
+              onClick={() => setOwnership(option.id)}
+              className={`rounded px-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground ${ownership === option.id ? "bg-raised text-foreground" : ""}`}
+            >{option.label}</button>
+          ))}
+        </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div
@@ -298,89 +437,76 @@ export function LibraryPage() {
             ))}
           </div>
         ) : items.length ? (
-          <div
-            className={`mt-6 grid gap-4 ${
-              view === "grid" ? "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" : "grid-cols-1"
-            }`}
-          >
-            {items.map((item) => (
-              <article
-                key={item.id}
-                className={`group min-w-0 overflow-hidden rounded-xl border bg-surface/50 transition-colors hover:border-border-strong hover:bg-surface ${
-                  view === "list" ? "flex min-h-20 items-stretch" : ""
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => setPreview(item)}
-                  aria-label={`Preview ${item.name}`}
-                  className={`relative block shrink-0 overflow-hidden bg-raised text-left ${
-                    view === "list" ? "h-20 w-28" : "aspect-[5/4] w-full"
-                  }`}
-                >
-                  <LibraryThumbnail item={item} />
-                  {view === "grid" && (
-                    <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 pb-2.5 pt-7 text-[10px] font-medium uppercase tracking-[0.12em] text-white/80">
-                      {categoryLabel(item.library_category)}
-                    </span>
-                  )}
+          openFolder ? (
+            <div className="mt-6 animate-pop-in">
+              <nav aria-label="Library folder" className="mb-4 flex items-center gap-1.5 text-xs">
+                <button type="button" onClick={() => setOpenFolderId(null)} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground hover:bg-raised hover:text-foreground">
+                  <ChevronLeft className="size-3.5" />Library
                 </button>
-                <div className="flex min-w-0 flex-1 items-center justify-between gap-3 p-3">
-                  <button
-                    type="button"
-                    onClick={() => setPreview(item)}
-                    className="min-w-0 flex-1 text-left"
-                  >
-                    <h2 className="truncate text-xs font-medium text-foreground group-hover:text-foreground">
-                      {item.name}
-                    </h2>
-                    <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                      <span className="font-medium text-foreground/75">
-                        {categoryLabel(item.library_category)}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      {formatBytes(item.size_bytes)}
-                    </p>
-                  </button>
-                  <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
-                    <button
-                      type="button"
-                      onClick={() => setPreview(item)}
-                      aria-label={`Preview ${item.name}`}
-                      className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-foreground"
-                    >
-                      <Eye className="size-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void downloadResource(item.download_url, item.name)}
-                      aria-label={`Download ${item.name}`}
-                      className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-foreground"
-                    >
-                      <Download className="size-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={removeMutation.isPending}
-                      onClick={() => removeMutation.mutate(item.id)}
-                      aria-label={`Remove ${item.name} from Library`}
-                      className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-destructive"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
+                <span className="text-muted-foreground/60">/</span>
+                <span className="inline-flex items-center gap-1.5 font-medium text-foreground"><Folder className="size-3.5 text-sage" />{openFolder.name}</span>
+                <span className="text-muted-foreground">· {openFolder.items.length} items</span>
+                <button type="button" onClick={() => setSharingFolder(openFolder)} className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground">
+                  <Share2 className="size-3.5" />Share folder
+                </button>
+              </nav>
+              {renderItems(openFolder.items)}
+            </div>
+          ) : (
+            <>
+              {folders.length ? (
+                <div className="mt-6">
+                  <h2 className="mb-3 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Workspace folders</h2>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {folders.map((folder) => (
+                      <div key={folder.id} className="group relative">
+                      <button
+                        type="button"
+                        onClick={() => setOpenFolderId(folder.id)}
+                        aria-label={`Open ${folder.name} folder`}
+                        className="flex w-full items-center gap-3 rounded-xl border bg-surface/50 p-3 pr-12 text-left transition-[border-color,background-color,transform] duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:bg-surface"
+                      >
+                        <span className="relative grid size-11 shrink-0 place-items-center rounded-lg border bg-raised text-sage transition-colors group-hover:text-foreground">
+                          <Folder className="size-5" strokeWidth={1.6} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs font-medium text-foreground">{folder.name}</span>
+                          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{folderSummary(folder.items)}</span>
+                        </span>
+                        <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSharingFolder(folder)}
+                        aria-label={`Share ${folder.name} folder`}
+                        title="Share folder"
+                        className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground opacity-100 transition-opacity hover:bg-raised hover:text-foreground sm:opacity-0 sm:focus-visible:opacity-100 sm:group-hover:opacity-100"
+                      >
+                        <Share2 className="size-3.5" />
+                      </button>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              </article>
-            ))}
-          </div>
+              ) : null}
+              {looseItems.length ? (
+                <div className="mt-6">
+                  {folders.length ? <h2 className="mb-3 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Files</h2> : null}
+                  {renderItems(looseItems)}
+                </div>
+              ) : null}
+            </>
+          )
         ) : (
           <div className="mt-8 rounded-xl border border-dashed px-6 py-16 text-center">
             <Bookmark className="mx-auto size-7 text-muted-foreground" strokeWidth={1.5} />
             <p className="mt-3 text-sm font-medium">
-              {query ? "No matching files" : "Your Library is empty"}
+              {ownership === "shared" ? "Nothing shared with you yet" : query ? "No matching files" : "Your Library is empty"}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Save or star datasets and artifacts from any chat to access them across all analyses.
+              {ownership === "shared"
+                ? "Files other people share with you will appear here."
+                : "Save or star datasets and artifacts from any chat to access them across all analyses."}
             </p>
           </div>
         )}
@@ -390,6 +516,15 @@ export function LibraryPage() {
           </p>
         )}
       </section>
+      {sharingFolder ? (
+        <ShareWorkspaceDialog
+          open
+          onOpenChange={(open) => { if (!open) setSharingFolder(null); }}
+          workspaceId={sharingFolder.id}
+          workspaceName={sharingFolder.name}
+          subject="folder"
+        />
+      ) : null}
       {preview && (
         <div
           className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs"

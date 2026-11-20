@@ -13,6 +13,8 @@ import type {
   SteeringInstructionDto,
   WorkspaceDto,
   WorkspaceContextFileDto,
+  WorkspaceInviteDto,
+  WorkspaceRole,
   WorkflowDto,
 } from "./types";
 import type { ArtifactResource, DatasetResource } from "@/features/context-sidebar/types";
@@ -91,6 +93,23 @@ export function getWorkspaceContextFiles(workspaceId: string): Promise<ApiList<W
   return requestJson<ApiList<WorkspaceContextFileDto>>(`/workspaces/${encodeURIComponent(workspaceId)}/context-files`);
 }
 
+export function getWorkspaceInvites(workspaceId: string): Promise<ApiList<WorkspaceInviteDto>> {
+  return requestJson<ApiList<WorkspaceInviteDto>>(`/workspaces/${encodeURIComponent(workspaceId)}/invites`);
+}
+
+export function inviteToWorkspace(workspaceId: string, input: { email: string; role: WorkspaceRole }): Promise<WorkspaceInviteDto> {
+  return requestJson<WorkspaceInviteDto>(`/workspaces/${encodeURIComponent(workspaceId)}/invites`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function updateWorkspaceInvite(workspaceId: string, inviteId: string, role: WorkspaceRole): Promise<WorkspaceInviteDto> {
+  return requestJson<WorkspaceInviteDto>(`/workspaces/${encodeURIComponent(workspaceId)}/invites/${encodeURIComponent(inviteId)}`, { method: "PATCH", body: JSON.stringify({ role }) });
+}
+
+export async function removeWorkspaceInvite(workspaceId: string, inviteId: string): Promise<void> {
+  const response = await fetch(`${API_ROOT}/workspaces/${encodeURIComponent(workspaceId)}/invites/${encodeURIComponent(inviteId)}`, { method: "DELETE", headers: requestHeaders() });
+  if (!response.ok) throw await apiError(response);
+}
+
 export function getWorkspaceWorkflows(workspaceId: string): Promise<ApiList<WorkflowDto>> {
   return requestJson<ApiList<WorkflowDto>>(`/workspaces/${encodeURIComponent(workspaceId)}/workflows`);
 }
@@ -116,7 +135,7 @@ export async function deleteWorkspaceContextFile(workspaceId: string, fileId: st
   if (!response.ok) throw await apiError(response);
 }
 
-export function updateWorkspace(workspaceId: string, input: { name?: string; description?: string | null; archived?: boolean }): Promise<WorkspaceDto> {
+export function updateWorkspace(workspaceId: string, input: { name?: string; description?: string | null; archived?: boolean; pinned?: boolean }): Promise<WorkspaceDto> {
   return requestJson<WorkspaceDto>(`/workspaces/${encodeURIComponent(workspaceId)}`, {
     method: "PATCH",
     body: JSON.stringify(input),
@@ -157,7 +176,7 @@ export function getActivity(): Promise<ApiList<ChatDto>> {
   return requestJson<ApiList<ChatDto>>("/chats/activity/list");
 }
 
-export function updateChat(chatId: string, input: { title?: string; workspace_id?: string | null; archived?: boolean; is_unread?: boolean }): Promise<ChatDto> {
+export function updateChat(chatId: string, input: { title?: string; workspace_id?: string | null; archived?: boolean; pinned?: boolean; is_unread?: boolean }): Promise<ChatDto> {
   return requestJson<ChatDto>(`/chats/${encodeURIComponent(chatId)}`, {
     method: "PATCH",
     body: JSON.stringify(input),
@@ -215,9 +234,17 @@ export function getArtifacts(chatId: string): Promise<ApiList<ArtifactResource>>
 export type LibraryCategory = "dataset" | "visual" | "code" | "report" | "other";
 
 /** A saved resource retains its dataset/artifact discriminator for preview rendering. */
+type LibraryFields = {
+  library_category: LibraryCategory;
+  library_created_at: string;
+  /** The live workspace the file belongs to, directly or through a workspace chat; null for standalone chats. */
+  workspace_id: string | null;
+  workspace_name: string | null;
+};
+
 export type LibraryResource =
-  | (DatasetResource & { resource_type: "dataset"; library_category: LibraryCategory; library_created_at: string })
-  | (ArtifactResource & { resource_type: "artifact"; library_category: LibraryCategory; library_created_at: string });
+  | (DatasetResource & LibraryFields & { resource_type: "dataset" })
+  | (ArtifactResource & LibraryFields & { resource_type: "artifact" });
 
 export function getLibrary(): Promise<ApiList<LibraryResource>> {
   return requestJson<ApiList<LibraryResource>>("/library");
@@ -394,7 +421,15 @@ export async function streamChatRun(
 }
 
 export async function streamQuickAssistantMessage(
-  input: { context_type: "chat" | "workspace"; context_id: string; content: string; model_id: string; effort?: string; client_request_id: string },
+  input: {
+    context_type: "chat" | "workspace";
+    context_id: string;
+    content: string;
+    model_id: string;
+    effort?: string;
+    client_request_id: string;
+    context_until_message_id?: string;
+  },
   onEvent: (event: ExecutionEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {

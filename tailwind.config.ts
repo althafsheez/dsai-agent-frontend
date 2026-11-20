@@ -30,6 +30,11 @@ export default {
       destructive: "var(--destructive)", success: "var(--success)", ring: "var(--ring)",
     },
     borderRadius: { lg: "var(--radius)", md: "calc(var(--radius) - 2px)", sm: "calc(var(--radius) - 4px)" },
+    keyframes: {
+      "pop-in": { from: { opacity: "0", transform: "translateY(-6px) scale(0.97)" }, to: { opacity: "1", transform: "none" } },
+    },
+    animation: { "pop-in": "pop-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" },
+    transitionTimingFunction: { spring: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
   }},
   plugins: [],
 } satisfies Config;
