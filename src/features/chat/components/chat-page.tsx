@@ -4,6 +4,7 @@ import Image from "next/image";
 import {
   ArrowUp,
   BarChart3,
+  BookOpen,
   BrainCircuit,
   Calculator,
   CircleStop,
@@ -59,8 +60,10 @@ import {
   updateChat,
   uploadResource,
   type ExecutionEvent,
+  type LibraryResource,
   type MessageDto,
 } from "@/lib/api";
+import { LibraryImportDialog } from "@/features/library";
 import type { AssistantMessage, ChatMessage, MessageBlock, TraceStep } from "../types";
 import { asRecord, classifyError, replayTrace, resources as extractTraceResources } from "../execution-trace";
 import type { DataReferenceResource } from "./data-reference";
@@ -199,6 +202,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const [libraryDialogOpen, setLibraryDialogOpen] = useState(false);
   const [connectorCategory, setConnectorCategory] = useState<ConnectorCategory>("all");
   const [connectorQuery, setConnectorQuery] = useState("");
   const [modelId, setModelId] = useState("");
@@ -707,6 +711,18 @@ export function ChatPage({ chatId }: { chatId: string }) {
     setAttachmentMenuOpen(false);
   }
 
+  function handleAttachFromLibrary(items: LibraryResource[]) {
+    const next = items.map<DraftAttachment>((item) => ({
+      id: `lib-${item.id}-${crypto.randomUUID()}`,
+      file: new File([""], item.name, {
+        type: item.mime_type || "application/octet-stream",
+      }),
+      previewUrl: null,
+    }));
+    setAttachments((current) => [...current, ...next]);
+    setError(null);
+  }
+
   function removeAttachment(id: string) {
     setAttachments((current) => {
       const removed = current.find((attachment) => attachment.id === id);
@@ -1028,14 +1044,41 @@ export function ChatPage({ chatId }: { chatId: string }) {
                 ))}
               </div>
             ) : null}
-            <div className="flex items-end gap-2">
-              <div className="relative">
+            <div className="flex items-end gap-1.5">
+              <div className="relative flex items-center gap-1">
                 <button type="button" aria-label="Add files or connectors" aria-haspopup="dialog" aria-expanded={attachmentMenuOpen} disabled={running || messagesQuery.isError} onClick={() => setAttachmentMenuOpen((open) => !open)} className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40"><Plus className="size-4" /></button>
+                <button
+                  type="button"
+                  aria-label="Import from Library"
+                  disabled={running || messagesQuery.isError}
+                  onClick={() => setLibraryDialogOpen(true)}
+                  className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40"
+                  title="Import from Library"
+                >
+                  <BookOpen className="size-4" />
+                </button>
                 {attachmentMenuOpen ? (
                   <div role="dialog" aria-label="Add files and connectors" className="absolute bottom-[calc(100%+8px)] left-0 z-50 flex h-[320px] w-[min(300px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-xl border border-border-strong bg-[#191b1e] p-2 shadow-[0_18px_50px_rgba(0,0,0,0.48)]">
                     <button type="button" onClick={() => fileInputRef.current?.click()} className="flex w-full shrink-0 items-center gap-2 rounded-lg border border-border-strong bg-[linear-gradient(110deg,#303744,#242a33)] p-2 text-left hover:border-slate/70">
                       <span className="grid size-9 shrink-0 place-items-center rounded-md bg-[#b8cef0] text-[#172033]"><Paperclip className="size-[18px]" /></span>
                       <span><span className="block text-xs font-semibold leading-4 text-foreground">Add files</span><span className="block text-[10px] leading-4 text-foreground/65">From your device</span></span>
+                      <ChevronRight className="ml-auto size-3.5 text-foreground" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAttachmentMenuOpen(false);
+                        setLibraryDialogOpen(true);
+                      }}
+                      className="mt-1 flex w-full shrink-0 items-center gap-2 rounded-lg border border-border-strong bg-[linear-gradient(110deg,#242a33,#1a2028)] p-2 text-left hover:border-slate/70"
+                    >
+                      <span className="grid size-9 shrink-0 place-items-center rounded-md bg-[#c2d9b8] text-[#172e18]">
+                        <BookOpen className="size-[18px]" />
+                      </span>
+                      <span>
+                        <span className="block text-xs font-semibold leading-4 text-foreground">Import from Library</span>
+                        <span className="block text-[10px] leading-4 text-foreground/65">Browse saved assets</span>
+                      </span>
                       <ChevronRight className="ml-auto size-3.5 text-foreground" />
                     </button>
                     <label className="relative mt-2 block shrink-0"><span className="sr-only">Find a connector</span><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><input value={connectorQuery} onChange={(event) => setConnectorQuery(event.target.value)} placeholder="Find a connector…" className="h-8 w-full rounded-md border bg-transparent pl-8 pr-2.5 text-[11px] outline-none placeholder:text-muted-foreground focus:border-ring" /></label>
@@ -1118,6 +1161,12 @@ export function ChatPage({ chatId }: { chatId: string }) {
             {!error && composerStatus ? <p>{composerStatus}</p> : null}
           </div>
         </form>
+
+        <LibraryImportDialog
+          open={libraryDialogOpen}
+          onClose={() => setLibraryDialogOpen(false)}
+          onAttach={handleAttachFromLibrary}
+        />
       </div>
 
       {panelOpen ? (
