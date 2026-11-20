@@ -9,6 +9,7 @@ interface ArtifactsPanelProps {
   artifacts: ArtifactResource[];
   onFileSelect: (artifact: ArtifactResource) => void;
   onLibraryToggle?: (artifact: ArtifactResource) => void;
+  searchQuery?: string;
 }
 
 function ArtifactIcon({ kind }: { kind: ArtifactKind }) {
@@ -19,7 +20,7 @@ function ArtifactIcon({ kind }: { kind: ArtifactKind }) {
   return <FileText className={className} strokeWidth={1.6} />;
 }
 
-export function ArtifactsPanel({ artifacts, onFileSelect, onLibraryToggle }: ArtifactsPanelProps) {
+export function ArtifactsPanel({ artifacts, onFileSelect, onLibraryToggle, searchQuery }: ArtifactsPanelProps) {
   const groups = [
     { label: "Input", items: artifacts.filter((artifact) => (artifact.source ?? (artifact.origin === "generated" ? "output" : "input")) === "input") },
     { label: "Output", items: artifacts.filter((artifact) => (artifact.source ?? (artifact.origin === "generated" ? "output" : "input")) === "output") },
@@ -27,7 +28,11 @@ export function ArtifactsPanel({ artifacts, onFileSelect, onLibraryToggle }: Art
 
   return (
     <div id="artifacts-panel" role="tabpanel" aria-label="Artifacts" className="h-full min-h-0 overflow-y-auto overscroll-contain py-2">
-      {artifacts.length === 0 ? <p className="px-4 py-5 text-xs text-muted-foreground">No artifacts in this context.</p> : null}
+      {artifacts.length === 0 ? (
+        <p className="px-4 py-5 text-center text-xs text-muted-foreground">
+          {searchQuery ? `No artifacts matching \u201C${searchQuery}\u201D` : "No artifacts in this context."}
+        </p>
+      ) : null}
       {groups.map((group) => {
         if (!group.items.length) return null;
         return (
