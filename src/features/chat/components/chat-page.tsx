@@ -63,6 +63,7 @@ import {
 } from "@/lib/api";
 import type { AssistantMessage, ChatMessage, MessageBlock, TraceStep } from "../types";
 import { asRecord, classifyError, replayTrace, resources as extractTraceResources } from "../execution-trace";
+import type { DataReferenceResource } from "./data-reference";
 import { takePendingRun } from "../pending-run";
 import { useConversationScroll } from "../use-conversation-scroll";
 import { ChatHeader } from "./chat-header";
@@ -915,6 +916,17 @@ export function ChatPage({ chatId }: { chatId: string }) {
     });
   }, [messages, running, modelId, effort, runMessage]);
 
+  const availableResources = useMemo<DataReferenceResource[]>(() => {
+    const list: DataReferenceResource[] = [];
+    (datasetsQuery.data?.items ?? []).forEach((d) =>
+      list.push({ id: d.id, name: d.name, resourceType: "dataset" })
+    );
+    (artifactsQuery.data?.items ?? []).forEach((a) =>
+      list.push({ id: a.id, name: a.name, resourceType: "artifact", kind: a.kind })
+    );
+    return list;
+  }, [datasetsQuery.data?.items, artifactsQuery.data?.items]);
+
   return (
     <section className="relative flex min-h-0 flex-1 overflow-hidden">
       <div className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] bg-background">
@@ -945,6 +957,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
           ) : (
             <MessageList
               messages={messages}
+              availableResources={availableResources}
               onRetry={handleRetry}
               onFileSelect={selectFileById}
               onFileDownload={downloadFileById}

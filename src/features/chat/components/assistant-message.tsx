@@ -1,3 +1,4 @@
+import React, { useMemo } from "react";
 import { AlertTriangle, RotateCcw, Sparkles } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -7,27 +8,7 @@ import { ChartBlock } from "./chart-block";
 import { CodeBlock } from "./code-block";
 import { FileBlock } from "./file-block";
 import { TableBlock } from "./table-block";
-
-function InlineText({ text }: { text: string }) {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-  return (
-    <>
-      {parts.map((part, index) =>
-        part.startsWith("**") && part.endsWith("**") ? (
-          <strong key={index} className="font-semibold text-foreground">
-            {part.slice(2, -2)}
-          </strong>
-        ) : part.startsWith("`") && part.endsWith("`") ? (
-          <code key={index} className="rounded bg-raised px-1.5 py-0.5 font-mono text-[0.9em]">
-            {part.slice(1, -1)}
-          </code>
-        ) : (
-          part
-        )
-      )}
-    </>
-  );
-}
+import { renderRichText, type DataReferenceResource } from "./data-reference";
 
 function StreamingCursor() {
   return (
@@ -43,10 +24,14 @@ function MarkdownText({
   content,
   isStreaming,
   isLast,
+  availableResources,
+  onFileSelect,
 }: {
   content: string;
   isStreaming?: boolean;
   isLast?: boolean;
+  availableResources?: DataReferenceResource[];
+  onFileSelect?: (id: string) => void;
 }) {
   const paragraphs = content.split("\n\n").filter(Boolean);
 
@@ -66,7 +51,7 @@ function MarkdownText({
         if (paragraph.startsWith("## ")) {
           return (
             <h2 key={index} className="pt-1 text-base font-medium tracking-tight text-foreground">
-              <InlineText text={paragraph.slice(3)} />
+              {renderRichText(paragraph.slice(3), availableResources, onFileSelect)}
               {cursor}
             </h2>
           );
@@ -77,7 +62,7 @@ function MarkdownText({
             <ul key={index} className="list-disc space-y-1 pl-5">
               {items.map((item, itemIdx) => (
                 <li key={itemIdx}>
-                  <InlineText text={item.replace(/^- /, "")} />
+                  {renderRichText(item.replace(/^- /, ""), availableResources, onFileSelect)}
                   {isLastParagraph && itemIdx === items.length - 1 ? cursor : null}
                 </li>
               ))}
@@ -86,7 +71,7 @@ function MarkdownText({
         }
         return (
           <p key={index}>
-            <InlineText text={paragraph} />
+            {renderRichText(paragraph, availableResources, onFileSelect)}
             {cursor}
           </p>
         );
@@ -98,9 +83,13 @@ function MarkdownText({
 function Markdown({
   content,
   isStreaming,
+  availableResources,
+  onFileSelect,
 }: {
   content: string;
   isStreaming?: boolean;
+  availableResources?: DataReferenceResource[];
+  onFileSelect?: (id: string) => void;
 }) {
   const parts: Array<{
     type: "text";
@@ -137,7 +126,13 @@ function Markdown({
 
   if (!parts.length) {
     if (isStreaming) return <StreamingCursor />;
-    return <MarkdownText content={content} />;
+    return (
+      <MarkdownText
+        content={content}
+        availableResources={availableResources}
+        onFileSelect={onFileSelect}
+      />
+    );
   }
 
   return (
@@ -163,6 +158,8 @@ function Markdown({
             content={part.content}
             isStreaming={isStreaming}
             isLast={isLastPart}
+            availableResources={availableResources}
+            onFileSelect={onFileSelect}
           />
         );
       })}
@@ -173,17 +170,26 @@ function Markdown({
 function MessageRenderer({
   block,
   isStreaming,
+  availableResources,
   onFileSelect,
   onFileDownload,
 }: {
   block: MessageBlock;
   isStreaming?: boolean;
+  availableResources?: DataReferenceResource[];
   onFileSelect?: (id: string) => void;
   onFileDownload?: (id: string) => void;
 }) {
   switch (block.type) {
     case "markdown":
-      return <Markdown content={block.content} isStreaming={isStreaming} />;
+      return (
+        <Markdown
+          content={block.content}
+          isStreaming={isStreaming}
+          availableResources={availableResources}
+          onFileSelect={onFileSelect}
+        />
+      );
     case "code":
       return <CodeBlock {...block} />;
     case "table":
@@ -215,11 +221,13 @@ function MessageRenderer({
 
 export function AssistantMessage({
   message,
+  availableResources,
   onRetry,
   onFileSelect,
   onFileDownload,
 }: {
   message: AssistantMessageType;
+  availableResources?: DataReferenceResource[];
   onRetry?: (message: AssistantMessageType) => void;
   onFileSelect?: (id: string) => void;
   onFileDownload?: (id: string) => void;
@@ -229,6 +237,25 @@ export function AssistantMessage({
     (b) => (b.type === "markdown" && b.content.trim().length > 0) || b.type !== "markdown"
   );
   const isRecoverable = message.errorType !== "unrecoverable";
+
+  const resolvedResources = useMemo(() => {
+    const map = new Map<string, DataReferenceResource>();
+    (availableResources ?? []).forEach((r) => map.set(r.id, r));
+    (message.trace ?? []).forEach((step) => {
+      (step.inputs ?? []).forEach((r) =>
+        map.set(r.id, { id: r.id, name: r.name, resourceType: r.resourceType })
+      );
+      (step.outputs ?? []).forEach((r) =>
+        map.set(r.id, { id: r.id, name: r.name, resourceType: r.resourceType })
+      );
+    });
+    message.blocks.forEach((b) => {
+      if (b.type === "file") {
+        map.set(b.id, { id: b.id, name: b.name, kind: b.kind });
+      }
+    });
+    return Array.from(map.values());
+  }, [availableResources, message.trace, message.blocks]);
 
   return (
     <div className="flex gap-3">
@@ -248,6 +275,7 @@ export function AssistantMessage({
                 key={`${message.id}-${index}`}
                 block={block}
                 isStreaming={isRunning && isLastBlock}
+                availableResources={resolvedResources}
                 onFileSelect={onFileSelect}
                 onFileDownload={onFileDownload}
               />

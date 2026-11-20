@@ -115,10 +115,12 @@ describe("AssistantMessage", () => {
       />
     );
 
-    // Partial text preserved
+    // Partial text preserved and highlighted
     expect(
-      screen.getByText("Calculated intermediate revenue of $42,000 before the stream dropped.")
+      screen.getByText(/Calculated intermediate revenue of/)
     ).toBeVisible();
+    expect(screen.getByText("$42,000")).toBeVisible();
+    expect(screen.getByText(/before the stream dropped\./)).toBeVisible();
 
     // Recoverable badge & error
     expect(screen.getByText("The Gemini response failed")).toBeVisible();
