@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { AgentTrace } from "./agent-trace";
+import { AgentTrace, IndividualThoughtTextRenderer } from "./agent-trace";
 import type { TraceStep } from "../types";
 
 const mockSteps: TraceStep[] = [
@@ -48,32 +48,46 @@ const mockSteps: TraceStep[] = [
   },
 ];
 
-describe("AgentTrace component", () => {
-  it("renders execution trace header and step list", () => {
-    render(<AgentTrace steps={mockSteps} />);
-    expect(screen.getByText("Agent execution")).toBeVisible();
+describe("AgentTrace component (Reasoning Trace)", () => {
+  it("renders reasoning trace header with summary and toggles open/close", async () => {
+    const user = userEvent.setup();
+    render(<AgentTrace steps={mockSteps} isStreaming={false} />);
+
+    expect(screen.getByText("Reasoning Trace")).toBeVisible();
+    expect(screen.getByText("Execute Python (Retry)")).toBeVisible();
+
+    // Toggle open
+    const toggleButton = screen.getByRole("button", { name: "Toggle Reasoning Trace" });
+    await user.click(toggleButton);
+
     expect(screen.getByText("Inspect Dataset")).toBeVisible();
     expect(screen.getByText("Execute Python")).toBeVisible();
-    expect(screen.getByText("Execute Python (Retry)")).toBeVisible();
   });
 
-  it("indicates hybrid recovery when a failed step is succeeded by subsequent steps", () => {
-    render(<AgentTrace steps={mockSteps} />);
+  it("auto-expands during streaming and shows pulsing ellipsis", () => {
+    render(<AgentTrace steps={mockSteps} isStreaming={true} />);
+
+    expect(screen.getByRole("status", { name: "Reasoning in progress" })).toBeInTheDocument();
+    // Timeline is open by default while streaming
+    expect(screen.getByText("Inspect Dataset")).toBeVisible();
+  });
+
+  it("indicates hybrid recovery when a failed step was self-corrected", async () => {
+    render(<AgentTrace steps={mockSteps} isStreaming={true} />);
+
     // Step 2 failed but was recovered by step 3
     expect(screen.getByText("Recovered")).toBeVisible();
-    expect(
-      screen.getByText(/Self-correction succeeded: Error was automatically recovered in subsequent steps/i)
-    ).toBeVisible();
+    expect(screen.getByText(/Self-corrected:/i)).toBeVisible();
   });
 
-  it("renders and expands code, outputs, and invokes onResourceSelect on click", async () => {
+  it("expands code and allows resource chip clicking", async () => {
     const user = userEvent.setup();
     const onResourceSelect = vi.fn();
-    render(<AgentTrace steps={mockSteps} onResourceSelect={onResourceSelect} />);
+
+    render(<AgentTrace steps={mockSteps} isStreaming={true} onResourceSelect={onResourceSelect} />);
 
     // Expand step 1
     await user.click(screen.getByRole("button", { name: /Inspect Dataset/i }));
-    // Click input resource chip
     const inputChip = screen.getByRole("button", { name: "Select sales.csv" });
     expect(inputChip).toBeVisible();
     await user.click(inputChip);
@@ -81,31 +95,45 @@ describe("AgentTrace component", () => {
 
     // Expand step 3
     await user.click(screen.getByRole("button", { name: /Execute Python \(Retry\)/ }));
-    // Click output resource chip
     const outputChip = screen.getByRole("button", { name: "Select revenue_trend.png" });
     expect(outputChip).toBeVisible();
     await user.click(outputChip);
     expect(onResourceSelect).toHaveBeenCalledWith("art-1");
 
-    // Check code blocks
-    expect(screen.getByText("df['rev'] = df['revenue'].astype(float)")).toBeVisible();
+    // Check code and output
+    expect(screen.getByText("df['rev'] = df['TotalRevenue'].astype(float)")).toBeVisible();
     expect(screen.getByText("Processed 1,250 rows successfully")).toBeVisible();
   });
 
-  it("displays running status indicator when a step is currently running", () => {
-    const runningSteps: TraceStep[] = [
-      {
-        id: "step-run",
-        runId: "run-2",
-        messageId: "msg-2",
-        label: "Execute Python",
-        summary: "Running analysis script...",
-        status: "running",
-        startedAt: "2026-11-19T10:00:00Z",
-        code: "import pandas as pd",
-      },
-    ];
-    render(<AgentTrace steps={runningSteps} />);
-    expect(screen.getByText(/Running Execute Python/i)).toBeVisible();
+  it("truncates long thought text at 250 characters and expands on toggle", async () => {
+    const user = userEvent.setup();
+    const longText =
+      "This is a comprehensive analytical reasoning step where we thoroughly inspect the table columns, analyze data types, compute distribution percentiles, calculate the correlation matrix across continuous features, and verify data consistency before building our predictive model.";
+
+    render(<IndividualThoughtTextRenderer text={longText} isStreaming={false} />);
+
+    // Show more button present
+    const showMoreButton = screen.getByRole("button", { name: "Show more" });
+    expect(showMoreButton).toBeVisible();
+
+    await user.click(showMoreButton);
+    expect(screen.getByRole("button", { name: "Show less" })).toBeVisible();
+  });
+
+  it("auto-expands on expand-and-scroll-to-table custom event", async () => {
+    render(<AgentTrace steps={mockSteps} isStreaming={false} />);
+
+    // Initially collapsed
+    expect(screen.queryByText("Inspect Dataset")).not.toBeInTheDocument();
+
+    // Dispatch deep-link scroll event
+    window.dispatchEvent(
+      new CustomEvent("expand-and-scroll-to-table", {
+        detail: { tableName: "sales.csv" },
+      })
+    );
+
+    // Now expanded
+    expect(await screen.findByText("Inspect Dataset")).toBeVisible();
   });
 });
