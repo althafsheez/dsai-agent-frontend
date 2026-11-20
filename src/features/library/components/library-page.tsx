@@ -15,9 +15,11 @@ import {
   Layers3,
   List,
   Search,
+  Star,
   Trash2,
   X,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { FilePreviewSidebar, type ContextFile } from "@/features/context-sidebar";
 import { formatBytes } from "@/features/context-sidebar/resource-utils";
 import {
@@ -38,15 +40,39 @@ function ResourceIcon({ item }: { item: LibraryResource }) {
 }
 
 type LibraryView = "grid" | "list";
-type Filter = "all" | LibraryResource["library_category"];
+type Filter = "all" | "favorites" | LibraryResource["library_category"];
 
 const FILTERS: Array<{ id: Filter; label: string; icon: typeof Layers3 }> = [
   { id: "all", label: "All", icon: Layers3 },
+  { id: "favorites", label: "Favorites", icon: Star },
   { id: "dataset", label: "Datasets", icon: Database },
   { id: "report", label: "Reports", icon: FileText },
   { id: "visual", label: "Visuals", icon: BarChart3 },
   { id: "code", label: "Code", icon: Code2 },
 ];
+
+const FAVORITES_STORAGE_KEY = "dsai:library:favorites";
+
+function getStoredFavorites(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(FAVORITES_STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveStoredFavorites(favs: Set<string>) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(Array.from(favs)));
+  } catch {
+    // Ignore storage quota/permission issues
+  }
+}
 
 function categoryLabel(category: LibraryResource["library_category"]) {
   return category === "dataset"
@@ -169,6 +195,17 @@ export function LibraryPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [view, setView] = useState<LibraryView>("grid");
   const [preview, setPreview] = useState<ContextFile | null>(null);
+  const [favorites, setFavorites] = useState<Set<string>>(() => getStoredFavorites());
+
+  function toggleFavorite(id: string) {
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      saveStoredFavorites(next);
+      return next;
+    });
+  }
 
   const libraryQuery = useQuery({ queryKey: ["library"], queryFn: getLibrary });
 
@@ -188,9 +225,16 @@ export function LibraryPage() {
     const search = query.trim().toLowerCase();
     return (libraryQuery.data?.items ?? []).filter((item) => {
       const matchesSearch = !search || item.name.toLowerCase().includes(search);
-      return matchesSearch && (filter === "all" || item.library_category === filter);
+      const isFav = favorites.has(item.id) || Boolean((item as { saved?: boolean }).saved);
+      const matchesFilter =
+        filter === "all"
+          ? true
+          : filter === "favorites"
+          ? isFav
+          : item.library_category === filter;
+      return matchesSearch && matchesFilter;
     });
-  }, [filter, libraryQuery.data?.items, query]);
+  }, [favorites, filter, libraryQuery.data?.items, query]);
 
   return (
     <>
@@ -233,8 +277,18 @@ export function LibraryPage() {
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <Icon className="size-3.5" />
+                <Icon
+                  className={cn(
+                    "size-3.5",
+                    id === "favorites" && favorites.size > 0 && "text-amber-400 fill-amber-400"
+                  )}
+                />
                 {label}
+                {id === "favorites" && favorites.size > 0 && (
+                  <span className="ml-1 rounded-full bg-amber-400/10 px-1.5 py-0.2 text-[10px] font-semibold text-amber-400 border border-amber-400/20">
+                    {favorites.size}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -303,84 +357,132 @@ export function LibraryPage() {
               view === "grid" ? "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" : "grid-cols-1"
             }`}
           >
-            {items.map((item) => (
-              <article
-                key={item.id}
-                className={`group min-w-0 overflow-hidden rounded-xl border bg-surface/50 transition-colors hover:border-border-strong hover:bg-surface ${
-                  view === "list" ? "flex min-h-20 items-stretch" : ""
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => setPreview(item)}
-                  aria-label={`Preview ${item.name}`}
-                  className={`relative block shrink-0 overflow-hidden bg-raised text-left ${
-                    view === "list" ? "h-20 w-28" : "aspect-[5/4] w-full"
+            {items.map((item) => {
+              const isFav = favorites.has(item.id) || Boolean((item as { saved?: boolean }).saved);
+              return (
+                <article
+                  key={item.id}
+                  className={`group min-w-0 overflow-hidden rounded-xl border bg-surface/50 transition-colors hover:border-border-strong hover:bg-surface ${
+                    view === "list" ? "flex min-h-20 items-stretch" : ""
                   }`}
                 >
-                  <LibraryThumbnail item={item} />
-                  {view === "grid" && (
-                    <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 pb-2.5 pt-7 text-[10px] font-medium uppercase tracking-[0.12em] text-white/80">
-                      {categoryLabel(item.library_category)}
-                    </span>
-                  )}
-                </button>
-                <div className="flex min-w-0 flex-1 items-center justify-between gap-3 p-3">
-                  <button
-                    type="button"
-                    onClick={() => setPreview(item)}
-                    className="min-w-0 flex-1 text-left"
+                  <div
+                    className={`relative block shrink-0 overflow-hidden bg-raised text-left ${
+                      view === "list" ? "h-20 w-28" : "aspect-[5/4] w-full"
+                    }`}
                   >
-                    <h2 className="truncate text-xs font-medium text-foreground group-hover:text-foreground">
-                      {item.name}
-                    </h2>
-                    <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                      <span className="font-medium text-foreground/75">
-                        {categoryLabel(item.library_category)}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      {formatBytes(item.size_bytes)}
-                    </p>
-                  </button>
-                  <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                     <button
                       type="button"
                       onClick={() => setPreview(item)}
                       aria-label={`Preview ${item.name}`}
-                      className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-foreground"
+                      className="size-full"
                     >
-                      <Eye className="size-3.5" />
+                      <LibraryThumbnail item={item} />
                     </button>
+                    {view === "grid" && (
+                      <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 pb-2.5 pt-7 text-[10px] font-medium uppercase tracking-[0.12em] text-white/80">
+                        {categoryLabel(item.library_category)}
+                      </span>
+                    )}
                     <button
                       type="button"
-                      onClick={() => void downloadResource(item.download_url, item.name)}
-                      aria-label={`Download ${item.name}`}
-                      className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-foreground"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleFavorite(item.id);
+                      }}
+                      aria-label={isFav ? `Unfavorite ${item.name}` : `Favorite ${item.name}`}
+                      aria-pressed={isFav}
+                      className={cn(
+                        "absolute top-2 right-2 z-10 grid size-7 place-items-center rounded-md border backdrop-blur-sm transition-all",
+                        isFav
+                          ? "bg-black/70 border-amber-400/40 text-amber-400 opacity-100"
+                          : "bg-black/40 border-white/10 text-white/70 opacity-0 group-hover:opacity-100 hover:text-white hover:bg-black/60"
+                      )}
                     >
-                      <Download className="size-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={removeMutation.isPending}
-                      onClick={() => removeMutation.mutate(item.id)}
-                      aria-label={`Remove ${item.name} from Library`}
-                      className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-destructive"
-                    >
-                      <Trash2 className="size-3.5" />
+                      <Star className={cn("size-3.5", isFav && "fill-amber-400")} />
                     </button>
                   </div>
-                </div>
-              </article>
-            ))}
+                  <div className="flex min-w-0 flex-1 items-center justify-between gap-3 p-3">
+                    <button
+                      type="button"
+                      onClick={() => setPreview(item)}
+                      className="min-w-0 flex-1 text-left"
+                    >
+                      <h2 className="truncate text-xs font-medium text-foreground group-hover:text-foreground">
+                        {item.name}
+                      </h2>
+                      <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <span className="font-medium text-foreground/75">
+                          {categoryLabel(item.library_category)}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        {formatBytes(item.size_bytes)}
+                      </p>
+                    </button>
+                    <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                      <button
+                        type="button"
+                        onClick={() => toggleFavorite(item.id)}
+                        aria-label={isFav ? `Unfavorite ${item.name}` : `Favorite ${item.name}`}
+                        aria-pressed={isFav}
+                        className={cn(
+                          "grid size-7 place-items-center rounded-md bg-raised transition-colors",
+                          isFav
+                            ? "text-amber-400 hover:text-amber-300"
+                            : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        <Star className={cn("size-3.5", isFav && "fill-amber-400")} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPreview(item)}
+                        aria-label={`Preview ${item.name}`}
+                        className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-foreground"
+                      >
+                        <Eye className="size-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void downloadResource(item.download_url, item.name)}
+                        aria-label={`Download ${item.name}`}
+                        className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-foreground"
+                      >
+                        <Download className="size-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={removeMutation.isPending}
+                        onClick={() => removeMutation.mutate(item.id)}
+                        aria-label={`Remove ${item.name} from Library`}
+                        className="grid size-7 place-items-center rounded-md bg-raised text-muted-foreground hover:text-destructive"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         ) : (
           <div className="mt-8 rounded-xl border border-dashed px-6 py-16 text-center">
-            <Bookmark className="mx-auto size-7 text-muted-foreground" strokeWidth={1.5} />
+            {filter === "favorites" ? (
+              <Star className="mx-auto size-7 text-amber-400/60" strokeWidth={1.5} />
+            ) : (
+              <Bookmark className="mx-auto size-7 text-muted-foreground" strokeWidth={1.5} />
+            )}
             <p className="mt-3 text-sm font-medium">
-              {query ? "No matching files" : "Your Library is empty"}
+              {filter === "favorites"
+                ? "No favorite files yet"
+                : query
+                ? "No matching files"
+                : "Your Library is empty"}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Save or star datasets and artifacts from any chat to access them across all analyses.
+              {filter === "favorites"
+                ? "Star any file or artifact in your Library to quickly find it here."
+                : "Save or star datasets and artifacts from any chat to access them across all analyses."}
             </p>
           </div>
         )}
