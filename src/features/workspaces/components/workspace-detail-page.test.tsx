@@ -83,4 +83,56 @@ describe("WorkspaceDetailPage chats toolbar", () => {
     await user.clear(searchInput);
     expect(screen.getByText("CAC Payback Review")).toBeInTheDocument();
   });
+
+  it("renders enlarged and polished dataset metadata when a dataset is selected", async () => {
+    const { getWorkspaceDatasets } = await import("@/lib/api");
+    vi.mocked(getWorkspaceDatasets).mockResolvedValueOnce({
+      items: [
+        {
+          id: "ds-1",
+          name: "sales_forecast.csv",
+          mime_type: "text/csv",
+          size_bytes: 2048576,
+          origin: "uploaded",
+          preview_url: null,
+          download_url: "/api/datasets/ds-1/download",
+          created_by: "user-you",
+          created_at: "2026-11-10T10:00:00Z",
+          row_count: 14500,
+          column_count: 3,
+          columns: [
+            { name: "date", data_type: "VARCHAR" },
+            { name: "region", data_type: "VARCHAR" },
+            { name: "revenue", data_type: "FLOAT" },
+          ],
+          scope_type: "workspace",
+          run_id: null,
+        },
+      ],
+      next_cursor: null,
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    // Switch to Datasets tab
+    const datasetsTab = await screen.findByRole("tab", { name: /Datasets/ });
+    await user.click(datasetsTab);
+
+    // Click on the dataset
+    const datasetItem = await screen.findByRole("button", { name: /sales_forecast\.csv/ });
+    await user.click(datasetItem);
+
+    // Verify metadata area metrics
+    expect(screen.getByText("14,500")).toBeInTheDocument();
+    expect(screen.getByText("Schema Architecture")).toBeInTheDocument();
+    expect(screen.getByText("3 fields")).toBeInTheDocument();
+    expect(screen.getByText("date")).toBeInTheDocument();
+    expect(screen.getByText("region")).toBeInTheDocument();
+    expect(screen.getByText("revenue")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Download dataset/ })).toHaveAttribute(
+      "href",
+      "/api/datasets/ds-1/download"
+    );
+  });
 });
