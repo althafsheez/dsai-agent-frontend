@@ -6,7 +6,6 @@ import {
   BarChart3,
   BrainCircuit,
   Calculator,
-  CircleStop,
   ChevronRight,
   CirclePause,
   CornerDownRight,
@@ -14,6 +13,7 @@ import {
   FileSearch,
   FileSpreadsheet,
   FileText,
+  Folder,
   Github,
   HardDrive,
   ListPlus,
@@ -34,6 +34,8 @@ import {
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { useUiStore } from "@/stores/ui-store";
 import { ContextSidebar, FilePreviewSidebar, type ContextFile } from "@/features/context-sidebar";
 import {
   addResourceToLibrary,
@@ -55,15 +57,21 @@ import {
   setChatPresence,
   steerRun,
   streamChatRun,
+  updateChat,
   uploadResource,
   type ExecutionEvent,
   type MessageDto,
 } from "@/lib/api";
-import type { AssistantMessage, ChatMessage, MessageBlock } from "../types";
-import { replayTrace } from "../execution-trace";
+import type { AssistantMessage, ChatMessage, MessageBlock, TraceStep } from "../types";
+import { asRecord, replayTrace, resources as extractTraceResources } from "../execution-trace";
 import { takePendingRun } from "../pending-run";
 import { useConversationScroll } from "../use-conversation-scroll";
 import { ChatHeader } from "./chat-header";
+import { QuickAssistantPopup } from "@/features/quick-assistant";
+import { ShareWorkspaceDialog } from "@/features/workspaces/components/share-workspace-dialog";
+import { parseSlashCommand, suggestSlashCommands, type SlashCommand } from "../slash-commands/commands";
+import { SlashCommandMenu, slashOptionId } from "../slash-commands/slash-command-menu";
+import { assistantText, transcriptMarkdown } from "../slash-commands/transcript";
 import { ConversationNavigator } from "./conversation-navigator";
 import { MessageList } from "./message-list";
 
@@ -191,6 +199,14 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const conversationScroll = useConversationScroll(messages);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  // Holds the main-chat snapshot taken when Quick Assistant opened; null means closed.
+  const [quickAssistant, setQuickAssistant] = useState<{ snapshotMessageId: string | null; minimized: boolean; autoAsk?: string; session: number } | null>(null);
+  const [slashIndex, setSlashIndex] = useState(0);
+  // The draft the user pressed Escape on; the picker stays closed until the draft changes.
+  const [slashDismissedFor, setSlashDismissedFor] = useState<string | null>(null);
+  const router = useRouter();
+  const toggleSidebar = useUiStore((state) => state.toggleSidebar);
   const [selectedFile, setSelectedFile] = useState<ContextFile | null>(null);
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [draft, setDraft] = useState("");
@@ -263,6 +279,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
     } else if (!streamController.current) {
       setActiveRunId(null);
       setRunning(false);
+      setStopPending(false);
     }
   }, [runsQuery.data?.items]);
 
@@ -443,10 +460,16 @@ export function ChatPage({ chatId }: { chatId: string }) {
         const id = eventString(event, "tool_call_id");
         const name = eventString(event, "name");
         if (!id || !name) return;
-        updateAssistant((message) => ({
-          ...message,
-          trace: [...(message.trace ?? []), {
-            id: eventString(event, "step_id") ?? `${event.run_id}:${id}`,
+        const argumentsValue = asRecord(event.data.arguments) ?? {};
+        const stepId = eventString(event, "step_id") ?? `${event.run_id}:${id}`;
+        const code = typeof event.data.code === "string" ? event.data.code : typeof argumentsValue.code === "string" ? argumentsValue.code : undefined;
+        const sql = typeof event.data.sql === "string" ? event.data.sql : typeof argumentsValue.sql === "string" ? argumentsValue.sql : undefined;
+        const inputResources = extractTraceResources(event.data.input_resources ?? argumentsValue.input_resources);
+        updateAssistant((message) => {
+          const priorTrace = message.trace ?? [];
+          const existingStepIndex = priorTrace.findIndex((s) => s.id === stepId);
+          const newStep: TraceStep = {
+            id: stepId,
             runId: event.run_id,
             messageId: assistantId,
             label: toolLabel(name),
@@ -454,18 +477,49 @@ export function ChatPage({ chatId }: { chatId: string }) {
             detail: "Tool is running",
             status: "running",
             startedAt: event.timestamp,
-          }],
-        }));
+            code,
+            sql,
+            inputs: inputResources.length ? inputResources : undefined,
+          };
+          const nextTrace = existingStepIndex >= 0
+            ? priorTrace.map((s, idx) => idx === existingStepIndex ? { ...s, ...newStep } : s)
+            : [...priorTrace, newStep];
+          return {
+            ...message,
+            trace: nextTrace,
+          };
+        });
         return;
       }
       if (event.type === "tool.completed" || event.type === "tool.failed") {
         const id = eventString(event, "tool_call_id");
         if (!id) return;
         const failed = event.type === "tool.failed";
+        const stepId = eventString(event, "step_id") ?? `${event.run_id}:${id}`;
+        const output = asRecord(event.data.output) ?? {};
+        const outputResources = extractTraceResources(event.data.resources ?? output.resources);
+        const durationMs = typeof event.data.duration_ms === "number" ? event.data.duration_ms : undefined;
+        const results = output.rows ?? output.results ?? output.text;
+        const stdout = typeof output.stdout === "string" ? output.stdout : undefined;
+        const stderr = typeof output.stderr === "string" ? output.stderr : undefined;
+        const errorMessage = failed ? String(event.data.error ?? output.error ?? "Tool failed") : undefined;
+
         updateAssistant((message) => ({
           ...message,
-          trace: (message.trace ?? []).map((step) => step.id === (eventString(event, "step_id") ?? `${event.run_id}:${id}`)
-            ? { ...step, detail: failed ? eventString(event, "error") ?? "Tool failed" : "Completed", status: failed ? "failed" : "completed", completedAt: event.timestamp }
+          trace: (message.trace ?? []).map((step) => step.id === stepId
+            ? {
+                ...step,
+                status: failed ? "failed" : "completed",
+                detail: failed ? (errorMessage ?? "Tool failed") : "Completed",
+                summary: eventString(event, "summary") ?? step.summary,
+                completedAt: event.timestamp,
+                durationMs: durationMs ?? step.durationMs,
+                outputs: outputResources.length ? outputResources : step.outputs,
+                results: results !== undefined ? results : step.results,
+                stdout: stdout !== undefined ? stdout : step.stdout,
+                stderr: stderr !== undefined ? stderr : step.stderr,
+                error: errorMessage,
+              }
             : step),
         }));
         return;
@@ -517,12 +571,29 @@ export function ChatPage({ chatId }: { chatId: string }) {
           : "Gemini could not complete this response.";
         setError(message);
         setQueuedQuestions((current) => current.map((item) => ({ ...item, paused: true })));
-        updateAssistant((assistant) => ({ ...assistant, status: "failed" }));
+        updateAssistant((assistant) => ({
+          ...assistant,
+          status: "failed",
+          trace: (assistant.trace ?? []).map((step) =>
+            step.status === "running"
+              ? { ...step, status: "failed", detail: message, error: message }
+              : step
+          ),
+        }));
         return;
       }
       if (event.type === "agent.cancelled" || event.type === "agent.interrupted") {
+        const reason = event.type === "agent.cancelled" ? "Run stopped by user." : "Run interrupted.";
         setComposerStatus(event.type === "agent.cancelled" ? "Run stopped." : "Run interrupted.");
-        updateAssistant((message) => ({ ...message, status: "interrupted" }));
+        updateAssistant((message) => ({
+          ...message,
+          status: "interrupted",
+          trace: (message.trace ?? []).map((step) =>
+            step.status === "running"
+              ? { ...step, status: "failed", detail: "Interrupted", error: reason }
+              : step
+          ),
+        }));
       }
     }
 
@@ -539,16 +610,33 @@ export function ChatPage({ chatId }: { chatId: string }) {
       }
     } catch (caught) {
       if (controller.signal.aborted) {
-        updateAssistant((message) => ({ ...message, status: "interrupted" }));
+        updateAssistant((message) => ({
+          ...message,
+          status: "interrupted",
+          trace: (message.trace ?? []).map((step) =>
+            step.status === "running"
+              ? { ...step, status: "failed", detail: "Interrupted", error: "Run was cancelled by user." }
+              : step
+          ),
+        }));
       } else {
         const message = caught instanceof Error ? caught.message : "The Gemini request failed.";
         setError(message);
-        updateAssistant((assistant) => ({ ...assistant, status: "failed" }));
+        updateAssistant((assistant) => ({
+          ...assistant,
+          status: "failed",
+          trace: (assistant.trace ?? []).map((step) =>
+            step.status === "running"
+              ? { ...step, status: "failed", detail: message, error: message }
+              : step
+          ),
+        }));
       }
     } finally {
       if (streamController.current === controller) streamController.current = null;
       setActiveRunId(null);
       setRunning(false);
+      setStopPending(false);
       await queryClient.invalidateQueries({ queryKey: ["chat", chatId, "messages"] });
       await queryClient.invalidateQueries({ queryKey: ["chat", chatId] });
       await queryClient.invalidateQueries({ queryKey: ["activity"] });
@@ -572,6 +660,152 @@ export function ChatPage({ chatId }: { chatId: string }) {
       clientRequestId: pending.clientRequestId,
     });
   }, [chatId, messagesQuery.data, runMessage]);
+
+  // The header button opens a fresh snapshot, or minimizes/restores an existing session without losing it.
+  function toggleQuickAssistant() {
+    setQuickAssistant((current) => current
+      ? { ...current, minimized: !current.minimized }
+      : { snapshotMessageId: messagesQuery.data?.items.at(-1)?.id ?? null, minimized: false, session: Date.now() });
+  }
+  const minimizeQuickAssistant = useCallback(() => setQuickAssistant((current) => current && { ...current, minimized: true }), []);
+  const restoreQuickAssistant = useCallback(() => setQuickAssistant((current) => current && { ...current, minimized: false }), []);
+  const closeQuickAssistant = useCallback(() => setQuickAssistant(null), []);
+
+  const slashSuggestions = slashDismissedFor === draft ? null : suggestSlashCommands(draft);
+  const slashMenuOpen = slashSuggestions !== null;
+  const activeSlashIndex = slashSuggestions?.length ? Math.min(slashIndex, slashSuggestions.length - 1) : 0;
+
+  function clearDraft(status: string | null) {
+    setDraft("");
+    setComposerStatus(status);
+    setError(null);
+    window.requestAnimationFrame(() => resizeComposer(textareaRef.current));
+  }
+
+  function pickSlashCommand(command: SlashCommand) {
+    if (command.args && !command.args.startsWith("[")) {
+      setDraft(`/${command.name} `);
+      setSlashIndex(0);
+      textareaRef.current?.focus();
+      return;
+    }
+    void runSlashCommand(command, "");
+  }
+
+  async function runSlashCommand(command: SlashCommand | null, args: string, typedName?: string) {
+    setSlashIndex(0);
+    if (!command) return clearDraft(`Unknown command /${typedName}. Type / to see every command.`);
+    if (command.unavailable) return clearDraft(`/${command.name}: ${command.unavailable}`);
+    const lastAssistant = [...messages].reverse().find((message): message is AssistantMessage => message.role === "assistant");
+    switch (command.name) {
+      case "help":
+        setDraft("/");
+        setSlashDismissedFor(null);
+        setComposerStatus("Pick a command, or keep typing to filter.");
+        return;
+      case "btw": {
+        if (!args) return clearDraft("Add your side question after /btw.");
+        setQuickAssistant({ snapshotMessageId: messagesQuery.data?.items.at(-1)?.id ?? null, minimized: false, autoAsk: args, session: Date.now() });
+        return clearDraft("Asked in Quick Assistant. It won't be added to this chat.");
+      }
+      case "recap":
+        if (running) return clearDraft("Wait for the current run to finish, then try /recap again.");
+        setDraft("Give me a short recap of this analysis so far: key findings, the files used, and open questions.");
+        // Let React commit the new draft before the normal submit path reads it.
+        window.setTimeout(() => textareaRef.current?.form?.requestSubmit(), 0);
+        return;
+      case "rename": {
+        if (!args) return clearDraft("Add the new title after /rename.");
+        try {
+          await updateChat(chatId, { title: args.slice(0, 160) });
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["chat", chatId] }),
+            queryClient.invalidateQueries({ queryKey: ["sidebar", "recent-chats"] }),
+            queryClient.invalidateQueries({ queryKey: ["history"] }),
+          ]);
+          return clearDraft(`Renamed this chat to “${args.slice(0, 160)}”.`);
+        } catch (caught) {
+          return clearDraft(caught instanceof Error ? caught.message : "Could not rename this chat.");
+        }
+      }
+      case "copy": {
+        const text = lastAssistant ? assistantText(lastAssistant) : "";
+        if (!text) return clearDraft("There is no answer to copy yet.");
+        await navigator.clipboard.writeText(text);
+        return clearDraft("Copied the latest answer.");
+      }
+      case "export": {
+        const title = chatQuery.data?.title ?? "Conversation";
+        const url = URL.createObjectURL(new Blob([transcriptMarkdown(title, messages)], { type: "text/markdown" }));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${title.replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "conversation"}.md`;
+        link.click();
+        URL.revokeObjectURL(url);
+        return clearDraft("Downloaded this conversation as Markdown.");
+      }
+      case "context":
+        setSelectedFile(null);
+        setPanelOpen(true);
+        return clearDraft(null);
+      case "focus":
+        toggleSidebar();
+        return clearDraft("Toggled focus mode. Run /focus again to bring the sidebar back.");
+      case "clear":
+      case "exit":
+        clearDraft(null);
+        router.push("/");
+        return;
+      case "model": {
+        if (!args) return clearDraft(`Model: ${selectedModel?.label ?? "none"}. Available: ${models.map((model) => model.id).join(", ")}.`);
+        const next = models.find((model) => model.id.toLowerCase() === args.toLowerCase() || model.label.toLowerCase() === args.toLowerCase());
+        if (!next) return clearDraft(`No model named “${args}”. Available: ${models.map((model) => model.id).join(", ")}.`);
+        if (running) return clearDraft("Change the model after the current run finishes.");
+        setModelId(next.id);
+        return clearDraft(`Switched to ${next.label}.`);
+      }
+      case "effort": {
+        if (!args) return clearDraft(`Effort: ${effort || "default"}. Supported: ${supportedEfforts.join(", ") || "none"}.`);
+        const level = args.toLowerCase();
+        if (!supportedEfforts.includes(level)) return clearDraft(`${selectedModel?.label ?? "This model"} supports: ${supportedEfforts.join(", ") || "no effort levels"}.`);
+        if (running) return clearDraft("Change the effort after the current run finishes.");
+        setEffort(level);
+        return clearDraft(`Effort set to ${level}.`);
+      }
+      case "status":
+        return clearDraft(`${selectedModel?.label ?? "No model"} · effort ${effort || "default"} · ${running ? "running" : "idle"} · ${queuedQuestions.length} queued`);
+      case "tasks":
+        return clearDraft(running || queuedQuestions.length
+          ? `${running ? "1 analysis running" : "Nothing running"}${queuedQuestions.length ? ` · queued: ${queuedQuestions.map((item) => `“${item.content.slice(0, 40)}”`).join(", ")}` : ""}`
+          : "No running or queued questions.");
+      case "agents":
+        return clearDraft("One analysis agent works on this chat: Gemini with a Python sandbox. Quick Assistant is a separate read-only helper.");
+      case "stop":
+        if (!running || !activeRunId) return clearDraft("Nothing is running.");
+        clearDraft(null);
+        await stopActiveRun();
+        return;
+      case "resume":
+        clearDraft(null);
+        router.push("/history");
+        return;
+      case "workflows":
+      case "workflow-authoring":
+        clearDraft(null);
+        router.push("/workflows");
+        return;
+      case "mcp":
+      case "skills":
+        clearDraft(null);
+        router.push("/connectors");
+        return;
+      case "memory":
+        if (!chatQuery.data?.workspace_id) return clearDraft("Memory lives in a workspace's AI context. Move this chat into a workspace first.");
+        clearDraft(null);
+        router.push(`/workspaces/${chatQuery.data.workspace_id}`);
+        return;
+    }
+  }
 
   function selectFile(file: ContextFile) {
     setSelectedFile(file);
@@ -682,7 +916,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
         });
         return [];
       });
-      if (attachments.length) {
+      if (submittedAttachments.length) {
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ["chat", chatId, "datasets"] }),
           queryClient.invalidateQueries({ queryKey: ["chat", chatId, "artifacts"] }),
@@ -793,6 +1027,20 @@ export function ChatPage({ chatId }: { chatId: string }) {
     void runMessage({ type: "resume-queue" });
   }
 
+  async function moveChatToWorkspace(newWorkspaceId: string) {
+    try {
+      await updateChat(chatId, { workspace_id: newWorkspaceId });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["chat", chatId] }),
+        queryClient.invalidateQueries({ queryKey: ["workspaces"] }),
+        queryClient.invalidateQueries({ queryKey: ["history"] }),
+      ]);
+      setComposerStatus("Chat moved to workspace.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not move chat to workspace.");
+    }
+  }
+
   return (
     <section className="relative flex min-h-0 flex-1 overflow-hidden">
       <div className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] bg-background">
@@ -802,6 +1050,9 @@ export function ChatPage({ chatId }: { chatId: string }) {
             workspaceName={workspaceName}
             panelOpen={panelOpen}
             onToggleRightPanel={togglePanel}
+            quickAssistantOpen={quickAssistant !== null && !quickAssistant.minimized}
+            onToggleQuickAssistant={toggleQuickAssistant}
+            onShare={chatQuery.data?.workspace_id ? () => setShareOpen(true) : undefined}
           />
         </div>
         <ConversationNavigator
@@ -856,12 +1107,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
               ))}
             </div>
           ) : null}
-          {running && activeRunId ? (
+          {running && activeRunId && draft.trim() ? (
             <div className="mx-auto mb-2 flex max-w-3xl items-center gap-2" aria-label="Active run actions">
-              <button type="button" onClick={() => void stopActiveRun()} disabled={stopPending} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-400/40 bg-red-950/20 px-3 text-xs font-medium text-red-200 hover:bg-red-950/40 disabled:opacity-40">
-                {stopPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <CircleStop className="size-3.5" />}
-                Stop
-              </button>
               {draft.trim() ? <>
               <button type="button" onClick={() => void queueDraft()} disabled={Boolean(composerPending)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border-strong bg-raised px-3 text-xs font-medium text-foreground hover:bg-surface disabled:opacity-40">
                 {composerPending === "queue" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ListPlus className="size-3.5" />}
@@ -875,6 +1122,15 @@ export function ChatPage({ chatId }: { chatId: string }) {
             </div>
           ) : null}
           <div ref={composerRef} className="relative mx-auto max-w-3xl rounded-lg border border-border-strong bg-surface p-2 focus-within:border-ring">
+            {slashMenuOpen ? (
+              <SlashCommandMenu
+                id="slash-command-menu"
+                commands={slashSuggestions}
+                activeIndex={activeSlashIndex}
+                onHover={setSlashIndex}
+                onPick={pickSlashCommand}
+              />
+            ) : null}
             {attachments.length ? (
               <div aria-label="Selected chat attachments" className="mb-2 flex gap-2 overflow-x-auto pb-1">
                 {attachments.map((attachment) => (
@@ -926,30 +1182,87 @@ export function ChatPage({ chatId }: { chatId: string }) {
                 value={draft}
                 disabled={messagesQuery.isError}
                 onChange={(event) => { setDraft(event.target.value); resizeComposer(event.currentTarget); setError(null); setComposerStatus(null); }}
+                role="combobox"
+                aria-expanded={slashMenuOpen}
+                aria-controls={slashMenuOpen ? "slash-command-menu" : undefined}
+                aria-autocomplete="list"
+                aria-activedescendant={slashMenuOpen && slashSuggestions.length ? slashOptionId("slash-command-menu", activeSlashIndex) : undefined}
                 onKeyDown={(event) => {
+                  if (slashMenuOpen) {
+                    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                      event.preventDefault();
+                      const step = event.key === "ArrowDown" ? 1 : -1;
+                      setSlashIndex((activeSlashIndex + step + slashSuggestions.length) % Math.max(slashSuggestions.length, 1));
+                      return;
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setSlashDismissedFor(draft);
+                      return;
+                    }
+                    if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") {
+                      const picked = slashSuggestions[activeSlashIndex];
+                      if (picked) {
+                        event.preventDefault();
+                        pickSlashCommand(picked);
+                        return;
+                      }
+                    }
+                  }
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
+                    const slash = parseSlashCommand(draft);
+                    if (slash) {
+                      void runSlashCommand(slash.command, slash.args, slash.name);
+                      return;
+                    }
                     event.currentTarget.form?.requestSubmit();
                   }
                 }}
                 rows={1}
-                placeholder={running ? "Type a follow-up to queue or steer…" : "Ask anything about your data…"}
+                placeholder={running ? "Type a follow-up to queue or steer…" : "Ask anything about your data, or type / for commands"}
                 className="min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm leading-5 outline-none placeholder:text-muted-foreground disabled:opacity-60"
               />
-              <button type="submit" disabled={!draft.trim() || running || !selectedModel} aria-label="Send message" className="grid size-8 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground disabled:opacity-30">
-                {running ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
+              <button type={running ? "button" : "submit"} onClick={running ? () => void stopActiveRun() : undefined} disabled={running ? !activeRunId || stopPending : !draft.trim() || !selectedModel} aria-label={running ? "Stop" : "Send message"} className={`grid size-8 shrink-0 place-items-center rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${running ? "bg-[#292b30] text-white hover:bg-[#34363c] disabled:opacity-50" : "bg-primary text-primary-foreground disabled:opacity-30"}`}>
+                {running ? (stopPending ? <LoaderCircle className="size-4 animate-spin" /> : <span className="size-[13.5px] rounded-[2px] bg-white/85" />) : <ArrowUp className="size-4" />}
               </button>
             </div>
             <input ref={fileInputRef} type="file" multiple accept=".csv,.xls,.xlsx,.parquet,.png,.jpg,.jpeg,.pdf,.txt,.md,.json" className="sr-only" aria-label="Add files to chat" onChange={(event) => { addFiles(event.target.files); event.currentTarget.value = ""; }} />
-            <div className="mt-1.5 flex items-center justify-end gap-2 border-t px-1 pt-2">
-              <label htmlFor="chat-model" className="text-[10px] text-muted-foreground">Model</label>
-              <select id="chat-model" aria-label="Model" value={selectedModel?.id ?? ""} disabled={running || !models.length} onChange={(event) => setModelId(event.target.value)} className="max-w-[180px] rounded border bg-raised px-2 py-1 text-[11px] outline-none focus:border-ring disabled:opacity-50">
-                {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
-              </select>
-              <label htmlFor="chat-effort" className="text-[10px] text-muted-foreground">Effort</label>
-              <select id="chat-effort" aria-label="Reasoning effort" value={effort} disabled={running || !supportedEfforts.length} onChange={(event) => setEffort(event.target.value)} className="rounded border bg-raised px-2 py-1 text-[11px] capitalize outline-none focus:border-ring disabled:opacity-50">
-                {supportedEfforts.map((option) => <option key={option} value={option}>{option}</option>)}
-              </select>
+            <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 px-1 pt-2">
+              <div className="flex items-center gap-1.5">
+                {!chatQuery.data?.workspace_id && (
+                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <Folder className="size-3.5 text-muted-foreground" />
+                    <select
+                      aria-label="Move chat to workspace"
+                      defaultValue=""
+                      disabled={running}
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          void moveChatToWorkspace(e.target.value);
+                          e.target.value = "";
+                        }
+                      }}
+                      className="max-w-[150px] rounded border border-border bg-raised px-2 py-0.5 text-[11px] outline-none text-muted-foreground hover:text-foreground focus:border-ring"
+                    >
+                      <option value="" disabled>Move to workspace…</option>
+                      {(workspacesQuery.data?.items ?? []).map((w) => (
+                        <option key={w.id} value={w.id}>{w.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <label htmlFor="chat-model" className="text-[10px] text-muted-foreground font-medium">Model</label>
+                <select id="chat-model" aria-label="Model" value={selectedModel?.id ?? ""} disabled={running || !models.length} onChange={(event) => setModelId(event.target.value)} className="max-w-[180px] rounded border border-border bg-raised px-2 py-1 text-[11px] outline-none focus:border-ring disabled:opacity-50 text-foreground">
+                  {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+                </select>
+                <label htmlFor="chat-effort" className="text-[10px] text-muted-foreground font-medium">Effort</label>
+                <select id="chat-effort" aria-label="Reasoning effort" value={effort} disabled={running || !supportedEfforts.length} onChange={(event) => setEffort(event.target.value)} className="rounded border border-border bg-raised px-2 py-1 text-[11px] capitalize outline-none focus:border-ring disabled:opacity-50 text-foreground">
+                  {supportedEfforts.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </div>
             </div>
           </div>
           <div className="mx-auto mt-1.5 min-h-4 max-w-3xl text-[11px] text-muted-foreground" aria-live="polite">
@@ -959,10 +1272,33 @@ export function ChatPage({ chatId }: { chatId: string }) {
         </form>
       </div>
 
+      {chatQuery.data?.workspace_id ? (
+        <ShareWorkspaceDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          workspaceId={chatQuery.data.workspace_id}
+          workspaceName={workspaceName ?? "this workspace"}
+          subject="chat"
+        />
+      ) : null}
+      {quickAssistant ? (
+        <QuickAssistantPopup
+          key={`${chatId}:${quickAssistant.session}`}
+          autoAsk={quickAssistant.autoAsk}
+          chatId={chatId}
+          snapshotMessageId={quickAssistant.snapshotMessageId}
+          resources={[...(datasetsQuery.data?.items ?? []), ...(artifactsQuery.data?.items ?? [])]}
+          onFileSelect={selectFile}
+          minimized={quickAssistant.minimized}
+          onMinimize={minimizeQuickAssistant}
+          onRestore={restoreQuickAssistant}
+          onClose={closeQuickAssistant}
+          contextOpen={panelOpen}
+        />
+      ) : null}
       {panelOpen ? (
         <div className="absolute inset-y-0 right-0 z-40 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:static xl:z-auto xl:w-[340px] xl:max-w-none xl:shrink-0 xl:shadow-none">
           <ContextSidebar
-            chatId={chatId}
             workspaceId={chatQuery.data?.workspace_id ?? null}
             datasets={datasetsQuery.data?.items ?? []}
             artifacts={artifactsQuery.data?.items ?? []}

@@ -31,7 +31,7 @@ function SegmentedControl<T extends string>({ label, value, options, onChange }:
 function FiltersPopover({ filters, options, onChange }: HistoryToolbarProps) {
   const [open, setOpen] = useState(false);
   const container = useRef<HTMLDivElement>(null);
-  const activeCount = Number(filters.time !== "any") + Number(filters.authorId !== "all") + Number(filters.workspaceId !== "all");
+  const activeCount = Number(filters.time !== "any") + Number(filters.authorId !== "all");
 
   useEffect(() => {
     if (!open) return;
@@ -64,7 +64,6 @@ function FiltersPopover({ filters, options, onChange }: HistoryToolbarProps) {
           ["any", "Any time"], ["day", "Last 24 hours"], ["week", "Last 7 days"], ["month", "Last 30 days"], ["quarter", "Last 90 days"],
         ]} />
         <FilterSelect label="Author" value={filters.authorId} onChange={(authorId) => onChange({ authorId })} options={[["all", "All authors"], ...options.authors.map((author) => [author.id, author.name] as [string, string])]} />
-        <FilterSelect label="Workspace" value={filters.workspaceId} onChange={(workspaceId) => onChange({ workspaceId })} options={[["all", "All workspaces"], ["standalone", "Standalone"], ...options.workspaces.map((workspace) => [workspace.id, workspace.name] as [string, string])]} />
       </div>
     </div>}
   </div>;
@@ -84,7 +83,12 @@ export function HistoryToolbar({ filters, options, onChange }: HistoryToolbarPro
     <label className="relative block">
       <span className="sr-only">Search chats</span>
       <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-      <input value={filters.search} onChange={(event) => onChange({ search: event.target.value })} placeholder="Search chats..." className="h-10 w-full rounded-md border bg-surface pl-9 pr-9 text-sm outline-none placeholder:text-muted-foreground focus:border-border-strong" />
+      <input
+        value={filters.search}
+        onChange={(event) => onChange({ search: event.target.value })}
+        placeholder="Search chats..."
+        className="h-10 w-full rounded-md border border-border bg-surface pl-9 pr-9 text-xs outline-none placeholder:text-muted-foreground focus:border-border-strong focus:ring-1 focus:ring-ring"
+      />
       {filters.search && <button type="button" aria-label="Clear search" onClick={() => onChange({ search: "" })} className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"><X className="size-3.5" /></button>}
     </label>
     <div className="flex flex-wrap items-center gap-2">

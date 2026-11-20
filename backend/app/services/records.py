@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from ..errors import APIError
 from ..models import Chat, Message, User, Workspace, WorkspaceContextFile, utc_now
 from ..schemas import ChatCreate, ChatUpdate, WorkspaceCreate, WorkspaceUpdate
+
+
+def _keep_updated_at(record: Chat | Workspace) -> None:
+    # Pinning alone must not reorder recency-sorted lists; flagging the column stops onupdate from firing.
+    flag_modified(record, "updated_at")
 
 
 def list_workspaces(session: Session, user: User) -> list[Workspace]:
@@ -48,6 +54,10 @@ def update_workspace(session: Session, user: User, workspace_id: str, data: Work
         workspace.description = data.description
     if data.archived is not None:
         workspace.archived_at = utc_now() if data.archived else None
+    if data.pinned is not None:
+        workspace.pinned_at = utc_now() if data.pinned else None
+        if data.model_fields_set == {"pinned"}:
+            _keep_updated_at(workspace)
     session.commit()
     session.refresh(workspace)
     return workspace
@@ -141,7 +151,12 @@ def update_chat(session: Session, user: User, chat_id: str, data: ChatUpdate) ->
         chat.archived_at = utc_now() if data.archived else None
     if data.is_unread is not None:
         chat.is_unread = data.is_unread
-    chat.updated_at = utc_now()
+    if data.pinned is not None:
+        chat.pinned_at = utc_now() if data.pinned else None
+    if data.model_fields_set == {"pinned"}:
+        _keep_updated_at(chat)
+    else:
+        chat.updated_at = utc_now()
     session.commit()
     session.refresh(chat)
     return chat

@@ -21,6 +21,7 @@ export function filterHistory(records: HistoryRecord[], filters: HistoryFilters,
       || (filters.workspaceId === "standalone" ? record.kind === "chat" && record.workspace_id === null : record.workspace_id === filters.workspaceId || (record.kind === "workspace" && record.id === filters.workspaceId)))
     .filter((record) => cutoff === null || new Date(record.updated_at).getTime() >= cutoff)
     .sort((a, b) => {
+      if (Boolean(a.pinned_at) !== Boolean(b.pinned_at)) return a.pinned_at ? -1 : 1;
       if (filters.sort === "name_asc") return a.name.localeCompare(b.name);
       const delta = new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
       return filters.sort === "updated_asc" ? delta : -delta;

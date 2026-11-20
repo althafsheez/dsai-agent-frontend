@@ -11,13 +11,15 @@ python3 -m venv backend/.venv
 backend/.venv/bin/pip install -r backend/requirements.txt
 cp -n backend/.env.example backend/.env
 # Add DSAI_GEMINI_API_KEY to backend/.env for live generation.
-backend/.venv/bin/alembic -c backend/alembic.ini upgrade head
 backend/.venv/bin/uvicorn backend.app.main:app --reload --port 8000
 ```
 
 Start the frontend in a second terminal with `npm run dev` and open `http://localhost:3000`. Both processes run from the repository root.
 
 The app also creates a missing development schema on startup. Alembic remains the source of versioned production schema changes. Set `DSAI_AUTO_CREATE_SCHEMA=false` when migrations are managed separately.
+Library PDF thumbnails use Poppler’s `pdftocairo` executable (provided by `poppler-utils` on Ubuntu).
+
+By default startup applies Alembic upgrades before serving requests. Before upgrading an existing SQLite schema, it writes a consistent backup beside the database named `dsai.db.backup-<timestamp>-<id>` (using the configured database filename). Keep or remove backups according to your local retention needs. Set `DSAI_AUTO_CREATE_SCHEMA=false` when migrations are managed separately; in that case, back up the database and run Alembic manually before starting the app.
 
 Run tests:
 

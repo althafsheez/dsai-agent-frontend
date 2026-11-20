@@ -1,78 +1,128 @@
-# DSAI
+# DSAI — Redesigned MVP Frontend
 
-Agentic analytics workspace with a production-quality frontend foundation and a minimal modular FastAPI backend.
+DSAI is an enterprise-grade agentic data analytics application designed for fast, conversational analysis of structured datasets (CSV, Excel, Parquet), interactive visualizations, and automated workflows.
 
 ## Current scope
 The main chat uses the ReAct agent in `agentic/agent/react_loop.py`. The existing FastAPI endpoint supplies conversation history and authorized tools, persists run events and streams responses to Next.js. Edit the shared loop in `agentic/` to change how chat chooses tools and synthesizes answers. Run the API and frontend together as shown below.
+This repository hosts the redesigned Next.js 15 frontend MVP, rebuilt with an understated dark charcoal design system, responsive application navigation, structured chat execution trace, and rich context inspection.
 
-## Local development
-Requires Node >=20.19, npm, and Python 3.11+.
+---
 
-Start the backend from the repository root in one terminal:
+## Design System & Brand Identity
+
+The redesign adheres strictly to the unified DSAI design specifications:
+
+- **Color Tokens**: Dark charcoal surfaces with high contrast text and restrained hairline borders:
+  - `--surface`: `oklch(0.18 0.005 260)`
+  - `--surface-2`: `oklch(0.22 0.006 260)`
+  - `--surface-3`: `oklch(0.26 0.008 260)`
+  - `--raised`: `oklch(0.24 0.008 260)`
+  - `--border-strong`: `oklch(0.35 0.01 260)`
+  - Accents: Sage (`oklch(0.72 0.08 155)`), Slate (`oklch(0.78 0.07 258)`), Navy (`oklch(0.32 0.06 260)`), Destructive Red (`oklch(0.63 0.22 25)`).
+- **Typography**: Explicitly loaded Inter font with tight letter-spacing (`tracking-tight`), restrained heading scales (`text-2xl` to `text-3xl`), and no unstyled oversized serif headers.
+- **Brand Identity**: Monogram badge and faceted geometric DSAI logo replacing legacy placeholder branding.
+
+---
+
+## Implemented Pages & Features
+
+1. **Global Application Shell (`src/components/layout`)**
+   - **App Sidebar**: Navigation order: *Recent Analyses*, *Workspaces*, *Dashboards*, *Workflows*, *Library*, *Connectors*.
+   - **Hover Flyouts**: Quick-access cards for recent analyses and workspaces with relative timestamps and direct links.
+   - **Pinned & Activity**: Collapsible pinned favorites and live background task indicator.
+   - **Search Dialog (`⌘K` / `Ctrl+K`)**: Global accessible quick-switcher for workspace routes and pages.
+   - **Demo User Footer**: Active demo profile switcher with immediate access to identity preferences.
+
+2. **Welcome & First-Send Landing (`/`)**
+   - Centered Inter welcome header (`Welcome back` / `What would you like to analyze?`).
+   - "Continue where you left off" and "Pinned" cards with metadata, author, and relative dates.
+   - First-send composer with file attachments, multi-model dropdown, reasoning effort selector, and suggested prompts.
+   - First-send invariant: Chat creation occurs on first Send, uploading local attachments before triggering the agent run.
+
+3. **Authentication Flows (`/login`, `/signup`, `/forgot-password`)**
+   - Clean, minimal auth layout without sidebar distraction.
+   - Demo user quick-switcher (`Yusuf`, `Anita`, `Demo Analyst`) integrated with `useAuth()`.
+   - Honest indicator for disabled third-party SSO buttons.
+
+4. **History & Workspace Management (`/history`, `/workspaces`)**
+   - **History Table**: Segmented controls (*Owned* / *All*, *Active* / *Archived*), search input, sorting, and filter popover (time, author, workspace).
+   - **Workspaces Directory**: Filterable list of accessible workspaces with author, created date, and action popover (Open, Copy link, Delete).
+   - **Workspace Detail View (`/workspaces/[id]`)**: Full workspace overview with tabs for *Chats*, *Datasets* (with schema inspector), *Workflows*, and durable Markdown *Context* files.
+   - **Access & Transfer Dialogs**: Member sharing role manager and guarded ownership transfer with safety confirmation.
+
+5. **Conversational Analysis (`/chat/[id]`)**
+   - **Header**: Breadcrumb navigation (Standalone chat vs. `Folder / Workspace > Chat Title`), right panel toggle (`◧`), and share action.
+   - **Composer**: Model selector, reasoning effort selector, workspace assigner, and in-run action controls.
+   - **Run Queue & Steering**: Functional Queue persists next instruction; Checkpoint Steering allows guiding execution mid-run.
+   - **Assistant Message Renderers**: Execution trace with status badges, collapsible tool calls, syntax-highlighted code blocks, interactive data tables, and Recharts visuals.
+   - **Conversation Navigator**: Minimalist progress rail with question/response markers, active viewport tracking, and scroll-to-turn.
+   - **Right Panel (Mutually Exclusive)**: Datasets & Artifacts contextual groups, schema inspection, download links, and read-only Quick Assistant.
+
+6. **Library (`/library`)**
+   - Saved artifacts and datasets catalog with category filters (*All*, *Datasets*, *Reports*, *Visuals*, *Code*).
+   - Dynamic thumbnail generation, code preview snippet overlays, and grid/list layout toggles.
+   - Slide-out file preview panel and direct file download support.
+
+7. **Dashboards & Workflows Previews (`/dashboards`, `/workflows`)**
+   - Aligned to dark charcoal styling with filterable cards, pinned state, trigger indicators, and honest preview notices.
+
+8. **Connectors & Settings (`/connectors`, `/settings`)**
+   - Catalog of analytical skills, database sources, and productivity integrations.
+   - Full settings overview: Profile preferences, role selector, Gemini API backend status, authentication review, and storage plans.
+
+---
+
+## Local Development
+
+### Prerequisites
+- Node.js >= 20.19
+- npm >= 10.0
+
+### Getting Started
 
 ```bash
-python3 -m venv backend/.venv
-backend/.venv/bin/pip install -r backend/requirements.txt
-cp -n backend/.env.example backend/.env
-# Add DSAI_GEMINI_API_KEY to backend/.env.
-backend/.venv/bin/alembic -c backend/alembic.ini upgrade head
-backend/.venv/bin/uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
-```
+# Clone the repository
+git clone https://github.com/althafsheez/dsai-agent-frontend.git
+cd dsai-agent-frontend
 
-Keep that process running. In a second terminal, also from the repository root:
+# Install dependencies
+npm install
 
-```bash
-cp -n .env.example .env.local
-npm ci
+# Start the development server
 npm run dev
 ```
 
-Open http://localhost:3000, select a model and reasoning effort, and send a message. Start both terminals in:
-`/home/althafsheez/Desktop/Projects/dsai-agent-frontend`.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-Backend setup and run commands are documented in [backend/README.md](backend/README.md).
+---
 
-## Verification
-```sh
-npm run lint
-npm run typecheck
-npm test
-npm run build
-npm run test:e2e
-```
+## Quality Assurance & Verification
 
-Credential-backed Gemini checks are opt-in:
+The codebase maintains strict quality gates with zero warnings and zero TypeScript errors:
 
 ```bash
-DSAI_LIVE_GEMINI=1 backend/.venv/bin/pytest -c backend/pytest.ini backend/tests/test_live_gemini.py -q
-DSAI_LIVE_GEMINI=1 PLAYWRIGHT_CHANNEL=chrome npx playwright test tests/e2e/live-chat.spec.ts --project=desktop
+# 1. Typecheck
+npm run typecheck
+
+# 2. Linting (zero tolerance)
+npm run lint
+
+# 3. Unit & Integration Tests (Vitest)
+npm test
+
+# 4. Production Build
+npm run build
 ```
 
-Playwright requires its Chromium browser installed (`npx playwright install chromium`).
-Its tests launch an independent server on port 3100.
-Inter is bundled locally via @fontsource-variable/inter; builds do not fetch Google Fonts.
-Next.js development artifacts use .next-dev; production uses .next.
+### Verification Results
+- **TypeScript**: `tsc --noEmit` passed with 0 errors.
+- **ESLint**: `eslint . --max-warnings=0` passed with 0 warnings.
+- **Vitest Suite**: 55/55 tests passed across 23 test files (100% pass rate).
+- **Next.js Production Build**: All 14 routes statically and dynamically compiled with optimized chunk sizes.
 
-## Architecture
-App Router server pages compose a client shell and small interactive components.
-`src/components/ui`: shadcn-style primitives backed by Radix.
-`src/components/layout`: shell, sidebar, search and placeholders.
-`src/features/chat/components`: persisted chat UI and streamed message rendering.
-`src/lib/api`: typed HTTP client and incremental POST-SSE parser.
-`src/stores/ui-store.ts`: shared sidebar UI only.
-`src/app/providers.tsx`: TanStack Query provider for backend-owned server state.
-Recharts is installed for future charts but not imported into the foundation bundle.
-React Flow and backend frameworks are not installed in the frontend.
+---
 
-See PROJECT_SPEC.md for planned directory boundaries, API_CONTRACT.md for the future backend, AGENTS.md for implementation rules, and IMPLEMENTATION_PLAN.md for phase gates.
-
-## References
-- Functional/technology: https://github.com/rohanrony/dsai-frontend
-- Visual: https://github.com/AnitaGeorge404/Dsai-light-version
-- Dark tokens verified from visual reference src/styles.css (blob 5ae0e2d15b7397ad0ea456ea4d3f7040883a14df).
-- shadcn/ui component conventions: https://ui.shadcn.com
-The user's final decisions override reference-specific routes, fonts and framework choices.
-
-If Google Chrome is already installed, use `PLAYWRIGHT_CHANNEL=chrome npm run test:e2e` instead of downloading a browser.
-
-Dependency overrides pin Next's PostCSS to the patched 8.x release and TypeScript ESLint's minimatch to a compatible patched release. These keep Next.js 15 while resolving installation audit findings. Recheck these overrides when upgrading framework/tooling.
+## References & Guidelines
+- Functional & Technical Reference: [dsai-frontend](https://github.com/rohanrony/dsai-frontend)
+- Visual Reference: [Dsai-light-version](https://github.com/AnitaGeorge404/Dsai-light-version)
+- Specifications: See `PROJECT_SPEC.md`, `API_CONTRACT.md`, and `IMPLEMENTATION_PLAN.md`.

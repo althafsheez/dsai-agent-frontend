@@ -1,11 +1,13 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Database, FileSpreadsheet, Layers3, LoaderCircle, MoreHorizontal, Plus, Sparkles, UploadCloud, X } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, Database, FileSpreadsheet, LoaderCircle, Plug, Plus, Sparkles, UploadCloud, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { createWorkspace, type WorkspaceDto } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { DATA_SOURCE_CONNECTORS } from "@/features/connectors/catalog";
 
 interface CreateWorkspaceDialogProps {
   onCreated: (workspace: WorkspaceDto, files: File[]) => Promise<void> | void;
@@ -25,6 +27,8 @@ export function CreateWorkspaceDialog({ onCreated }: CreateWorkspaceDialogProps)
   const [dragging, setDragging] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [connectorId, setConnectorId] = useState<string | null>(null);
+  const selectedConnector = DATA_SOURCE_CONNECTORS.find((connector) => connector.id === connectorId) ?? null;
   const fileInput = useRef<HTMLInputElement>(null);
 
   function reset() {
@@ -33,6 +37,7 @@ export function CreateWorkspaceDialog({ onCreated }: CreateWorkspaceDialogProps)
     setFiles([]);
     setError(null);
     setDragging(false);
+    setConnectorId(null);
   }
 
   function addFiles(nextFiles: FileList | null) {
@@ -62,7 +67,7 @@ export function CreateWorkspaceDialog({ onCreated }: CreateWorkspaceDialogProps)
 
   return <Dialog open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (!nextOpen && !submitting) reset(); }}>
     <DialogTrigger asChild><Button type="button"><Plus />New Workspace</Button></DialogTrigger>
-    <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[600px] overflow-y-auto bg-[#111315] p-0">
+    <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[600px] overflow-y-auto bg-popover p-0">
       <form onSubmit={submit}>
         <div className="border-b px-6 py-5 sm:px-7">
           <DialogTitle className="text-xl font-semibold tracking-tight">Create Workspace</DialogTitle>
@@ -79,7 +84,7 @@ export function CreateWorkspaceDialog({ onCreated }: CreateWorkspaceDialogProps)
             <div className="mb-3 flex items-center gap-2.5">
               <Database className="size-5" strokeWidth={1.5} />
               <h2 id="workspace-datasets" className="text-sm font-medium">Datasets</h2>
-              <span className="text-[10px] text-muted-foreground">Optional · uploads pending</span>
+              <span className="text-[10px] text-muted-foreground">Optional</span>
             </div>
             <button
               type="button"
@@ -100,19 +105,36 @@ export function CreateWorkspaceDialog({ onCreated }: CreateWorkspaceDialogProps)
                 <FileSpreadsheet className="size-3.5 text-muted-foreground" /><span className="min-w-0 flex-1 truncate">{file.name}</span><span className="text-[10px] text-muted-foreground">{formatFileSize(file.size)}</span>
                 <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setFiles((current) => current.filter((item) => item !== file))} className="rounded p-0.5 text-muted-foreground hover:text-foreground"><X className="size-3.5" /></button>
               </div>)}
-              <p className="text-[10px] leading-relaxed text-amber-200">These files remain in your browser and will not be uploaded in the current backend phase.</p>
             </div>}
 
-            <div className="my-3 flex items-center gap-3 text-[10px] text-muted-foreground"><span className="h-px flex-1 bg-border" />or connect a source<span className="h-px flex-1 bg-border" /></div>
-            <div className="grid grid-cols-5 gap-2">
-              {[
-                { label: "CSV", icon: FileSpreadsheet, active: true },
-                { label: "Excel", icon: FileSpreadsheet, active: true },
-                { label: "Parquet", icon: Layers3, active: true },
-                { label: "SQL", icon: Database, active: false },
-                { label: "More", icon: MoreHorizontal, active: false },
-              ].map(({ label, icon: Icon, active }) => <button key={label} type="button" disabled={!active} onClick={() => fileInput.current?.click()} className="flex min-w-0 flex-col items-center gap-1.5 rounded-lg border bg-surface px-1 py-2.5 text-[10px] font-medium text-muted-foreground transition-colors enabled:hover:border-border-strong enabled:hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"><Icon className="size-4" /><span className="truncate">{label}</span></button>)}
+            <div className="my-3 flex items-center gap-3 text-[10px] text-muted-foreground"><span className="h-px flex-1 bg-border" />or connect a source<span className="rounded-full border px-1.5 py-px text-[9px] uppercase tracking-wider">Coming soon</span><span className="h-px flex-1 bg-border" /></div>
+            <div role="group" aria-label="Data source connectors" className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {DATA_SOURCE_CONNECTORS.map(({ id, name, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  title={`${name} — coming soon`}
+                  aria-pressed={connectorId === id}
+                  onClick={() => setConnectorId((current) => current === id ? null : id)}
+                  className={cn(
+                    "flex min-w-0 items-center gap-2 rounded-lg border bg-surface px-2.5 py-2 text-left text-[11px] font-medium text-muted-foreground transition-[border-color,color,background-color] duration-150 hover:border-border-strong hover:text-foreground",
+                    connectorId === id && "border-border-strong bg-raised text-foreground",
+                  )}
+                >
+                  <span className="grid size-6 shrink-0 place-items-center rounded-md bg-raised"><Icon className="size-3.5" /></span>
+                  <span className="min-w-0 flex-1 truncate">{name}</span>
+                </button>
+              ))}
             </div>
+            {selectedConnector ? (
+              <div role="status" className="mt-2.5 flex animate-pop-in items-start gap-2 rounded-lg border bg-surface/60 px-3 py-2.5 text-[11px] leading-5 text-muted-foreground">
+                <Plug className="mt-0.5 size-3.5 shrink-0 text-sage" />
+                <p className="min-w-0 flex-1">
+                  <span className="font-medium text-foreground">{selectedConnector.name}</span> connections are not available yet. Export the data as CSV, Excel or Parquet and upload it above for now.
+                </p>
+                <Link href="/connectors" className="inline-flex shrink-0 items-center gap-1 text-foreground hover:underline">Connectors<ArrowRight className="size-3" /></Link>
+              </div>
+            ) : null}
           </section>
 
           <section aria-labelledby="workspace-context" className="rounded-xl border bg-background/25 p-3.5">
