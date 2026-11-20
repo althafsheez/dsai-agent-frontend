@@ -823,6 +823,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
           ) : (
             <MessageList
               messages={messages}
+              runs={runsQuery.data?.items}
               onFileSelect={selectFileById}
               onFileDownload={downloadFileById}
               registerSection={conversationScroll.registerSection}

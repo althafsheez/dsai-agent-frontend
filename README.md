@@ -3,7 +3,7 @@
 Agentic analytics workspace with a production-quality frontend foundation and a minimal modular FastAPI backend.
 
 ## Current scope
-The main chat flow is connected to the FastAPI backend: the frontend loads the backend model allowlist, creates chats on first Send, streams text from Gemini, supports follow-up messages, and restores persisted messages after reload. Other product areas still use fixtures or placeholders. Uploads, resource preview/download, Queue/Steer, Quick Assistant, Tavily, E2B, SQL, and visualization tools remain pending. Disabled controls are intentional.
+The main chat uses the ReAct agent in `agentic/agent/react_loop.py`. The existing FastAPI endpoint supplies conversation history and authorized tools, persists run events and streams responses to Next.js. Edit the shared loop in `agentic/` to change how chat chooses tools and synthesizes answers. Run the API and frontend together as shown below.
 
 ## Local development
 Requires Node >=20.19, npm, and Python 3.11+.

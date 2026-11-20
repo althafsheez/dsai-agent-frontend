@@ -58,7 +58,17 @@ class E2BSandboxPool:
                     # exist, which is safe and expected for a fresh template.
                     sandbox.files.make_dir("/home/user/outputs")
                     sandbox.files.make_dir("/home/user/inputs")
+                    # Each E2B sandbox has its own Python environment.
+                    sandbox.commands.run(
+                        "python -c 'import reportlab' || python -m pip install --disable-pip-version-check reportlab==4.4.10",
+                        timeout=120,
+                    )
                 except Exception as exc:
+                    if sandbox is not None:
+                        try:
+                            sandbox.kill()
+                        except Exception:
+                            pass
                     raise SandboxUnavailable(f"Could not start the E2B sandbox: {type(exc).__name__}.") from exc
                 self._sandboxes[run_id] = sandbox
                 self._output_hashes[run_id] = {}

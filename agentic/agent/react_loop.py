@@ -1,14 +1,17 @@
-import json
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
 import os
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
 
 from google import genai
 from google.genai import types
 
-from agentic.config import get_gemini_api_key, get_gemini_model
-from agentic.engine.duckdb_engine import DuckDBEngine
-from agentic.engine.python_worker import WarmPythonWorker
+if TYPE_CHECKING:
+    from agentic.engine.duckdb_engine import DuckDBEngine
+    from agentic.engine.python_worker import WarmPythonWorker
+
 from agentic.agent.prompts import SYSTEM_PROMPT
 
 
@@ -78,6 +81,10 @@ class ReActAgent:
         api_key: Optional[str] = None,
         max_turns: int = 2,
     ):
+        from agentic.config import get_gemini_api_key, get_gemini_model
+        from agentic.engine.duckdb_engine import DuckDBEngine
+        from agentic.engine.python_worker import WarmPythonWorker
+
         self.duckdb_engine = duckdb_engine or DuckDBEngine()
         self.python_worker = python_worker or WarmPythonWorker()
         self.max_turns = max_turns
@@ -225,110 +232,97 @@ class ReActAgent:
             system_instruction=system_content,
         )
 
-        turn = 0
-        final_answer = ""
+        async def execute(name: str, args: dict) -> dict:
+            return self.execute_tool(name, args)
 
-        while turn < self.max_turns:
-            turn += 1
-            yield {"type": "status", "content": f"Turn {turn}/{self.max_turns}: Gemini reasoning ({self.model})..."}
+        try:
+            async for event in self.stream_turns(
+                client=client, model=self.model, contents=contents, config=config,
+                max_turns=self.max_turns, execute_tool=execute,
+            ):
+                if event["type"] == "done":
+                    event["metrics"]["total_time_ms"] = round((time.perf_counter() - start_time) * 1000, 2)
+                yield event
+        finally:
+            await client.aio.aclose()
 
+    @staticmethod
+    async def stream_turns(
+        *, client: genai.Client, model: str, contents: list[types.Content],
+        config: types.GenerateContentConfig, max_turns: int,
+        execute_tool: Callable[[str, dict], Awaitable[dict]],
+        is_cancelled: Callable[[], bool] | None = None,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """Run tool turns followed by a tool-free synthesis if the budget is exhausted."""
+        final_answer = []
+        start = time.perf_counter()
+        for turn in range(1, max_turns + 2):
+            if is_cancelled and is_cancelled():
+                return
+            synthesis = turn > max_turns
+            turn_config = config.model_copy(update={
+                "tool_config": types.ToolConfig(
+                    function_calling_config=types.FunctionCallingConfig(mode="NONE")
+                ),
+            }) if synthesis else config
+            if synthesis:
+                contents.append(types.Content(role="user", parts=[types.Part.from_text(
+                    text="The tool budget is exhausted. Give your final answer using the results already available. "
+                    "Explain any incomplete work or tool errors. Do not request additional tools."
+                )]))
+            label = "Synthesizing analytical findings…" if synthesis else f"Analysis turn {turn} of {max_turns}"
+            yield {"type": "status", "content": label}
+            calls = []
+            seen_ids = set()
+            model_parts = []
             try:
                 stream = await client.aio.models.generate_content_stream(
-                    model=self.model,
-                    contents=contents,
-                    config=config,
+                    model=model, contents=contents, config=turn_config,
                 )
-            except Exception as e:
-                yield {"type": "error", "content": f"Gemini API error: {str(e)}"}
-                return
-
-            model_parts: List[types.Part] = []
-            calls: List[Any] = []
-            seen_call_ids: set = set()
-
-            try:
                 async for chunk in stream:
-                    if not chunk.candidates or chunk.candidates[0].content is None:
+                    if is_cancelled and is_cancelled():
+                        return
+                    if not chunk.candidates or not chunk.candidates[0].content:
                         continue
                     for part in chunk.candidates[0].content.parts or []:
-                        if part.function_call is not None:
-                            call = part.function_call
-                            call_id = str(call.id or f"turn-{turn}-call-{len(calls) + 1}")
-                            if call_id not in seen_call_ids:
-                                seen_call_ids.add(call_id)
-                                calls.append(call)
-                                model_parts.append(part)
-                            continue
-                        if part.text:
-                            model_parts.append(types.Part.from_text(text=part.text))
-                            final_answer += part.text
+                        call = part.function_call
+                        if call is not None:
+                            if call.id and call.id in seen_ids:
+                                continue
+                            if call.id:
+                                seen_ids.add(call.id)
+                            calls.append(call)
+                        model_parts.append(part)
+                        if part.text and not part.thought:
+                            final_answer.append(part.text)
                             yield {"type": "delta", "content": part.text}
-            except Exception as e:
-                yield {"type": "error", "content": f"Stream error: {str(e)}"}
+            except Exception:
+                yield {"type": "error", "content": "Gemini generation failed."}
                 return
-
             if not calls:
-                # No tool calls needed, model completed final answer directly
+                if not any(part.text and not part.thought for part in model_parts):
+                    yield {"type": "error", "content": "Gemini returned no public answer."}
+                    return
                 break
-
-            # Record model turn with function calls
+            if synthesis:
+                yield {"type": "error", "content": "Gemini requested another tool during final synthesis."}
+                return
             contents.append(types.Content(role="model", parts=model_parts))
+            responses = []
+            for index, call in enumerate(calls, 1):
+                if is_cancelled and is_cancelled():
+                    return
+                name = str(call.name or "")
+                args = dict(call.args or {})
+                call_id = call.id or f"turn-{turn}-call-{index}"
+                yield {"type": "tool_call", "tool": name, "arguments": args, "tool_call_id": call_id}
+                result = await execute_tool(name, args)
+                yield {"type": "tool_result", "tool": name, "result": result, "tool_call_id": call_id}
+                responses.append(types.Part(function_response=types.FunctionResponse(
+                    name=name, id=call.id, response=result,
+                )))
+            contents.append(types.Content(role="user", parts=responses))
 
-            # Execute all requested tool calls
-            response_parts: List[types.Part] = []
-            for call in calls:
-                fn_name = str(call.name or "")
-                fn_args = dict(call.args or {})
-
-                yield {
-                    "type": "tool_call",
-                    "tool": fn_name,
-                    "arguments": fn_args,
-                }
-
-                tool_result = self.execute_tool(fn_name, fn_args)
-                yield {
-                    "type": "tool_result",
-                    "tool": fn_name,
-                    "result": tool_result,
-                }
-
-                response_parts.append(
-                    types.Part.from_function_response(name=fn_name, response={"result": tool_result})
-                )
-
-            contents.append(types.Content(role="user", parts=response_parts))
-
-            # If max turns reached, make one last synthesis call without tools
-            if turn == self.max_turns:
-                yield {
-                    "type": "status",
-                    "content": "Final turn: Synthesizing analytical findings...",
-                }
-                synth_config = types.GenerateContentConfig(
-                    temperature=0.0,
-                    system_instruction=system_content,
-                )
-                try:
-                    stream_synth = await client.aio.models.generate_content_stream(
-                        model=self.model,
-                        contents=contents,
-                        config=synth_config,
-                    )
-                    async for chunk in stream_synth:
-                        if chunk.text:
-                            final_answer += chunk.text
-                            yield {"type": "delta", "content": chunk.text}
-                except Exception as e:
-                    yield {"type": "error", "content": f"Final formatting error: {str(e)}"}
-                break
-
-        total_elapsed = round((time.perf_counter() - start_time) * 1000, 2)
-        yield {
-            "type": "done",
-            "content": final_answer,
-            "metrics": {
-                "total_time_ms": total_elapsed,
-                "turns": turn,
-            },
-        }
+        yield {"type": "done", "content": "".join(final_answer), "metrics": {
+            "turns": min(turn, max_turns), "total_time_ms": round((time.perf_counter() - start) * 1000, 2),
+        }}
