@@ -228,7 +228,6 @@ export function WorkspacesPage() {
                       href={`/workspaces/${workspace.id}`}
                       className="flex min-w-0 items-center gap-2.5 px-1 py-3 outline-none focus-visible:bg-raised"
                     >
-                      <Folder className="size-4 shrink-0 text-slate" />
                       <div className="min-w-0">
                         <span className="flex min-w-0 items-center gap-1.5 font-medium group-hover:text-foreground">
                           <span className="truncate">{workspace.name}</span>
