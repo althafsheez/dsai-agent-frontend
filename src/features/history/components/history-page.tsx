@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { deleteChat, getChats, getWorkspaces, updateChat, updateWorkspace } from "@/lib/api";
+import {  getActivity} from "@/lib/api";
 import { filterHistory } from "../logic/filter-history";
 import { currentDemoUser, type HistoryFilters, type HistoryOwnership, type HistoryRecord, type HistorySort, type HistoryStatus, type HistoryTime } from "../types";
 import { HistoryTable } from "./history-table";
@@ -34,6 +35,7 @@ export function HistoryPage() {
   const queryClient = useQueryClient();
   const filters = useMemo(() => readFilters(new URLSearchParams(params.toString())), [params]);
   const workspacesQuery = useQuery({ queryKey: ["workspaces"], queryFn: getWorkspaces });
+  const activityQuery = useQuery({ queryKey: ["activity"], queryFn: getActivity, refetchInterval: 2000 });
   const historyQuery = useQuery({
     queryKey: historyKey,
     queryFn: async () => {
@@ -107,11 +109,12 @@ export function HistoryPage() {
   return <section className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
     <header className="mb-6">
       <h1 className="text-xl font-semibold tracking-tight text-foreground">History</h1>
-      <p className="mt-1 text-xs text-muted-foreground">View and manage your chats and workspaces</p>
+      <p className="mt-1 text-xs text-muted-foreground">View and manage your chats</p>
     </header>
     <HistoryToolbar filters={filters} options={options} onChange={updateFilters} />
     <HistoryTable
       records={records}
+      activity={activityQuery.data?.items ?? []}
       loading={historyQuery.isLoading}
       hasFilters={hasFilters}
       onClearFilters={() => updateFilters({ ownership: "owned", status: "active", search: "", time: "any", authorId: "all", workspaceId: "all", sort: "updated_desc" })}

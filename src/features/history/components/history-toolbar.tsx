@@ -82,12 +82,12 @@ function FilterSelect({ label, value, options, onChange }: { label: string; valu
 export function HistoryToolbar({ filters, options, onChange }: HistoryToolbarProps) {
   return <div className="space-y-3">
     <label className="relative block">
-      <span className="sr-only">Search chats and workspaces</span>
+      <span className="sr-only">Search chats</span>
       <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
       <input
         value={filters.search}
         onChange={(event) => onChange({ search: event.target.value })}
-        placeholder="Search chats and workspaces..."
+        placeholder="Search chats..."
         className="h-10 w-full rounded-md border border-border bg-surface pl-9 pr-9 text-xs outline-none placeholder:text-muted-foreground focus:border-border-strong focus:ring-1 focus:ring-ring"
       />
       {filters.search && <button type="button" aria-label="Clear search" onClick={() => onChange({ search: "" })} className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"><X className="size-3.5" /></button>}
