@@ -48,4 +48,78 @@ describe("workspaces page", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ name: "Finance Planning", description: "Track forecast accuracy", ai_context: "Track forecast accuracy" });
     expect(fetchMock.mock.calls[2][1]?.body).toBeInstanceOf(FormData);
   });
+
+  it("filters workspaces by ownership and permissions", async () => {
+    const ownedWorkspace = {
+      id: "ws-owned",
+      name: "Owned Workspace",
+      description: "My workspace",
+      created_by: "user-you",
+      created_at: "2026-11-10T10:00:00Z",
+      updated_at: "2026-11-12T10:00:00Z",
+      archived_at: null,
+      deleted_at: null,
+      role: "owner",
+    };
+    const contributedWorkspace = {
+      id: "ws-contrib",
+      name: "Contributed Workspace",
+      description: "Edit access workspace",
+      created_by: "user-other-1",
+      created_at: "2026-11-10T10:00:00Z",
+      updated_at: "2026-11-12T10:00:00Z",
+      archived_at: null,
+      deleted_at: null,
+      role: "contributor",
+    };
+    const sharedWorkspace = {
+      id: "ws-shared",
+      name: "Shared Workspace",
+      description: "View only workspace",
+      created_by: "user-other-2",
+      created_at: "2026-11-10T10:00:00Z",
+      updated_at: "2026-11-12T10:00:00Z",
+      archived_at: null,
+      deleted_at: null,
+      role: "viewer",
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () =>
+        new Response(
+          JSON.stringify({
+            items: [ownedWorkspace, contributedWorkspace, sharedWorkspace],
+            next_cursor: null,
+          }),
+          { headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByRole("row", { name: /Owned Workspace/ })).toBeVisible();
+    expect(screen.getByRole("row", { name: /Contributed Workspace/ })).toBeVisible();
+    expect(screen.getByRole("row", { name: /Shared Workspace/ })).toBeVisible();
+
+    // Filter "Owned"
+    await user.click(screen.getByRole("button", { name: "Owned" }));
+    expect(screen.getByRole("row", { name: /Owned Workspace/ })).toBeVisible();
+    expect(screen.queryByRole("row", { name: /Contributed Workspace/ })).toBeNull();
+    expect(screen.queryByRole("row", { name: /Shared Workspace/ })).toBeNull();
+
+    // Filter "Contributed"
+    await user.click(screen.getByRole("button", { name: "Contributed" }));
+    expect(screen.queryByRole("row", { name: /Owned Workspace/ })).toBeNull();
+    expect(screen.getByRole("row", { name: /Contributed Workspace/ })).toBeVisible();
+    expect(screen.queryByRole("row", { name: /Shared Workspace/ })).toBeNull();
+
+    // Filter "Shared"
+    await user.click(screen.getByRole("button", { name: "Shared" }));
+    expect(screen.queryByRole("row", { name: /Owned Workspace/ })).toBeNull();
+    expect(screen.queryByRole("row", { name: /Contributed Workspace/ })).toBeNull();
+    expect(screen.getByRole("row", { name: /Shared Workspace/ })).toBeVisible();
+  });
 });

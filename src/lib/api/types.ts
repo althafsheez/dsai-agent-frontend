@@ -25,6 +25,8 @@ export interface WorkspaceDto {
   updated_at: string;
   archived_at: string | null;
   deleted_at: string | null;
+  role?: "owner" | "admin" | "contributor" | "editor" | "viewer" | string;
+  permission?: "admin" | "edit" | "view" | string;
 }
 
 export interface WorkspaceContextFileDto {
