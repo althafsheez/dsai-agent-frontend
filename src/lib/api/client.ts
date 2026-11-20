@@ -223,6 +223,10 @@ export function getDatasets(chatId: string): Promise<ApiList<DatasetResource>> {
   return requestJson<ApiList<DatasetResource>>(`/datasets?chat_id=${encodeURIComponent(chatId)}`);
 }
 
+export function downloadWorkspaceDatasets(workspaceId: string, workspaceName: string): Promise<void> {
+  return downloadResource(`/workspaces/${encodeURIComponent(workspaceId)}/datasets/download`, `${workspaceName}-datasets.zip`);
+}
+
 export function getWorkspaceDatasets(workspaceId: string): Promise<ApiList<DatasetResource>> {
   return requestJson<ApiList<DatasetResource>>(`/datasets?workspace_id=${encodeURIComponent(workspaceId)}`);
 }

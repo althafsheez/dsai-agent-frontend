@@ -54,6 +54,7 @@ CSV/XLSX/XLS/Parquet structured formats -> Dataset. Images/PDF/documents/charts 
 - GET /api/artifacts?chat_id= or workspace_id= -> scoped Artifact list. Workspace visibility requires explicit links, never auto-publish private chat resources.
 - POST /api/resource-links {resource_type,resource_id,scope_type,scope_id}; validate access, idempotent unique tuple. No dataset-moving UI.
 - GET /api/datasets/{id}/preview?limit=50: {name,total_rows,column_count,columns:[{name,data_type}],rows:scalar[][],truncated:boolean}. Cap at 100 and bound cell size; counts nullable until inspection completes.
+- GET /api/workspaces/{id}/datasets/download returns a ZIP of all directly linked workspace datasets, with distinct filenames for duplicate names.
 - GET /api/datasets/{id}/download; GET /api/artifacts/{id}/download.
 - GET /api/resources/{id}/preview?thumbnail=true returns a PNG of the first PDF page for the owning user.
 - GET /api/artifacts/{id}/preview: controlled image/PDF response or metadata/validated chart spec; unsupported formats offer download. No arbitrary filesystem URLs or executable HTML.

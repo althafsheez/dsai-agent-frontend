@@ -357,3 +357,31 @@ async def test_workspace_invites_are_persisted_and_updatable(client: AsyncClient
 
     assert (await client.delete(f"{base}/{invite_id}", headers=demo_headers)).status_code == 204
     assert (await client.get(base, headers=demo_headers)).json()["items"] == []
+
+
+async def test_workspace_dataset_zip(client: AsyncClient, demo_headers: dict[str, str]) -> None:
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    workspace = (await client.post("/api/workspaces", headers=demo_headers, json={"name": "Reports"})).json()
+    scope = workspace["id"]
+    url = f"/api/workspaces/{scope}/datasets/download"
+    assert (await client.get(url, headers=demo_headers)).status_code == 404
+    chat = (await client.post("/api/chats", headers=demo_headers, json={
+        "workspace_id": scope, "content": "Analyze", "client_request_id": "zip-chat",
+    })).json()["chat"]
+    for index, (scope_type, scope_id, name) in enumerate([
+        ("workspace", scope, "iris.csv"), ("workspace", scope, "iris.csv"),
+        ("chat", chat["id"], "private.csv"), ("workspace", scope, "notes.txt"),
+    ]):
+        response = await client.post("/api/resources/upload", headers=demo_headers, data={
+            "scope_type": scope_type, "scope_id": scope_id, "client_upload_id": str(index),
+        }, files={"file": (name, f"value\n{index}\n".encode(), "text/plain")})
+        assert response.status_code == 201
+
+    assert (await client.get(url, headers={"X-Demo-User-Id": "user-shared"})).status_code == 403
+    response = await client.get(url, headers=demo_headers)
+    assert response.headers["content-type"] == "application/zip"
+    with ZipFile(BytesIO(response.content)) as archive:
+        assert sorted(archive.namelist()) == ["iris (2).csv", "iris.csv"]
+        assert {archive.read(name) for name in archive.namelist()} == {b"value\n0\n", b"value\n1\n"}

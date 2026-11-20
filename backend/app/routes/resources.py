@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import re
 import subprocess
+from tempfile import TemporaryFile
+from zipfile import ZipFile, ZIP_DEFLATED
 import mimetypes
 import hashlib
 from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile, status
+from starlette.background import BackgroundTask
+from starlette.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -190,6 +195,55 @@ def _chat_catalog(session: Session, user: User, chat_id: str) -> list[tuple[Reso
     return [row for row in sorted(rows, key=lambda row: row[2] != "chat") if not (row[0].id in seen or seen.add(row[0].id))]
 
 
+def _workspace_datasets(session: Session, workspace_id: str):
+    return session.execute(
+        select(Resource, FileObject, ResourceLink.scope_type)
+        .join(ResourceLink, ResourceLink.resource_id == Resource.id)
+        .join(FileObject, FileObject.id == Resource.file_object_id)
+        .where(ResourceLink.scope_type == "workspace", ResourceLink.scope_id == workspace_id,
+               Resource.resource_type == "dataset")
+        .order_by(Resource.created_at.desc(), Resource.id.desc())
+    ).unique().all()
+
+
+@catalog_router.get("/workspaces/{workspace_id}/datasets/download")
+def download_workspace_datasets(
+    workspace_id: str,
+    request: Request,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    workspace = require_workspace(session, user, workspace_id)
+    rows = _workspace_datasets(session, workspace_id)
+    if not rows:
+        raise APIError(404, "no_datasets", "This workspace has no datasets.")
+    storage: LocalFileStorage = request.app.state.storage
+    used_names: set[str] = set()
+    archive = TemporaryFile()
+    try:
+        with ZipFile(archive, "w", compression=ZIP_DEFLATED, compresslevel=1) as bundle:
+            for resource, file_object, _ in rows:
+                original = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", resource.name).strip(" .") or "dataset"
+                path = Path(original)
+                name = original
+                number = 2
+                while name.casefold() in used_names:
+                    name = f"{path.stem} ({number}){path.suffix}"
+                    number += 1
+                used_names.add(name.casefold())
+                bundle.writestr(name, storage.read_bytes(file_object.relative_storage_path))
+        archive.seek(0)
+        filename = quote(f"{workspace.name}-datasets.zip", safe="")
+        return StreamingResponse(
+            iter(lambda: archive.read(65536), b""), media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+            background=BackgroundTask(archive.close),
+        )
+    except Exception:
+        archive.close()
+        raise
+
+
 @catalog_router.get("/datasets")
 async def list_datasets(
     chat_id: str | None = None,
@@ -202,13 +256,7 @@ async def list_datasets(
     library_ids = set(session.scalars(select(LibraryEntry.resource_id).where(LibraryEntry.user_id == user.id)))
     if workspace_id:
         require_workspace(session, user, workspace_id)
-        rows = session.execute(
-            select(Resource, FileObject, ResourceLink.scope_type)
-            .join(ResourceLink, ResourceLink.resource_id == Resource.id)
-            .join(FileObject, FileObject.id == Resource.file_object_id)
-            .where(ResourceLink.scope_type == "workspace", ResourceLink.scope_id == workspace_id)
-            .order_by(Resource.created_at.desc(), Resource.id.desc())
-        ).all()
+        rows = _workspace_datasets(session, workspace_id)
     else:
         rows = _chat_catalog(session, user, chat_id or "")
     items = [
