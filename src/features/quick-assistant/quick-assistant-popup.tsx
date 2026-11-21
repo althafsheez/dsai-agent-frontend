@@ -21,6 +21,8 @@ interface QuickAssistantPopupProps {
   rightInset?: number;
   /** Asked once as soon as the assistant is ready, e.g. from the `/btw` slash command. */
   autoAsk?: string;
+  /** Selected chat text sent here from the right-click menu; it is quoted into the draft, not sent. */
+  quote?: { text: string; nonce: number };
 }
 interface QuickMessage { id: string; role: "user" | "assistant"; content: string; status: string; }
 
@@ -33,7 +35,7 @@ function compactText(content: string) {
     : part.startsWith("`") && part.endsWith("`") ? <code key={index} className="rounded bg-raised px-1 font-mono text-[11px]">{part.slice(1, -1)}</code> : part);
 }
 
-export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFileSelect, minimized, onMinimize, onRestore, onClose, autoAsk, rightInset = 0 }: QuickAssistantPopupProps) {
+export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFileSelect, minimized, onMinimize, onRestore, onClose, autoAsk, quote, rightInset = 0 }: QuickAssistantPopupProps) {
   const inputId = useId();
   const titleId = useId();
   const [draft, setDraft] = useState("");
@@ -92,6 +94,15 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
     event.preventDefault();
     await ask(draft.trim());
   }
+
+  const lastQuote = useRef<number | null>(null);
+  useEffect(() => {
+    if (!quote || lastQuote.current === quote.nonce) return;
+    lastQuote.current = quote.nonce;
+    const quoted = quote.text.split("\n").map((line) => `> ${line}`).join("\n");
+    setDraft((current) => `${current ? `${current}\n\n` : ""}${quoted}\n\n`);
+    inputRef.current?.focus();
+  }, [quote]);
 
   const autoAsked = useRef(false);
   useEffect(() => {
