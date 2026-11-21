@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.env
+.env.*
+!.env.example
+logs/
+*.log
+*.jsonl
+*.db
+*.db-journal
+agentic.db
+dsai.db
+uploads/
