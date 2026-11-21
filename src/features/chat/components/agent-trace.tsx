@@ -1,7 +1,7 @@
 "use client";
 
 import type { AgentRunDto } from "@/lib/api";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, Check, ChevronDown, ChevronRight, ChevronUp, Circle, Code2, Copy, Database, FileText, LoaderCircle, RotateCcw, Sparkles, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -331,7 +331,6 @@ function TimelineStepItem({
 
 export function AgentTrace({
   steps,
-  run,
   isStreaming = false,
   isOpen: controlledIsOpen,
   onOpenChange,
@@ -341,7 +340,6 @@ export function AgentTrace({
 }: {
   run?: AgentRunDto;
   steps: TraceStep[];
-  run?: AgentRunDto;
   isStreaming?: boolean;
   isOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -446,12 +444,6 @@ export function AgentTrace({
                 <ReasoningEllipsis />
               </>
             )}
-            {!isStreaming && totalMs !== null && totalMs >= 0 ? (
-              <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">
-                <span>Total time · {spaced(totalMs)}</span>
-                {toolMs > 0 ? <span> · Tool time · {spaced(toolMs)}</span> : null}
-              </span>
-            ) : null}
             {isCompleted && (
               <span className="text-[11px] text-sage font-medium shrink-0 flex items-center gap-1 ml-auto mr-1">
                 <Check className="size-3" />
