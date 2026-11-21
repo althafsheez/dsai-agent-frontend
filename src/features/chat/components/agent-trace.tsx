@@ -154,7 +154,7 @@ function TimelineStepItem({
   const codeContent = step.code || step.sql;
   const codeLanguage = step.sql ? "sql" : "python";
 
-  const handleCopyCode = async (e: React.MouseEvent) => {
+  const handleCopyCode = async (e: MouseEvent) => {
     e.stopPropagation();
     if (!codeContent) return;
     try {
@@ -350,7 +350,7 @@ export function AgentTrace({
   const isControlled = controlledIsOpen !== undefined;
   const isOpen = isControlled ? controlledIsOpen : localIsOpen;
 
-  const handleOpenChange = React.useCallback(
+  const handleOpenChange = useCallback(
     (open: boolean) => {
       if (!isControlled) {
         setLocalIsOpen(open);
