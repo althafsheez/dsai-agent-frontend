@@ -39,6 +39,7 @@ import { useUiStore } from "@/stores/ui-store";
 import { ContextSidebar, FilePreviewSidebar, type ContextFile } from "@/features/context-sidebar";
 import {
   addResourceToLibrary,
+  branchChat,
   createMessage,
   downloadResource,
   cancelQueuedRun,
@@ -1239,6 +1240,19 @@ export function ChatPage({ chatId }: { chatId: string }) {
     }
   }
 
+  async function branchFrom(messageId: string) {
+    if (running) return;
+    setError(null);
+    try {
+      const branch = await branchChat(chatId, messageId);
+      void queryClient.invalidateQueries({ queryKey: ["sidebar", "recent-chats"] });
+      void queryClient.invalidateQueries({ queryKey: ["history"] });
+      router.push(`/chat/${branch.id}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not branch this chat.");
+    }
+  }
+
   const handleRetry = useCallback((failedMessage: AssistantMessage) => {
     if (running) return;
     const assistantIndex = messages.findIndex((m) => m.id === failedMessage.id);
@@ -1311,6 +1325,9 @@ export function ChatPage({ chatId }: { chatId: string }) {
             <MessageList
               messages={messages}
               runs={runsQuery.data?.items}
+              onRetry={handleRetry}
+              onBranch={running ? undefined : (messageId) => void branchFrom(messageId)}
+              availableResources={availableResources}
               onFileSelect={selectFileById}
               onFileDownload={downloadFileById}
               resources={resources}

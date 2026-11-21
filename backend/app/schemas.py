@@ -117,6 +117,11 @@ class ChatCreate(BaseModel):
     client_request_id: str = Field(min_length=1, max_length=100)
 
 
+class ChatBranch(BaseModel):
+    message_id: str = Field(min_length=1, max_length=36)
+    client_request_id: str = Field(min_length=1, max_length=100)
+
+
 class ChatUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     workspace_id: str | None = None
