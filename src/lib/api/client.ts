@@ -351,6 +351,13 @@ export function cancelRun(runId: string, reason: "user" | "navigation" | "refres
   });
 }
 
+export function editQueuedRun(runId: string, content: string): Promise<MessageDto> {
+  return requestJson<MessageDto>(`/runs/${encodeURIComponent(runId)}/queue`, {
+    method: "PATCH",
+    body: JSON.stringify({ content }),
+  });
+}
+
 export async function cancelQueuedRun(runId: string): Promise<void> {
   const response = await fetch(`${API_ROOT}/runs/${encodeURIComponent(runId)}/queue`, {
     method: "DELETE",

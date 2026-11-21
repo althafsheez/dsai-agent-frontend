@@ -9,6 +9,7 @@ import {
   Calculator,
   ChevronRight,
   CirclePause,
+  Pencil,
   CornerDownRight,
   Database,
   FileSearch,
@@ -43,6 +44,7 @@ import {
   createMessage,
   downloadResource,
   cancelQueuedRun,
+  editQueuedRun,
   cancelRun,
   getArtifacts,
   getChatRuns,
@@ -139,6 +141,7 @@ interface QueuedQuestion {
   position: number;
   removing: boolean;
   paused: boolean;
+  editing?: boolean;
 }
 
 interface DraftAttachment {
@@ -1062,6 +1065,27 @@ export function ChatPage({ chatId }: { chatId: string }) {
     }
   }
 
+  async function saveQueuedEdit(runId: string, content: string) {
+    const text = content.trim();
+    if (!text) return;
+    setError(null);
+    try {
+      const message = await editQueuedRun(runId, text);
+      setQueuedQuestions((current) => {
+        const next = current.map((item) => item.runId === runId ? { ...item, content: message.content, editing: false } : item);
+        queuedQuestionsRef.current = next;
+        return next;
+      });
+      setComposerStatus("Queued question updated.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update the queued question.");
+    }
+  }
+
+  function toggleQueuedEdit(runId: string, editing: boolean) {
+    setQueuedQuestions((current) => current.map((item) => item.runId === runId ? { ...item, editing } : item));
+  }
+
   function resumePausedQueue() {
     if (running || !queuedQuestions.some((item) => item.paused)) return;
     void runMessage({ type: "resume-queue" });
@@ -1152,6 +1176,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
             <MessageList
               messages={messages}
               runs={runsQuery.data?.items}
+              onRetry={handleRetry}
+              availableResources={availableResources}
               onFileSelect={selectFileById}
               onFileDownload={downloadFileById}
               resources={resources}
@@ -1167,7 +1193,26 @@ export function ChatPage({ chatId }: { chatId: string }) {
                 <div key={item.runId} className="flex items-center gap-2 rounded-md border border-border bg-raised px-3 py-2 text-xs">
                   {item.paused ? <CirclePause className="size-3.5 shrink-0 text-amber-300" aria-hidden="true" /> : <LoaderCircle className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />}
                   <span className="shrink-0 font-medium text-foreground">{item.paused ? "Paused" : `Queued${item.position > 1 ? ` · ${item.position}` : ""}`}</span>
-                  <span className="min-w-0 flex-1 truncate text-muted-foreground">{item.content}</span>
+                  {item.editing ? (
+                    <input
+                      autoFocus
+                      defaultValue={item.content}
+                      aria-label="Edit queued question"
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") { event.preventDefault(); void saveQueuedEdit(item.runId, event.currentTarget.value); }
+                        if (event.key === "Escape") toggleQueuedEdit(item.runId, false);
+                      }}
+                      onBlur={(event) => void saveQueuedEdit(item.runId, event.currentTarget.value)}
+                      className="min-w-0 flex-1 rounded border border-border-strong bg-surface px-2 py-1 text-xs text-foreground outline-none focus:border-ring"
+                    />
+                  ) : (
+                    <span className="min-w-0 flex-1 truncate text-muted-foreground">{item.content}</span>
+                  )}
+                  {!item.editing ? (
+                    <button type="button" onClick={() => toggleQueuedEdit(item.runId, true)} aria-label={`Edit queued question: ${item.content}`} className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-surface hover:text-foreground">
+                      <Pencil className="size-3.5" />
+                    </button>
+                  ) : null}
                   {item.paused ? (
                     <button type="button" onClick={resumePausedQueue} aria-label="Resume queued questions" className="rounded px-1.5 py-1 text-[11px] font-medium text-amber-200 hover:bg-surface hover:text-amber-100">
                       Resume

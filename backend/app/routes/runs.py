@@ -13,6 +13,7 @@ from ..schemas import (
     EventEnvelope,
     MessageResponse,
     QueueResponse,
+    QueueEdit,
     QueueStart,
     RetryStart,
     RunResponse,
@@ -196,6 +197,27 @@ async def queue_run(
         run=RunResponse.model_validate(queued_run),
         position=position,
     )
+
+
+@router.patch("/api/runs/{run_id}/queue", response_model=MessageResponse)
+async def edit_queued_run(
+    run_id: str,
+    data: QueueEdit,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MessageResponse:
+    run = session.get(AgentRun, run_id)
+    if run is None:
+        raise APIError(404, "run_not_found", "Run not found.")
+    require_chat(session, user, run.chat_id)
+    if run.status != "queued":
+        raise APIError(409, "run_not_queued", "Only a queued run can be edited.")
+    message = session.get(Message, run.user_message_id)
+    if message is None:
+        raise APIError(404, "message_not_found", "Queued message not found.")
+    message.content = data.content
+    session.commit()
+    return MessageResponse.model_validate(message)
 
 
 @router.delete("/api/runs/{run_id}/queue", status_code=status.HTTP_204_NO_CONTENT)

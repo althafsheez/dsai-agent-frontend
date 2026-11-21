@@ -227,6 +227,10 @@ class QueueStart(BaseModel):
     client_request_id: str = Field(min_length=1, max_length=100)
 
 
+class QueueEdit(BaseModel):
+    content: str = Field(min_length=1, max_length=100_000)
+
+
 class SteerStart(BaseModel):
     content: str = Field(min_length=1, max_length=100_000)
     client_request_id: str = Field(min_length=1, max_length=100)

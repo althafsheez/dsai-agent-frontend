@@ -230,7 +230,7 @@ async def test_queue_runs_next_and_steer_restarts_same_run(tmp_path, demo_header
                 assert messages[-1] == ChatTurn(role="user", content="High-priority steering instruction: Focus on enterprise")
                 yield "Steered response."
             else:
-                assert messages[-1] == ChatTurn(role="user", content="Compare last quarter")
+                assert messages[-1] == ChatTurn(role="user", content="Compare last quarter by region")
                 yield "Queued response."
 
     provider = BlockingProvider()
@@ -270,6 +270,13 @@ async def test_queue_runs_next_and_steer_restarts_same_run(tmp_path, demo_header
             )
             assert queued.status_code == 201, queued.text
             assert queued.json()["message"]["status"] == "queued"
+            edited = await client.patch(
+                f"/api/runs/{queued.json()['run']['id']}/queue",
+                headers=demo_headers,
+                json={"content": "Compare last quarter by region"},
+            )
+            assert edited.status_code == 200, edited.text
+            assert edited.json()["content"] == "Compare last quarter by region"
 
             steered = await client.post(
                 f"/api/runs/{active_run_id}/steer",
