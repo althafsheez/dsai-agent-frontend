@@ -156,6 +156,8 @@ class QuickMessage(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(24), default="completed")
     position: Mapped[int] = mapped_column(Integer)
     client_request_id: Mapped[str | None] = mapped_column(String(100))
+    # One context can hold several independent conversations (tabs); positions stay unique across all of them.
+    thread_id: Mapped[str] = mapped_column(String(36), default="main", server_default="main", index=True)
 
 
 class AgentRun(Base):

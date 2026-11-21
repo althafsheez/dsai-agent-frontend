@@ -305,8 +305,9 @@ export function getMessages(chatId: string): Promise<ApiList<MessageDto>> {
   return requestJson<ApiList<MessageDto>>(`/chats/${encodeURIComponent(chatId)}/messages`);
 }
 
-export function getQuickAssistantMessages(contextType: "chat" | "workspace", contextId: string): Promise<ApiList<QuickMessageDto>> {
-  return requestJson<ApiList<QuickMessageDto>>(`/quick-assistant/messages?context_type=${contextType}&context_id=${encodeURIComponent(contextId)}`);
+export function getQuickAssistantMessages(contextType: "chat" | "workspace", contextId: string, threadId?: string): Promise<ApiList<QuickMessageDto>> {
+  const thread = threadId ? `&thread_id=${encodeURIComponent(threadId)}` : "";
+  return requestJson<ApiList<QuickMessageDto>>(`/quick-assistant/messages?context_type=${contextType}&context_id=${encodeURIComponent(contextId)}${thread}`);
 }
 
 export function getChatRuns(chatId: string): Promise<ApiList<AgentRunDto>> {
@@ -446,6 +447,7 @@ export async function streamQuickAssistantMessage(
     effort?: string;
     client_request_id: string;
     context_until_message_id?: string;
+    thread_id?: string;
   },
   onEvent: (event: ExecutionEvent) => void,
   signal?: AbortSignal,
