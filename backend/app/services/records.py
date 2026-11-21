@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from ..errors import APIError
-from ..models import Chat, Message, User, Workspace, WorkspaceContextFile, utc_now
-from ..schemas import ChatCreate, ChatUpdate, WorkspaceCreate, WorkspaceUpdate
+from ..models import Chat, Message, ResourceLink, User, Workspace, WorkspaceContextFile, utc_now
+from ..schemas import ChatBranch, ChatCreate, ChatUpdate, WorkspaceCreate, WorkspaceUpdate
 
 
 def _keep_updated_at(record: Chat | Workspace) -> None:
@@ -133,6 +133,54 @@ def create_chat(session: Session, user: User, data: ChatCreate) -> tuple[Chat, M
     session.refresh(chat)
     session.refresh(message)
     return chat, message
+
+
+def branch_chat(session: Session, user: User, chat_id: str, data: ChatBranch) -> Chat:
+    """Copy a chat up to and including one message into a new, independent chat."""
+    source = require_chat(session, user, chat_id)
+    existing = session.scalar(select(Chat).where(Chat.created_by == user.id, Chat.client_request_id == data.client_request_id))
+    if existing is not None:
+        return existing
+    cutoff = session.get(Message, data.message_id)
+    if cutoff is None or cutoff.chat_id != source.id or cutoff.kind != "normal":
+        raise APIError(422, "invalid_branch_point", "Choose a message from this chat to branch from.")
+    copied = list(session.scalars(
+        select(Message)
+        .where(Message.chat_id == source.id, Message.kind == "normal", Message.position <= cutoff.position, Message.status == "completed")
+        .order_by(Message.position)
+    ))
+    if not any(message.role == "user" for message in copied):
+        raise APIError(422, "invalid_branch_point", "There is nothing above this point to branch from.")
+    branch = Chat(
+        title=f"Branch: {source.title}"[:200],
+        title_source="manual",
+        workspace_id=source.workspace_id,
+        created_by=user.id,
+        client_request_id=data.client_request_id,
+    )
+    session.add(branch)
+    session.flush()
+    id_map: dict[str, str] = {}
+    for position, message in enumerate(copied, start=1):
+        clone = Message(
+            chat_id=branch.id, role=message.role, kind="normal", content=message.content,
+            status="completed", position=position, client_request_id=f"branch:{branch.id}:{position}",
+        )
+        session.add(clone)
+        session.flush()
+        id_map[message.id] = clone.id
+    # Files made in the copied part travel with the branch; outputs from later messages stay behind.
+    links = session.scalars(select(ResourceLink).where(ResourceLink.scope_type == "chat", ResourceLink.scope_id == source.id))
+    for link in links:
+        if link.message_id is not None and link.message_id not in id_map:
+            continue
+        session.add(ResourceLink(
+            resource_id=link.resource_id, scope_type="chat", scope_id=branch.id,
+            message_id=id_map.get(link.message_id) if link.message_id else None,
+        ))
+    session.commit()
+    session.refresh(branch)
+    return branch
 
 
 def update_chat(session: Session, user: User, chat_id: str, data: ChatUpdate) -> Chat:

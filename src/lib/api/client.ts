@@ -176,6 +176,13 @@ export function getActivity(): Promise<ApiList<ChatDto>> {
   return requestJson<ApiList<ChatDto>>("/chats/activity/list");
 }
 
+export function branchChat(chatId: string, messageId: string): Promise<ChatDto> {
+  return requestJson<ChatDto>(`/chats/${encodeURIComponent(chatId)}/branch`, {
+    method: "POST",
+    body: JSON.stringify({ message_id: messageId, client_request_id: crypto.randomUUID() }),
+  });
+}
+
 export function updateChat(chatId: string, input: { title?: string; workspace_id?: string | null; archived?: boolean; pinned?: boolean; is_unread?: boolean }): Promise<ChatDto> {
   return requestJson<ChatDto>(`/chats/${encodeURIComponent(chatId)}`, {
     method: "PATCH",

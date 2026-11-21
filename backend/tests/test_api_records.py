@@ -411,3 +411,43 @@ async def test_library_dataset_zip(client: AsyncClient, demo_headers: dict[str, 
     folder = await client.get(f"{url}?workspace_id={workspace['id']}", headers=demo_headers)
     with ZipFile(BytesIO(folder.content)) as archive:
         assert archive.namelist() == ["a.csv"]
+
+
+async def test_branching_copies_only_messages_up_to_the_branch_point(
+    client: AsyncClient, demo_headers: dict[str, str]
+) -> None:
+    created = await create_chat(client, demo_headers)
+    chat_id = created["chat"]["id"]
+    for index in (2, 3):
+        posted = await client.post(
+            f"/api/chats/{chat_id}/messages", headers=demo_headers,
+            json={"content": f"Follow-up {index}", "client_request_id": f"message-{index}"},
+        )
+        assert posted.status_code == 201
+    second = (await client.get(f"/api/chats/{chat_id}/messages", headers=demo_headers)).json()["items"][1]
+
+    branched = await client.post(
+        f"/api/chats/{chat_id}/branch", headers=demo_headers,
+        json={"message_id": second["id"], "client_request_id": "branch-1"},
+    )
+    assert branched.status_code == 201, branched.text
+    branch = branched.json()
+    assert branch["id"] != chat_id
+    assert branch["title"].startswith("Branch:")
+    copied = (await client.get(f"/api/chats/{branch['id']}/messages", headers=demo_headers)).json()["items"]
+    assert [message["content"] for message in copied] == ["Analyze revenue", "Follow-up 2"]
+    assert {message["id"] for message in copied}.isdisjoint({created["message"]["id"], second["id"]})
+
+    repeated = await client.post(
+        f"/api/chats/{chat_id}/branch", headers=demo_headers,
+        json={"message_id": second["id"], "client_request_id": "branch-1"},
+    )
+    assert repeated.json()["id"] == branch["id"]
+    original = (await client.get(f"/api/chats/{chat_id}/messages", headers=demo_headers)).json()["items"]
+    assert len(original) == 3
+
+    bad = await client.post(
+        f"/api/chats/{chat_id}/branch", headers=demo_headers,
+        json={"message_id": "nope", "client_request_id": "branch-2"},
+    )
+    assert bad.status_code == 422
