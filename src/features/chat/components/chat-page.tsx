@@ -212,7 +212,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   // Holds the main-chat snapshot taken when Quick Assistant opened; null means closed.
-  const [quickAssistant, setQuickAssistant] = useState<{ snapshotMessageId: string | null; minimized: boolean; autoAsk?: string; session: number } | null>(null);
+  const [quickAssistant, setQuickAssistant] = useState<{ snapshotMessageId: string | null; minimized: boolean; autoAsk?: string; session: number; quote?: { text: string; nonce: number } } | null>(null);
+  const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string } | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
   // The draft the user pressed Escape on; the picker stays closed until the draft changes.
   const [slashDismissedFor, setSlashDismissedFor] = useState<string | null>(null);
@@ -724,6 +725,29 @@ export function ChatPage({ chatId }: { chatId: string }) {
       ? { ...current, minimized: !current.minimized }
       : { snapshotMessageId: messagesQuery.data?.items.at(-1)?.id ?? null, minimized: false, session: Date.now() });
   }
+  function openSelectionMenu(event: React.MouseEvent) {
+    const text = window.getSelection()?.toString().trim() ?? "";
+    if (!text) return;
+    event.preventDefault();
+    setSelectionMenu({ x: event.clientX, y: event.clientY, text: text.slice(0, 2000) });
+  }
+  function sendSelectionToQuickAssistant() {
+    if (!selectionMenu) return;
+    const quote = { text: selectionMenu.text, nonce: Date.now() };
+    setQuickAssistant((current) => current
+      ? { ...current, minimized: false, quote }
+      : { snapshotMessageId: messagesQuery.data?.items.at(-1)?.id ?? null, minimized: false, session: Date.now(), quote });
+    setSelectionMenu(null);
+  }
+  useEffect(() => {
+    if (!selectionMenu) return;
+    const close = () => setSelectionMenu(null);
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", escape);
+    window.addEventListener("scroll", close, true);
+    return () => { window.removeEventListener("pointerdown", close); window.removeEventListener("keydown", escape); window.removeEventListener("scroll", close, true); };
+  }, [selectionMenu]);
   const minimizeQuickAssistant = useCallback(() => setQuickAssistant((current) => current && { ...current, minimized: true }), []);
   const restoreQuickAssistant = useCallback(() => setQuickAssistant((current) => current && { ...current, minimized: false }), []);
   const closeQuickAssistant = useCallback(() => setQuickAssistant(null), []);
@@ -1277,6 +1301,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
           aria-label="Conversation messages"
           className="col-start-2 row-start-2 min-h-0 overflow-y-auto"
           onScroll={conversationScroll.onScroll}
+          onContextMenu={openSelectionMenu}
         >
           {messagesQuery.isError ? (
             <div role="alert" className="mx-auto max-w-3xl px-5 py-10 text-sm text-red-300">
@@ -1597,8 +1622,21 @@ export function ChatPage({ chatId }: { chatId: string }) {
           subject="chat"
         />
       ) : null}
+      {selectionMenu ? (
+        <div
+          role="menu"
+          style={{ left: Math.min(selectionMenu.x, window.innerWidth - 240), top: Math.min(selectionMenu.y, window.innerHeight - 56) }}
+          className="fixed z-[70] w-56 rounded-md border border-border-strong bg-raised p-1 shadow-xl"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button type="button" role="menuitem" onClick={sendSelectionToQuickAssistant} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs text-foreground hover:bg-surface">
+            <Sparkles className="size-3.5 text-muted-foreground" />Ask Quick Assistant about this
+          </button>
+        </div>
+      ) : null}
       {quickAssistant ? (
         <QuickAssistantPopup
+          quote={quickAssistant.quote}
           key={`${chatId}:${quickAssistant.session}`}
           autoAsk={quickAssistant.autoAsk}
           chatId={chatId}
