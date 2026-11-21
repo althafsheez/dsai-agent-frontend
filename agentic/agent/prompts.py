@@ -46,6 +46,9 @@ Core Operating Principles:
    - Plan your tool call decisively on Turn 1.
    - If an error occurs, correct it immediately on Turn 2.
    - Synthesize findings into clear, concise Markdown with key metrics highlighted.
+
+5. **Direct Answers for Conceptual / General Knowledge**:
+   - If the user asks a conceptual, theoretical, mathematical (if simple/trivial), or general knowledge question that does NOT require database querying, statistical modeling, or live web search, answer directly on Turn 1 without invoking any tools.
 """
 
 

@@ -4,129 +4,175 @@
     "category": "Direct General Knowledge",
     "question": "What is the key mathematical difference between L1 (Lasso) and L2 (Ridge) regularization?",
     "expected_tool": "None (Direct LLM)",
-    "tools_called": ["web_search"],
-    "latency_ms": 6925.71,
-    "latency_sec": 6.93,
-    "turns": 2,
+    "tools_called": [],
+    "latency_ms": 5503,
+    "latency_sec": 5.5,
+    "ttft_ms": 3992,
+    "tool_execution_ms": 0,
+    "llm_execution_ms": 5503,
+    "turns": 1,
     "sub_5s": false,
-    "answer_preview": "L1 adds the sum of absolute values (|θ|), producing sparsity and feature selection; L2 adds squared values (θ²)...",
-    "full_answer": "The key mathematical difference between L1 (Lasso) and L2 (Ridge) regularization lies in the penalty term added to the loss function:\n\n- **L1 (Lasso):** Objective = L(θ) + λ ∑ |θ_j| (Absolute value penalty; diamond-shaped constraint; drives irrelevant feature coefficients strictly to 0).\n- **L2 (Ridge):** Objective = L(θ) + λ ∑ θ_j² (Squared value penalty; spherical constraint; asymptotically shrinks coefficients toward 0 without setting them exactly to 0)."
+    "answer_preview": "The key mathematical difference between L1 (Lasso) and L2 (Ridge) regularization lies in the **penalty term** added to t...",
+    "full_answer": "The key mathematical difference between L1 (Lasso) and L2 (Ridge) regularization lies in the **penalty term** added to the loss function, which fundamentally changes the geometry of the optimization problem and the resulting model behavior.\n\n### 1. The Mathematical Penalty\nGiven a loss function $L(\\theta)$ (e.g., Mean Squared Error), the regularized objective functions are:\n\n*   **L1 Regularization (Lasso):** Adds the sum of the **absolute values** of the coefficients.\n    $$\\text{Objective} = L(\\theta) + \\lambda \\sum_{j=1}^{p} |\\beta_j|$$\n*   **L2 Regularization (Ridge):** Adds the sum of the **squared values** of the coefficients.\n    $$\\text{Objective} = L(\\theta) + \\lambda \\sum_{j=1}^{p} \\beta_j^2$$\n\n*(Where $\\lambda$ is the regularization strength parameter.)*\n\n### 2. Key Differences in Behavior\n\n| Feature | L1 (Lasso) | L2 (Ridge) |\n| :--- | :--- | :--- |\n| **Penalty Geometry** | Diamond-shaped (non-differentiable at 0) | Circular/Spherical (differentiable everywhere) |\n| **Coefficient Effect** | Forces some coefficients to **exactly zero** | Shrinks coefficients toward zero, but rarely to zero |\n| **Feature Selection** | Performs automatic feature selection | Keeps all features (retains model complexity) |\n| **Solution** | Often sparse; useful for high-dimensional data | Dense; handles multicollinearity well |\n\n### 3. Why the Difference?\nThe difference arises from the **derivative** of the penalty term:\n\n*   **L2 (Ridge):** The derivative of $\\beta^2$ is $2\\beta$. As $\\beta$ approaches zero, the penalty gradient also approaches zero. This means the \"pressure\" to shrink the coefficient decreases as it gets smaller, causing it to asymptotically approach zero without ever reaching it.\n*   **L1 (Lasso):** The derivative of $|\\beta|$ is a constant ($\\pm 1$, depending on the sign of $\\beta$). The penalty exerts a **constant pressure** to reduce the coefficient even when it is very small. This constant force is what pushes coefficients all the way to zero, effectively \"killing\" irrelevant features.\n\n**In summary:** L2 regularization is preferred for preventing overfitting when most features are expected to contribute to the output, while L1 regularization is preferred when you suspect only a subset of features are truly influential (sparsity)."
   },
   {
     "id": 2,
     "category": "Direct General Knowledge",
     "question": "In distributed systems, state the CAP theorem and explain why a network partition forces a tradeoff.",
     "expected_tool": "None (Direct LLM)",
-    "tools_called": ["web_search"],
-    "latency_ms": 5221.29,
-    "latency_sec": 5.22,
-    "turns": 2,
-    "sub_5s": false,
-    "answer_preview": "The CAP Theorem states that a distributed system can simultaneously guarantee at most two of Consistency, Availability...",
-    "full_answer": "The CAP theorem states that a distributed data store can guarantee at most two of Consistency (C), Availability (A), and Partition Tolerance (P). Because network partitions (P) are unavoidable in real networks, a system must choose between Consistency (returning errors or waiting rather than serving stale data) or Availability (serving requests even if data is temporarily inconsistent across partitions)."
+    "tools_called": [],
+    "latency_ms": 2361,
+    "latency_sec": 2.36,
+    "ttft_ms": 1122,
+    "tool_execution_ms": 0,
+    "llm_execution_ms": 2361,
+    "turns": 1,
+    "sub_5s": true,
+    "answer_preview": "The **CAP Theorem**, also known as Brewer's Theorem, states that a distributed data store can only simultaneously provid...",
+    "full_answer": "The **CAP Theorem**, also known as Brewer's Theorem, states that a distributed data store can only simultaneously provide two out of the following three guarantees:\n\n1.  **Consistency (C):** Every read receives the most recent write or an error.\n2.  **Availability (A):** Every request receives a (non-error) response, without the guarantee that it contains the most recent write.\n3.  **Partition Tolerance (P):** The system continues to operate despite an arbitrary number of messages being dropped (or delayed) by the network between nodes.\n\n### Why a Network Partition Forces a Tradeoff\n\nIn a distributed system, a **network partition** occurs when communication between nodes is interrupted, effectively splitting the system into two or more isolated groups. Because network partitions are an inevitable reality of distributed systems (due to hardware failure, cable cuts, or software bugs), **Partition Tolerance (P) is generally considered a non-negotiable requirement** for any distributed system.\n\nWhen a partition occurs, the system is forced to choose between Consistency and Availability:\n\n*   **Choosing Consistency (CP):** If the system prioritizes consistency, it must ensure that all nodes return the same data. If a partition occurs, the nodes on one side of the partition cannot communicate with the other to verify if their data is the most recent. To prevent returning stale or conflicting data, the system must **refuse requests** (return an error or timeout) until the partition is resolved. Thus, the system sacrifices **Availability**.\n*   **Choosing Availability (AP):** If the system prioritizes availability, it must ensure that every request receives a response. If a partition occurs, nodes on both sides will continue to accept reads and writes. However, because they cannot synchronize, the data across the partition will diverge. The system sacrifices **Consistency** to ensure that the service remains reachable.\n\n**Summary:** You cannot have a system that is perfectly consistent and perfectly available in the face of a network failure. You must either stop serving requests to maintain consistency (CP) or serve potentially stale data to maintain availability (AP)."
   },
   {
     "id": 3,
     "category": "Mathematical Complex Calculation",
     "question": "Use python to calculate the exact value of 47^7 modulo 10007, and tell me if that result is prime.",
     "expected_tool": "run_python_code",
-    "tools_called": ["run_python_code"],
-    "latency_ms": 4297.59,
-    "latency_sec": 4.30,
+    "tools_called": [
+      "run_python_code"
+    ],
+    "latency_ms": 148045,
+    "latency_sec": 148.04,
+    "ttft_ms": 147960,
+    "tool_execution_ms": 8,
+    "llm_execution_ms": 148037,
     "turns": 2,
-    "sub_5s": true,
-    "answer_preview": "47^7 mod 10007 = 2352. The result is NOT prime (divisible by 2, 3, 4, 6, 7, etc.)...",
-    "full_answer": "The value of 47^7 (mod 10007) is **2352**. This result is **not prime**, as it is an even composite number (2352 = 2^4 × 3 × 7^2)."
+    "sub_5s": false,
+    "answer_preview": "The value of **47\u2077 mod 10007** is **2352**.  This result is **not prime**, as it is an even number divisible by 2 (and o...",
+    "full_answer": "The value of **47\u2077 mod 10007** is **2352**.\n\nThis result is **not prime**, as it is an even number divisible by 2 (and other factors such as 3, 4, 6, etc.)."
   },
   {
     "id": 4,
     "category": "Mathematical Complex Calculation",
     "question": "Given sample A = [23, 21, 26, 24, 28, 29, 27] and sample B = [18, 19, 21, 20, 22, 19, 20], use scipy.stats to calculate the independent two-sample t-statistic and two-tailed p-value.",
     "expected_tool": "run_python_code",
-    "tools_called": ["run_python_code"],
-    "latency_ms": 3006.94,
-    "latency_sec": 3.01,
+    "tools_called": [
+      "run_python_code"
+    ],
+    "latency_ms": 2235,
+    "latency_sec": 2.23,
+    "ttft_ms": 2226,
+    "tool_execution_ms": 19,
+    "llm_execution_ms": 2216,
     "turns": 2,
     "sub_5s": true,
-    "answer_preview": "T-statistic: 4.639, P-value: 0.00057. Statistically significant difference between Sample A and Sample B...",
-    "full_answer": "Independent two-sample t-test results using `scipy.stats.ttest_ind`:\n- **T-statistic:** 4.639\n- **P-value:** 0.00057\n\nSince p < 0.05, we reject the null hypothesis; the mean difference between Sample A and Sample B is statistically significant."
+    "answer_preview": "The independent two-sample t-test results for the provided samples are as follows:  *   **T-statistic:** 4.639 *   **P-v...",
+    "full_answer": "The independent two-sample t-test results for the provided samples are as follows:\n\n*   **T-statistic:** 4.639\n*   **P-value:** 0.00057\n\nSince the p-value is significantly lower than the standard alpha level of 0.05, we reject the null hypothesis, indicating a statistically significant difference between the means of sample A and sample B."
   },
   {
     "id": 5,
     "category": "Mathematical Complex Calculation",
     "question": "Generate a 4x4 Hilbert matrix where H[i,j] = 1/(i+j+1) for i,j in 0..3 using numpy, then compute its eigenvalues and condition number.",
     "expected_tool": "run_python_code",
-    "tools_called": ["run_python_code"],
-    "latency_ms": 3861.39,
-    "latency_sec": 3.86,
+    "tools_called": [
+      "run_python_code"
+    ],
+    "latency_ms": 57454,
+    "latency_sec": 57.45,
+    "ttft_ms": 56983,
+    "tool_execution_ms": 22,
+    "llm_execution_ms": 57432,
     "turns": 2,
-    "sub_5s": true,
-    "answer_preview": "Eigenvalues: [1.5002, 0.1691, 0.0067, 0.0001]. Condition number: 15,513.74 (highly ill-conditioned)...",
-    "full_answer": "Results for 4x4 Hilbert Matrix:\n- **Eigenvalues:** λ1 ≈ 1.5002, λ2 ≈ 0.1691, λ3 ≈ 0.0067, λ4 ≈ 0.0001\n- **Condition Number (L2 norm):** 15,513.74\n\nHilbert matrices are notoriously ill-conditioned, meaning condition numbers grow rapidly with matrix dimension."
+    "sub_5s": false,
+    "answer_preview": "The 4x4 Hilbert matrix $H$, where $H_{i,j} = \\frac{1}{i+j+1}$, was generated and analyzed.  ### Results *   **Hilbert Ma...",
+    "full_answer": "The 4x4 Hilbert matrix $H$, where $H_{i,j} = \\frac{1}{i+j+1}$, was generated and analyzed.\n\n### Results\n*   **Hilbert Matrix:**\n    $$\n    \\begin{bmatrix}\n    1.0 & 0.5 & 0.3333 & 0.25 \\\\\n    0.5 & 0.3333 & 0.25 & 0.2 \\\\\n    0.3333 & 0.25 & 0.2 & 0.1667 \\\\\n    0.25 & 0.2 & 0.1667 & 0.1429\n    \\end{bmatrix}\n    $$\n\n*   **Eigenvalues:**\n    The eigenvalues are approximately:\n    `[1.5002, 0.1691, 0.0067, 0.0001]`\n\n*   **Condition Number:**\n    The condition number (2-norm) is approximately **15,513.74**.\n\nHilbert matrices are classic examples of **ill-conditioned matrices**, where even small perturbations in input data can lead to significant errors in numerical solutions."
   },
   {
     "id": 6,
     "category": "Analytical Data Query (DuckDB SQL)",
     "question": "Using SQL on table 'dataset', find the top 3 categories by total revenue, showing category, total revenue, and average rating rounded to 2 decimals.",
     "expected_tool": "run_duckdb_sql",
-    "tools_called": ["run_duckdb_sql"],
-    "latency_ms": 2527.36,
-    "latency_sec": 2.53,
+    "tools_called": [
+      "run_duckdb_sql"
+    ],
+    "latency_ms": 3952,
+    "latency_sec": 3.95,
+    "ttft_ms": 3875,
+    "tool_execution_ms": 170,
+    "llm_execution_ms": 3782,
     "turns": 2,
     "sub_5s": true,
-    "answer_preview": "Top 3 Categories: 1. Beauty ($174,080.94, avg rating 3.03) 2. Clothing ($167,852.17) 3. Books ($150,250.72)...",
-    "full_answer": "| Category | Total Revenue | Average Rating |\n| :--- | :--- | :--- |\n| **Beauty** | $174,080.94 | 3.03 |\n| **Clothing** | $167,852.17 | 3.09 |\n| **Books** | $150,250.72 | 2.89 |"
+    "answer_preview": "The top 3 categories by total revenue are as follows:  | Category | Total Revenue | Average Rating | | :--- | :--- | :--...",
+    "full_answer": "The top 3 categories by total revenue are as follows:\n\n| Category | Total Revenue | Average Rating |\n| :--- | :--- | :--- |\n| **Beauty** | $174,080.94 | 3.03 |\n| **Clothing** | $167,852.17 | 3.09 |\n| **Books** | $150,250.72 | 2.89 |"
   },
   {
     "id": 7,
     "category": "Analytical Data Query (DuckDB SQL)",
     "question": "From table 'dataset', query the total transaction count, median (50th percentile) revenue, and 95th percentile revenue.",
     "expected_tool": "run_duckdb_sql",
-    "tools_called": ["run_duckdb_sql"],
-    "latency_ms": 2707.73,
-    "latency_sec": 2.71,
+    "tools_called": [
+      "run_duckdb_sql"
+    ],
+    "latency_ms": 2321,
+    "latency_sec": 2.32,
+    "ttft_ms": 2311,
+    "tool_execution_ms": 25,
+    "llm_execution_ms": 2296,
     "turns": 2,
     "sub_5s": true,
-    "answer_preview": "Total Rows: 1,000. Median (50th percentile) Revenue: $573.27. 95th Percentile Revenue: $2,137.32...",
-    "full_answer": "In-process DuckDB percentiles across 1,000 transactions:\n- **Total Count:** 1,000\n- **Median Revenue (50th percentile):** $573.27\n- **95th Percentile Revenue:** $2,137.32"
+    "answer_preview": "The analysis of the `dataset` table yields the following metrics:  *   **Total Transaction Count:** 1,000 *   **Median (...",
+    "full_answer": "The analysis of the `dataset` table yields the following metrics:\n\n*   **Total Transaction Count:** 1,000\n*   **Median (50th Percentile) Revenue:** 573.27\n*   **95th Percentile Revenue:** 2,137.32"
   },
   {
     "id": 8,
     "category": "Analytical Data Query (DuckDB SQL)",
     "question": "Calculate what percentage of transactions in each category had revenue strictly greater than the overall average transaction revenue across the dataset.",
     "expected_tool": "run_duckdb_sql",
-    "tools_called": ["run_duckdb_sql"],
-    "latency_ms": 3623.72,
-    "latency_sec": 3.62,
+    "tools_called": [
+      "run_duckdb_sql"
+    ],
+    "latency_ms": 2190,
+    "latency_sec": 2.19,
+    "ttft_ms": 1825,
+    "tool_execution_ms": 51,
+    "llm_execution_ms": 2139,
     "turns": 2,
     "sub_5s": true,
-    "answer_preview": "Clothing: 43.43%, Electronics: 41.27%, Books: 39.71%, Home & Kitchen: 39.34%, Beauty: 38.50%...",
-    "full_answer": "Percentage of transactions exceeding global average revenue ($768.42):\n| Category | % Transactions > Average |\n| :--- | :--- |\n| **Clothing** | 43.43% |\n| **Electronics** | 41.27% |\n| **Books** | 39.71% |\n| **Home & Kitchen** | 39.34% |\n| **Beauty** | 38.50% |"
+    "answer_preview": "The percentage of transactions in each category with revenue strictly greater than the overall average transaction reven...",
+    "full_answer": "The percentage of transactions in each category with revenue strictly greater than the overall average transaction revenue is as follows:\n\n| Category | Percentage Above Global Average |\n| :--- | :--- |\n| **Clothing** | 43.43% |\n| **Electronics** | 41.27% |\n| **Books** | 39.71% |\n| **Home & Kitchen** | 39.34% |\n| **Beauty** | 38.50% |\n\nThese figures represent the proportion of transactions within each category that exceed the dataset-wide mean revenue."
   },
   {
     "id": 9,
     "category": "Web Search / Information Retrieval",
     "question": "Search the web for the Python programming language: who created it and in what year was it first released?",
     "expected_tool": "web_search",
-    "tools_called": ["web_search"],
-    "latency_ms": 4820.50,
-    "latency_sec": 4.82,
+    "tools_called": [
+      "web_search"
+    ],
+    "latency_ms": 4309,
+    "latency_sec": 4.31,
+    "ttft_ms": 4304,
+    "tool_execution_ms": 787,
+    "llm_execution_ms": 3522,
     "turns": 2,
     "sub_5s": true,
-    "answer_preview": "Python was created by Guido van Rossum and was first released in 1991...",
-    "full_answer": "Python was created by **Guido van Rossum** and was first released on **February 20, 1991**."
+    "answer_preview": "Python was created by **Guido van Rossum** and was first released in **1991**.",
+    "full_answer": "Python was created by **Guido van Rossum** and was first released in **1991**."
   },
   {
     "id": 10,
     "category": "Web Search / Information Retrieval",
     "question": "Search the web for the James Webb Space Telescope (JWST): what is the diameter of its primary mirror and what is its orbital location?",
     "expected_tool": "web_search",
-    "tools_called": ["web_search"],
-    "latency_ms": 5120.30,
-    "latency_sec": 5.12,
+    "tools_called": [
+      "web_search"
+    ],
+    "latency_ms": 39208,
+    "latency_sec": 39.21,
+    "ttft_ms": 39068,
+    "tool_execution_ms": 667,
+    "llm_execution_ms": 38541,
     "turns": 2,
     "sub_5s": false,
-    "answer_preview": "Primary Mirror Diameter: 6.5 meters (21.3 feet). Orbital Location: Sun-Earth L2 Lagrange point...",
-    "full_answer": "The James Webb Space Telescope (JWST) specifications:\n- **Primary Mirror Diameter:** 6.5 meters (21.3 feet), consisting of 18 beryllium hexagonal segments.\n- **Orbital Location:** Halos around the **second Sun-Earth Lagrange point (L2)**, approximately 1.5 million kilometers (930,000 miles) from Earth."
+    "answer_preview": "The James Webb Space Telescope (JWST) features a primary mirror with a diameter of **6.5 meters** (approximately 21.3 fe...",
+    "full_answer": "The James Webb Space Telescope (JWST) features a primary mirror with a diameter of **6.5 meters** (approximately 21.3 feet). \n\nIt is located in a halo orbit around the **second Lagrange point (L2)**, which is approximately 1.5 million kilometers (about 1 million miles) from Earth, directly opposite the Sun. This location allows the telescope to stay in line with the Earth as it moves around the Sun, keeping the telescope's instruments shielded from the heat and light of the Sun, Earth, and Moon."
   }
 ]

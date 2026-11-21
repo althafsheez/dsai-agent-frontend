@@ -14,56 +14,11 @@ if TYPE_CHECKING:
     from agentic.engine.python_worker import WarmPythonWorker
 
 from agentic.agent.prompts import SYSTEM_PROMPT
+from agentic.client import get_shared_client
+from agentic.tools import ToolRegistry, create_default_registry
 
-
-GEMINI_TOOLS = [
-    types.Tool(
-        function_declarations=[
-            types.FunctionDeclaration(
-                name="run_duckdb_sql",
-                description="Execute an analytical SQL query in DuckDB over the dataset (table 'dataset'). Returns column names, preview rows, and latency.",
-                parameters_json_schema={
-                    "type": "object",
-                    "properties": {
-                        "sql": {
-                            "type": "string",
-                            "description": "The DuckDB SQL query to execute, e.g. 'SELECT count(*), avg(metric) FROM dataset'",
-                        }
-                    },
-                    "required": ["sql"],
-                },
-            ),
-            types.FunctionDeclaration(
-                name="run_python_code",
-                description="Execute Python code in a persistent warm session (with pandas as pd, numpy as np, scipy, stats, and df loaded). Use print() to output results. Returns stdout/stderr and latency.",
-                parameters_json_schema={
-                    "type": "object",
-                    "properties": {
-                        "code": {
-                            "type": "string",
-                            "description": "The Python code snippet to execute",
-                        }
-                    },
-                    "required": ["code"],
-                },
-            ),
-            types.FunctionDeclaration(
-                name="web_search",
-                description="Search the web for external information, facts, definitions, or public references.",
-                parameters_json_schema={
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The search query string",
-                        }
-                    },
-                    "required": ["query"],
-                },
-            ),
-        ]
-    )
-]
+# Backward-compatibility export for default tool declarations
+GEMINI_TOOLS = create_default_registry().get_gemini_tools()
 
 
 class ReActAgent:
@@ -78,6 +33,7 @@ class ReActAgent:
         self,
         duckdb_engine: Optional[DuckDBEngine] = None,
         python_worker: Optional[WarmPythonWorker] = None,
+        tool_registry: Optional[ToolRegistry] = None,
         model: Optional[str] = None,
         api_key: Optional[str] = None,
         max_turns: int = 2,
@@ -88,66 +44,21 @@ class ReActAgent:
 
         self.duckdb_engine = duckdb_engine or DuckDBEngine()
         self.python_worker = python_worker or WarmPythonWorker()
+        self.tool_registry = tool_registry or create_default_registry(
+            duckdb_engine=self.duckdb_engine,
+            python_worker=self.python_worker,
+        )
         self.max_turns = max_turns
         self.api_key = api_key or get_gemini_api_key()
         self.model = model or get_gemini_model()
 
     def web_search(self, query: str) -> Dict[str, Any]:
-        """Search the web for current factual information using Tavily or Wikipedia summary API."""
-        import time, urllib.request, urllib.parse, json
-        t0 = time.perf_counter()
-        tavily_key = os.getenv("TAVILY_API_KEY") or os.getenv("DSAI_TAVILY_API_KEY")
-        if tavily_key:
-            try:
-                req = urllib.request.Request(
-                    "https://api.tavily.com/search",
-                    data=json.dumps({"api_key": tavily_key, "query": query, "max_results": 3}).encode(),
-                    headers={"Content-Type": "application/json"}
-                )
-                with urllib.request.urlopen(req, timeout=4) as resp:
-                    data = json.loads(resp.read().decode())
-                    elapsed = round((time.perf_counter() - t0) * 1000, 2)
-                    return {"results": data.get("results", []), "execution_time_ms": elapsed}
-            except Exception:
-                pass
-        try:
-            encoded = urllib.parse.quote(query)
-            search_url = f"https://en.wikipedia.org/w/api.php?action=opensearch&search={encoded}&limit=3&namespace=0&format=json"
-            req = urllib.request.Request(search_url, headers={"User-Agent": "DSAIAgent/1.0"})
-            with urllib.request.urlopen(req, timeout=4) as resp:
-                data = json.loads(resp.read().decode())
-                titles = data[1] if len(data) > 1 else []
-                descriptions = data[2] if len(data) > 2 else []
-                urls = data[3] if len(data) > 3 else []
-                results = [{"title": t, "snippet": d, "url": u} for t, d, u in zip(titles, descriptions, urls)]
-                if titles:
-                    try:
-                        sum_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(titles[0])}"
-                        with urllib.request.urlopen(urllib.request.Request(sum_url, headers={"User-Agent": "DSAIAgent/1.0"}), timeout=3) as s_resp:
-                            s_data = json.loads(s_resp.read().decode())
-                            if "extract" in s_data:
-                                results[0]["extract"] = s_data["extract"]
-                    except Exception:
-                        pass
-                elapsed = round((time.perf_counter() - t0) * 1000, 2)
-                return {"results": results, "query": query, "execution_time_ms": elapsed}
-        except Exception as e:
-            elapsed = round((time.perf_counter() - t0) * 1000, 2)
-            return {"error": str(e), "results": [], "execution_time_ms": elapsed}
+        """Search the web for current factual information via WebSearchTool."""
+        return self.tool_registry.execute("web_search", {"query": query})
 
     def execute_tool(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a tool by name and return result dictionary."""
-        if name == "run_duckdb_sql":
-            sql = args.get("sql", "")
-            return self.duckdb_engine.run_query(sql)
-        elif name == "run_python_code":
-            code = args.get("code", "")
-            return self.python_worker.execute(code)
-        elif name == "web_search":
-            query = args.get("query", "")
-            return self.web_search(query)
-        else:
-            return {"error": f"Unknown tool: {name}"}
+        """Execute a tool by name via the central ToolRegistry."""
+        return self.tool_registry.execute(name, args)
 
     async def stream_query(
         self, query: str, dataset_path: Optional[str] = None
@@ -222,30 +133,29 @@ class ReActAgent:
             }
             return
 
-        # 3. ReAct loop with Google GenAI SDK
-        client = genai.Client(api_key=self.api_key)
+        # 3. ReAct loop with Google GenAI SDK (reusing connection pool)
+        client = get_shared_client(self.api_key)
         contents: List[types.Content] = [
             types.Content(role="user", parts=[types.Part.from_text(text=query)])
         ]
         config = types.GenerateContentConfig(
             temperature=0.0,
-            tools=GEMINI_TOOLS,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+            max_output_tokens=1024,
+            tools=self.tool_registry.get_gemini_tools(),
             system_instruction=system_content,
         )
 
         async def execute(name: str, args: dict) -> dict:
             return self.execute_tool(name, args)
 
-        try:
-            async for event in self.stream_turns(
-                client=client, model=self.model, contents=contents, config=config,
-                max_turns=self.max_turns, execute_tool=execute,
-            ):
-                if event["type"] == "done":
-                    event["metrics"]["total_time_ms"] = round((time.perf_counter() - start_time) * 1000, 2)
-                yield event
-        finally:
-            await client.aio.aclose()
+        async for event in self.stream_turns(
+            client=client, model=self.model, contents=contents, config=config,
+            max_turns=self.max_turns, execute_tool=execute,
+        ):
+            if event["type"] == "done":
+                event["metrics"]["total_time_ms"] = round((time.perf_counter() - start_time) * 1000, 2)
+            yield event
 
     @staticmethod
     async def stream_turns(
@@ -257,20 +167,21 @@ class ReActAgent:
         """Run tool turns followed by a tool-free synthesis if the budget is exhausted."""
         final_answer = []
         start = time.perf_counter()
-        for turn in range(1, max_turns + 2):
+        for turn in range(1, max_turns + 1):
             if is_cancelled and is_cancelled():
                 return
-            synthesis = turn > max_turns
-            turn_config = config.model_copy(update={
-                "tool_config": types.ToolConfig(
-                    function_calling_config=types.FunctionCallingConfig(mode="NONE")
-                ),
-            }) if synthesis else config
+            # Turn 2 is synthesis if a tool was executed in Turn 1
+            synthesis = (turn == max_turns and len(contents) > 1)
             if synthesis:
-                contents.append(types.Content(role="user", parts=[types.Part.from_text(
-                    text="The tool budget is exhausted. Give your final answer using the results already available. "
-                    "Explain any incomplete work or tool errors. Do not request additional tools."
-                )]))
+                turn_config = types.GenerateContentConfig(
+                    temperature=0.0,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                    max_output_tokens=1024,
+                    tools=None,
+                    system_instruction=config.system_instruction,
+                )
+            else:
+                turn_config = config
             label = "Synthesizing analytical findings…" if synthesis else f"Analysis turn {turn} of {max_turns}"
             yield {"type": "status", "content": label}
             calls = []
