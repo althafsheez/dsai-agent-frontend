@@ -337,7 +337,9 @@ export function AgentTrace({
   onOpenChange,
   className,
   onResourceSelect,
+  run,
 }: {
+  run?: AgentRunDto;
   steps: TraceStep[];
   run?: AgentRunDto;
   isStreaming?: boolean;
@@ -408,6 +410,9 @@ export function AgentTrace({
   const totalTime = elapsed !== null && Number.isFinite(elapsed) && elapsed >= 0 ? formatDuration(elapsed) : null;
 
   // Summary for header
+  const toolMs = steps.reduce((total, step) => total + (step.durationMs ?? 0), 0);
+  const totalMs = run?.started_at && run.finished_at ? Date.parse(run.finished_at) - Date.parse(run.started_at) : null;
+  const spaced = (ms: number) => (formatDuration(ms) ?? "").replace(/(\d)(ms|s)$/, "$1 $2");
   const stepLabel = activeStep.label;
   const stepSummary = activeStep.summary || (isCompleted ? `${steps.length} step${steps.length > 1 ? "s" : ""} completed` : "Processing…");
 
@@ -441,6 +446,12 @@ export function AgentTrace({
                 <ReasoningEllipsis />
               </>
             )}
+            {!isStreaming && totalMs !== null && totalMs >= 0 ? (
+              <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">
+                <span>Total time · {spaced(totalMs)}</span>
+                {toolMs > 0 ? <span> · Tool time · {spaced(toolMs)}</span> : null}
+              </span>
+            ) : null}
             {isCompleted && (
               <span className="text-[11px] text-sage font-medium shrink-0 flex items-center gap-1 ml-auto mr-1">
                 <Check className="size-3" />
