@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 
+from agentic.agent.prompts import WORKSPACE_SYSTEM_PROMPT
+from agentic.agent.react_loop import ReActAgent
 from google import genai
 from google.genai import types
 
@@ -126,73 +128,28 @@ class GeminiProvider:
         config = types.GenerateContentConfig(
             temperature=0,
             tools=[types.Tool(function_declarations=declarations)],
-            system_instruction=(
-                "You are a data analysis agent. Use tools when they materially help. "
-                "Never invent tool results. Files may only be read from /home/user/inputs and written under /home/user/outputs. "
-                "Use lookup_data for read-only CSV/Parquet SQL, execute_python for analysis, and generate_visualization for chart files. "
-                "When a DataFrame is a meaningful intermediate or answer table, save it as CSV or Parquet under /home/user/outputs so it can be persisted and previewed. "
-                "When the user asks you to create code, show it in a fenced Markdown code block and also call write_file to save the complete code under /home/user/outputs with the correct extension; the saved file becomes a downloadable Artifact card."
-            ),
+            system_instruction=WORKSPACE_SYSTEM_PROMPT,
             thinking_config=types.ThinkingConfig(thinking_level=effort) if effort else None,
         )
-        try:
-            for step in range(max_steps):
-                if is_cancelled is not None and is_cancelled():
-                    return
-                stream = await self._client.aio.models.generate_content_stream(
-                    model=model_id,
-                    contents=contents,
-                    config=config,
-                )
-                model_parts: list[types.Part] = []
-                calls: list[object] = []
-                seen_call_ids: set[str] = set()
-                received_content = False
-                async for chunk in stream:
-                    if is_cancelled is not None and is_cancelled():
-                        return
-                    if not chunk.candidates or chunk.candidates[0].content is None:
-                        continue
-                    received_content = True
-                    for part in chunk.candidates[0].content.parts or []:
-                        if part.function_call is not None:
-                            call = part.function_call
-                            # Providers may repeat the final function-call part
-                            # in streamed chunks. Execute each call only once.
-                            call_id = str(call.id or f"step-{step + 1}-call-{len(calls) + 1}")
-                            if call_id not in seen_call_ids:
-                                seen_call_ids.add(call_id)
-                                calls.append(call)
-                                model_parts.append(part)
-                            continue
-                        if part.text:
-                            model_parts.append(types.Part.from_text(text=part.text))
-                            yield ProviderEvent("message.delta", {"text": part.text})
-                if not received_content:
-                    raise ProviderError("empty_provider_response", "Gemini returned no response.")
-                if not model_parts:
-                    raise ProviderError("empty_provider_response", "Gemini returned no response.")
-                contents.append(types.Content(role="model", parts=model_parts))
-                if not calls:
-                    return
-                response_parts: list[types.Part] = []
-                for index, call in enumerate(calls):
-                    if is_cancelled is not None and is_cancelled():
-                        return
-                    name = str(call.name or "")
-                    arguments = dict(call.args or {})
-                    tool_call_id = call.id or f"step-{step + 1}-call-{index + 1}"
-                    yield ProviderEvent("tool.started", {"tool_call_id": tool_call_id, "name": name, "arguments": arguments})
-                    result = await execute_tool(name, arguments)
-                    failed = bool(result.get("error")) or result.get("success") is False
-                    yield ProviderEvent(
-                        "tool.failed" if failed else "tool.completed",
-                        {"tool_call_id": tool_call_id, "name": name, "error": result.get("error"), "output": result} if failed else {"tool_call_id": tool_call_id, "name": name, "output": result},
-                    )
-                    response_parts.append(types.Part.from_function_response(name=name, response=result))
-                contents.append(types.Content(role="user", parts=response_parts))
-            raise ProviderError("max_tool_steps", "The agent reached the maximum number of tool steps.")
-        except ProviderError:
-            raise
-        except Exception as exc:
-            raise ProviderError("provider_error", "Gemini tool execution failed.") from exc
+        async for event in ReActAgent.stream_turns(
+            client=self._client, model=model_id, contents=contents, config=config,
+            max_turns=max_steps, execute_tool=execute_tool, is_cancelled=is_cancelled,
+        ):
+            kind = event["type"]
+            if kind == "status":
+                yield ProviderEvent("progress", {"label": event["content"]})
+            elif kind == "delta":
+                yield ProviderEvent("message.delta", {"text": event["content"]})
+            elif kind == "tool_call":
+                yield ProviderEvent("tool.started", {
+                    "tool_call_id": event["tool_call_id"], "name": event["tool"], "arguments": event["arguments"],
+                })
+            elif kind == "tool_result":
+                result = event["result"]
+                data = {"tool_call_id": event["tool_call_id"], "name": event["tool"], "output": result}
+                if result.get("error") or result.get("success") is False:
+                    yield ProviderEvent("tool.failed", {**data, "error": result.get("error")})
+                else:
+                    yield ProviderEvent("tool.completed", data)
+            elif kind == "error":
+                raise ProviderError("provider_error", event["content"])

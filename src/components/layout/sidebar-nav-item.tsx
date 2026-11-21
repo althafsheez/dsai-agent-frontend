@@ -5,8 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { LucideIcon } from "lucide-react";
-import { getChats, getWorkspaces } from "@/lib/api";
+import { LoaderCircle, type LucideIcon } from "lucide-react";
+import { getActivity, getChats, getWorkspaces } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -44,6 +44,13 @@ export function SidebarNavItem({ label, href, icon: Icon, flyout, compact, onNav
     enabled: isWorkspaces,
     staleTime: 10_000,
   });
+  const activityQuery = useQuery({
+    queryKey: ["activity"],
+    queryFn: getActivity,
+    enabled: isRecentAnalyses,
+    refetchInterval: 2000,
+  });
+  const activityByChatId = new Map((activityQuery.data?.items ?? []).map((chat) => [chat.id, chat]));
   const quickItems = isRecentAnalyses
     ? (chatsQuery.data?.items ?? []).filter((chat) => !chat.archived_at && !chat.deleted_at).slice(0, 4).map((chat) => ({ id: chat.id, name: chat.title, href: `/chat/${chat.id}`, updatedAt: chat.updated_at }))
     : isWorkspaces
@@ -105,6 +112,13 @@ export function SidebarNavItem({ label, href, icon: Icon, flyout, compact, onNav
                     onClick={() => { setOpen(false); onNavigate?.(); }}
                     className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 hover:bg-sidebar-accent transition-colors"
                   >
+                    {isRecentAnalyses && activityByChatId.has(item.id) ? (
+                      activityByChatId.get(item.id)?.active_run_status === "running" || activityByChatId.get(item.id)?.active_run_status === "queued" ? (
+                        <LoaderCircle aria-label="Running" className="size-3 shrink-0 animate-spin text-sage" />
+                      ) : (
+                        <span aria-label="Unread" className="size-1.5 shrink-0 rounded-full bg-sage" />
+                      )
+                    ) : null}
                     <span className="min-w-0 flex-1 truncate text-xs text-foreground/90">{item.name}</span>
                     <time dateTime={item.updatedAt} className="shrink-0 text-[10px] text-muted-foreground">
                       {relativeUpdatedAt(item.updatedAt)}

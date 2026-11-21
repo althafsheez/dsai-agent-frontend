@@ -48,4 +48,20 @@ describe("workspaces page", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ name: "Finance Planning", description: "Track forecast accuracy", ai_context: "Track forecast accuracy" });
     expect(fetchMock.mock.calls[2][1]?.body).toBeInstanceOf(FormData);
   });
+
+  it("offers real data source connectors alongside local upload", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ items: [], next_cursor: null }), { headers: { "Content-Type": "application/json" } })));
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("No workspaces yet");
+    await user.click(screen.getByRole("button", { name: "New Workspace" }));
+    const dialog = screen.getByRole("dialog");
+    const connectors = within(dialog).getByRole("group", { name: "Data source connectors" });
+    expect(within(connectors).queryByText("CSV")).not.toBeInTheDocument();
+    for (const name of ["PostgreSQL", "MySQL", "Google BigQuery"]) expect(within(connectors).getByText(name)).toBeVisible();
+    expect(within(dialog).getByLabelText("Browse workspace datasets")).toBeInTheDocument();
+
+    await user.click(within(connectors).getByRole("button", { name: /PostgreSQL/ }));
+    expect(within(dialog).getByRole("status")).toHaveTextContent("PostgreSQL connections are not available yet");
+  });
 });

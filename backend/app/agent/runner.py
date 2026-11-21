@@ -28,7 +28,7 @@ class RunnerEvent:
 
 
 class AgentRunner:
-    """Provider-independent single-agent loop; tool iterations can be added here."""
+    """Adapt provider events to persisted chat steps and apply run controls."""
 
     def __init__(self, provider: LLMProvider, tools: ToolRegistry | None = None, max_steps: int = 8):
         self._provider = provider
