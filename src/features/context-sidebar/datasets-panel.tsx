@@ -13,6 +13,7 @@ interface DatasetsPanelProps {
   workspaceId: string | null;
   onFileSelect: (dataset: DatasetResource) => void;
   onLibraryToggle?: (dataset: DatasetResource) => void;
+  searchQuery?: string;
 }
 
 interface DatasetGroupProps {
@@ -20,9 +21,10 @@ interface DatasetGroupProps {
   datasets: DatasetResource[];
   onFileSelect: (dataset: DatasetResource) => void;
   onLibraryToggle?: (dataset: DatasetResource) => void;
+  searchQuery?: string;
 }
 
-function DatasetGroup({ label, datasets, onFileSelect, onLibraryToggle }: DatasetGroupProps) {
+function DatasetGroup({ label, datasets, onFileSelect, onLibraryToggle, searchQuery }: DatasetGroupProps) {
   const [open, setOpen] = useState(true);
 
   return (
@@ -61,21 +63,31 @@ function DatasetGroup({ label, datasets, onFileSelect, onLibraryToggle }: Datase
             })}
           </ul>
         ) : (
-          <p className="px-9 pb-3 text-[11px] text-muted-foreground">No datasets in this scope.</p>
+          <p className="px-9 pb-3 text-[11px] text-muted-foreground">
+            {searchQuery ? "No matching datasets in this section." : "No datasets in this scope."}
+          </p>
         )}
       </Collapsible.Content>
     </Collapsible.Root>
   );
 }
 
-export function DatasetsPanel({ datasets, onFileSelect, onLibraryToggle }: DatasetsPanelProps) {
+export function DatasetsPanel({ datasets, onFileSelect, onLibraryToggle, searchQuery }: DatasetsPanelProps) {
   const inputDatasets = datasets.filter((dataset) => (dataset.source ?? (dataset.origin === "generated" ? "output" : "input")) === "input");
   const outputDatasets = datasets.filter((dataset) => (dataset.source ?? (dataset.origin === "generated" ? "output" : "input")) === "output");
 
   return (
     <div id="datasets-panel" role="tabpanel" aria-label="Datasets" className="h-full min-h-0 overflow-y-auto overscroll-contain">
-      <DatasetGroup label="Input" datasets={inputDatasets} onFileSelect={onFileSelect} onLibraryToggle={onLibraryToggle} />
-      <DatasetGroup label="Output" datasets={outputDatasets} onFileSelect={onFileSelect} onLibraryToggle={onLibraryToggle} />
+      {searchQuery && datasets.length === 0 ? (
+        <p className="px-4 py-6 text-center text-xs text-muted-foreground">
+          No datasets matching &ldquo;{searchQuery}&rdquo;
+        </p>
+      ) : (
+        <>
+          <DatasetGroup label="Input" datasets={inputDatasets} onFileSelect={onFileSelect} onLibraryToggle={onLibraryToggle} searchQuery={searchQuery} />
+          <DatasetGroup label="Output" datasets={outputDatasets} onFileSelect={onFileSelect} onLibraryToggle={onLibraryToggle} searchQuery={searchQuery} />
+        </>
+      )}
     </div>
   );
 }
