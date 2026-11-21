@@ -220,23 +220,16 @@ function MessageRenderer({
   }
 }
 
-export function AssistantMessage({ message, run, onRetry, onFileSelect, onFileDownload }: { message: AssistantMessageType; run?: AgentRunDto; onRetry?: (message: AssistantMessageType) => void; onFileSelect?: (id: string) => void; onFileDownload?: (id: string) => void }) {
-  return <div className="flex gap-3">
-    <div className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md border bg-surface text-sage"><Sparkles className="size-3.5" /></div>
-    <div className="min-w-0 max-w-3xl flex-1">
-      {message.trace?.length ? <AgentTrace steps={message.trace} run={run} onResourceSelect={onFileSelect} /> : null}
-      <div aria-live={message.status === "running" ? "polite" : undefined}>{message.blocks.map((block, index) => <MessageRenderer key={`${message.id}-${index}`} block={block} onFileSelect={onFileSelect} onFileDownload={onFileDownload} />)}</div>
-      {message.status === "running" && <span className="mt-2 inline-block h-4 w-1 animate-pulse rounded bg-sage" aria-label="Response streaming" />}
-      {(message.status === "failed" || message.status === "interrupted") && <div role="alert" className="mt-4 flex items-start gap-3 rounded-lg border border-red-400/30 bg-red-400/5 p-3"><AlertTriangle className="mt-0.5 size-4 text-red-400" /><div className="flex-1"><p className="text-xs font-medium">{message.status === "failed" ? "The Gemini response failed" : "The Gemini response was interrupted"}</p><p className="mt-1 text-[11px] text-muted-foreground">Any completed output remains saved in this conversation.</p></div>{onRetry && <Button variant="outline" size="sm" onClick={() => onRetry(message)}><RotateCcw />Retry</Button>}</div>}
-      <time dateTime={message.createdAt} className="mt-3 block text-[10px] text-muted-foreground">{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
 export function AssistantMessage({
   message,
+  run,
   availableResources,
   onRetry,
   onFileSelect,
   onFileDownload,
 }: {
   message: AssistantMessageType;
+  run?: AgentRunDto;
   availableResources?: DataReferenceResource[];
   onRetry?: (message: AssistantMessageType) => void;
   onFileSelect?: (id: string) => void;
@@ -274,7 +267,7 @@ export function AssistantMessage({
       </div>
       <div className="min-w-0 max-w-3xl flex-1">
         {message.trace?.length ? (
-          <AgentTrace steps={message.trace} onResourceSelect={onFileSelect} />
+          <AgentTrace steps={message.trace} run={run} isStreaming={isRunning} onResourceSelect={onFileSelect} />
         ) : null}
 
         <div aria-live={isRunning ? "polite" : undefined} className="space-y-3">
