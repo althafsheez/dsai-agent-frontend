@@ -319,7 +319,15 @@ export function ChatPage({ chatId }: { chatId: string }) {
   }, [runsQuery.data?.items]);
 
   useEffect(() => {
-    if (traceHistoryQuery.data) setTraceEvents(traceHistoryQuery.data);
+    const history = traceHistoryQuery.data;
+    if (!history) return;
+    // Merge instead of replace: a history fetch that started mid-run must not
+    // wipe live events that arrived after it (that froze the trace after steer).
+    setTraceEvents((current) => {
+      const seen = new Set(current.map((event) => event.event_id));
+      const missing = history.filter((event) => !seen.has(event.event_id));
+      return missing.length ? [...current, ...missing] : current;
+    });
   }, [traceHistoryQuery.data]);
 
   useEffect(() => {
