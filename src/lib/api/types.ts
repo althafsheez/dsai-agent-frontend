@@ -91,6 +91,7 @@ export interface MessageDto {
 
 export interface QuickMessageDto {
   id: string;
+  thread_id: string;
   context_type: "chat" | "workspace";
   context_id: string;
   role: "user" | "assistant";

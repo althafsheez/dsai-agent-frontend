@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp, Database, Expand, FileText, LoaderCircle, Maximize2, Minimize2, Minus, Shrink, Sparkles, X } from "lucide-react";
+import { ArrowUp, Database, Expand, FileText, LoaderCircle, Maximize2, Minimize2, Minus, Plus, Shrink, Sparkles, X } from "lucide-react";
 import { FormEvent, useEffect, useId, useRef, useState } from "react";
 import { useFloatingFrame } from "./use-floating-frame";
 import { getModels, getQuickAssistantMessages, streamQuickAssistantMessage, type ExecutionEvent } from "@/lib/api";
@@ -48,6 +48,8 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
   const [sentThisSession, setSentThisSession] = useState(false);
   const [selectedModel, setSelectedModel] = useState<{ id: string; default_effort: string | null } | null>(null);
   const [unseenAnswer, setUnseenAnswer] = useState(false);
+  const [tabs, setTabs] = useState<string[]>(["main"]);
+  const [activeTab, setActiveTab] = useState("main");
   const minimizedRef = useRef(minimized);
   const controller = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -59,7 +61,9 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
     setLoadingHistory(true);
     void Promise.all([getQuickAssistantMessages("chat", chatId), getModels()]).then(([history, modelData]) => {
       if (!active) return;
-      setMessages(history.items.map((message) => ({ id: message.id, role: message.role, content: message.content, status: message.status })));
+      const threads = ["main", ...new Set(history.items.map((message) => message.thread_id).filter((id) => id !== "main"))];
+      setTabs(threads);
+      setMessages(history.items.filter((message) => message.thread_id === "main").map((message) => ({ id: message.id, role: message.role, content: message.content, status: message.status })));
       const models = modelData.models;
       setSelectedModel(models.find((model) => model.id === modelData.default_model_id) ?? models[0] ?? null);
     }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Quick Assistant is unavailable."); }).finally(() => { if (active) setLoadingHistory(false); });
@@ -89,6 +93,30 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [minimized, onMinimize]);
+
+  async function switchTab(threadId: string, isNew = false) {
+    if (running || threadId === activeTab) return;
+    setActiveTab(threadId);
+    setError(null);
+    setDraft("");
+    if (isNew) { setMessages([]); return; }
+    setLoadingHistory(true);
+    try {
+      const history = await getQuickAssistantMessages("chat", chatId, threadId);
+      setMessages(history.items.map((message) => ({ id: message.id, role: message.role, content: message.content, status: message.status })));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load this conversation.");
+    } finally {
+      setLoadingHistory(false);
+    }
+  }
+
+  function addTab() {
+    if (running) return;
+    const threadId = `tab-${crypto.randomUUID().slice(0, 8)}`;
+    setTabs((current) => [...current, threadId]);
+    void switchTab(threadId, true);
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -130,6 +158,7 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
         effort: selectedModel.default_effort ?? undefined,
         client_request_id: requestId,
         context_until_message_id: snapshotMessageId ?? undefined,
+        thread_id: activeTab,
       }, (event: ExecutionEvent) => {
         const messageId = typeof event.data.message_id === "string" ? event.data.message_id : null;
         if (event.type === "message.created" && messageId) { assistantId = messageId; setMessages((current) => current.map((message) => message.id === temporaryAssistantId ? { ...message, id: messageId } : message)); }
@@ -194,6 +223,16 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
           <X className="size-4" />
         </button>
       </header>
+      <div role="tablist" aria-label="Quick Assistant conversations" className="flex shrink-0 items-center gap-1 overflow-x-auto border-b px-3 py-1.5 [scrollbar-width:none]">
+        {tabs.map((threadId, index) => (
+          <button key={threadId} type="button" role="tab" aria-selected={threadId === activeTab} disabled={running && threadId !== activeTab} onClick={() => void switchTab(threadId)} className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50 ${threadId === activeTab ? "bg-raised text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+            Chat {index + 1}
+          </button>
+        ))}
+        <button type="button" onClick={addTab} disabled={running} aria-label="New Quick Assistant conversation" title="New conversation" className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40">
+          <Plus className="size-3.5" />
+        </button>
+      </div>
       {resources.length ? (
         <div className="flex shrink-0 gap-1.5 overflow-x-auto px-4 pt-2 [scrollbar-width:none]" aria-label="Available context files">
           {resources.slice(0, 4).map((resource) => (
