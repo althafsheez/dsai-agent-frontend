@@ -10,6 +10,7 @@ import { ChartBlock } from "./chart-block";
 import { CodeBlock } from "./code-block";
 import { FileBlock } from "./file-block";
 import { TableBlock } from "./table-block";
+import { parseMarkdownTable } from "../markdown-table";
 import { renderRichText, type DataReferenceResource } from "./data-reference";
 
 function StreamingCursor() {
@@ -50,6 +51,8 @@ function MarkdownText({
         const isLastParagraph = isLast && index === paragraphs.length - 1;
         const cursor = isStreaming && isLastParagraph ? <StreamingCursor /> : null;
 
+        const table = parseMarkdownTable(paragraph);
+        if (table) return <TableBlock key={index} columns={table.columns} rows={table.rows} />;
         if (paragraph.startsWith("## ")) {
           return (
             <h2 key={index} className="pt-1 text-base font-medium tracking-tight text-foreground">
