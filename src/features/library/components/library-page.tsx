@@ -4,11 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3,
+  ArrowRight,
   Bookmark,
   Check,
   ChevronDown,
   ChevronLeft,
-  ChevronRight,
   Code2,
   Database,
   Download,
@@ -53,14 +53,9 @@ function ResourceIcon({ item }: { item: LibraryResource }) {
 type LibraryView = "grid" | "list";
 type LibraryFolder = { id: string; name: string; items: LibraryResource[] };
 
-// Workspaces with more saved items than this get their own folder; smaller ones stay inline to avoid one-file folders.
-const FOLDER_MIN_ITEMS = 4;
-
-function folderSummary(items: LibraryResource[]) {
-  const counts = new Map<string, number>();
-  for (const item of items) counts.set(categoryLabel(item.library_category), (counts.get(categoryLabel(item.library_category)) ?? 0) + 1);
-  return [...counts].map(([label, count]) => `${count} ${label.toLowerCase()}${count === 1 ? "" : "s"}`).join(" · ");
-}
+const folderCategoryColors: Record<LibraryResource["library_category"], string> = {
+  dataset: "bg-blue-400", visual: "bg-emerald-400", report: "bg-amber-400", code: "bg-violet-400", other: "bg-slate-400",
+};
 type Ownership = "all" | "mine" | "shared";
 
 const OWNERSHIP: Array<{ id: Ownership; label: string }> = [
@@ -367,11 +362,9 @@ export function LibraryPage() {
       folder.items.push(item);
       byWorkspace.set(item.workspace_id, folder);
     }
-    const grouped = [...byWorkspace.values()].filter((folder) => folder.items.length >= FOLDER_MIN_ITEMS);
-    const groupedIds = new Set(grouped.map((folder) => folder.id));
     return {
-      folders: grouped.sort((a, b) => a.name.localeCompare(b.name)),
-      looseItems: items.filter((item) => !item.workspace_id || !groupedIds.has(item.workspace_id)),
+      folders: [...byWorkspace.values()].sort((a, b) => a.name.localeCompare(b.name)),
+      looseItems: items.filter((item) => !item.workspace_id),
     };
   }, [filter, items, query]);
   const openFolder = folders.find((folder) => folder.id === openFolderId) ?? null;
@@ -496,35 +489,46 @@ export function LibraryPage() {
               {folders.length ? (
                 <div className="mt-6">
                   <h2 className="mb-3 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Workspace folders</h2>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    {folders.map((folder) => (
-                      <div key={folder.id} className="group relative">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {folders.map((folder) => {
+                      const counts = Object.entries(folderCategoryColors).map(([category, color]) => ({
+                        category: category as LibraryResource["library_category"],
+                        color,
+                        count: folder.items.filter((item) => item.library_category === category).length,
+                      })).filter(({ count }) => count > 0);
+                      return (
+                      <div key={folder.id} className="group relative pt-3">
                       <button
                         type="button"
                         onClick={() => setOpenFolderId(folder.id)}
                         aria-label={`Open ${folder.name} folder`}
-                        className="flex w-full items-center gap-3 rounded-xl border bg-surface/50 p-3 pr-12 text-left transition-[border-color,background-color,transform] duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:bg-surface"
+                        className="relative flex min-h-48 w-full flex-col items-start rounded-xl rounded-tl-none border border-border-strong bg-surface px-4 pb-4 pt-5 text-left transition-colors hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
-                        <span className="relative grid size-11 shrink-0 place-items-center rounded-lg border bg-raised text-sage transition-colors group-hover:text-foreground">
-                          <Folder className="size-5" strokeWidth={1.6} />
+                        <span aria-hidden="true" className="absolute -top-3 left-[-1px] h-3 w-16 rounded-t-xl border border-b-0 border-border-strong bg-surface transition-colors group-hover:bg-raised" />
+                        <span className="block max-w-full truncate pr-8 text-sm font-semibold text-foreground">{folder.name}</span>
+                        <span className="mt-1 text-[11px] text-muted-foreground">{folder.items.length} {folder.items.length === 1 ? "file" : "files"}</span>
+                        <span aria-hidden="true" className="mt-4 flex h-1 w-full gap-0.5 overflow-hidden rounded-full">
+                          {counts.map(({ category, color, count }) => <span key={category} className={color} style={{ flex: count }} />)}
                         </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-xs font-medium text-foreground">{folder.name}</span>
-                          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{folderSummary(folder.items)}</span>
+                        <span className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+                          {counts.map(({ category, count }) => <span key={category}>{count} {categoryLabel(category).toLowerCase()}{count === 1 ? "" : "s"}</span>)}
                         </span>
-                        <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                        <span className="mt-auto flex w-full items-center justify-between gap-2 pt-5 text-[11px] text-muted-foreground">
+                          <span className="flex items-center gap-1.5"><Database aria-hidden="true" className="size-3.5" />{formatBytes(folder.items.reduce((total, item) => total + item.size_bytes, 0))}</span>
+                          <span aria-hidden="true" className="grid size-8 place-items-center rounded-lg border bg-raised transition-colors group-hover:text-foreground"><ArrowRight className="size-4" /></span>
+                        </span>
                       </button>
                       <button
                         type="button"
                         onClick={() => setSharingFolder(folder)}
                         aria-label={`Share ${folder.name} folder`}
                         title="Share folder"
-                        className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground opacity-100 transition-opacity hover:bg-raised hover:text-foreground sm:opacity-0 sm:focus-visible:opacity-100 sm:group-hover:opacity-100"
+                        className="absolute right-2 top-5 grid size-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-raised hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         <Share2 className="size-3.5" />
                       </button>
                       </div>
-                    ))}
+                    ); })}
                   </div>
                 </div>
               ) : null}

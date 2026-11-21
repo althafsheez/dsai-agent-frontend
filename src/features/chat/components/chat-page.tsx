@@ -822,23 +822,23 @@ export function ChatPage({ chatId }: { chatId: string }) {
     }
   }
 
-  function selectFile(file: ContextFile) {
+  const selectFile = useCallback((file: ContextFile) => {
     setSelectedFile(file);
     setPreviewExpanded(false);
     setPanelOpen(true);
-  }
+  }, []);
 
-  function selectFileById(id: string) {
+  const selectFileById = useCallback((id: string) => {
     const resource = resources.get(id);
     if (resource) selectFile(resource);
-  }
+  }, [resources, selectFile]);
 
-  function downloadFileById(id: string) {
+  const downloadFileById = useCallback((id: string) => {
     const resource = resources.get(id);
     if (resource) void downloadResource(resource.download_url, resource.name);
-  }
+  }, [resources]);
 
-  async function toggleResourceLibrary(file: ContextFile) {
+  const toggleResourceLibrary = useCallback(async (file: ContextFile) => {
     try {
       if (file.in_library) await removeResourceFromLibrary(file.id);
       else await addResourceToLibrary(file.id);
@@ -850,7 +850,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not update the Library.");
     }
-  }
+  }, [chatId, queryClient]);
 
   function togglePanel() {
     setPanelOpen((open) => {
@@ -1141,6 +1141,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
               runs={runsQuery.data?.items}
               onFileSelect={selectFileById}
               onFileDownload={downloadFileById}
+              resources={resources}
+              onLibraryToggle={toggleResourceLibrary}
               registerSection={conversationScroll.registerSection}
             />
           )}
