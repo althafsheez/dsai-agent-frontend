@@ -286,3 +286,102 @@ async def test_unread_chat_appears_in_activity_and_opening_marks_it_read(
     assert opened.status_code == 204
     assert (await client.get(f"/api/chats/{chat_id}", headers=demo_headers)).json()["is_unread"] is False
     assert (await client.get("/api/chats/activity/list", headers=demo_headers)).json()["items"] == []
+
+
+async def test_chat_and_workspace_pinning_does_not_reorder(
+    client: AsyncClient, demo_headers: dict[str, str]
+) -> None:
+    chat_id = (await create_chat(client, demo_headers))["chat"]["id"]
+    before = (await client.get(f"/api/chats/{chat_id}", headers=demo_headers)).json()
+
+    pinned = await client.patch(f"/api/chats/{chat_id}", headers=demo_headers, json={"pinned": True})
+    assert pinned.status_code == 200
+    assert pinned.json()["pinned_at"] is not None
+    assert pinned.json()["updated_at"] == before["updated_at"]
+
+    unpinned = await client.patch(f"/api/chats/{chat_id}", headers=demo_headers, json={"pinned": False})
+    assert unpinned.json()["pinned_at"] is None
+
+    workspace = await client.post("/api/workspaces", headers=demo_headers, json={"name": "Pinned workspace"})
+    workspace_id = workspace.json()["id"]
+    pinned_workspace = await client.patch(
+        f"/api/workspaces/{workspace_id}", headers=demo_headers, json={"pinned": True}
+    )
+    assert pinned_workspace.status_code == 200
+    assert pinned_workspace.json()["pinned_at"] is not None
+    assert pinned_workspace.json()["updated_at"] == workspace.json()["updated_at"]
+
+
+async def test_library_items_report_their_workspace(client: AsyncClient, demo_headers: dict[str, str]) -> None:
+    workspace = (await client.post("/api/workspaces", headers=demo_headers, json={"name": "Sales"})).json()
+    chat = await client.post("/api/chats", headers=demo_headers, json={
+        "content": "Analyze", "client_request_id": "library-workspace-chat", "workspace_id": workspace["id"],
+    })
+    standalone = await create_chat(client, demo_headers, "library-standalone")
+
+    async def upload(scope_type: str, scope_id: str, name: str) -> str:
+        response = await client.post("/api/resources/upload", headers=demo_headers, data={
+            "scope_type": scope_type, "scope_id": scope_id, "client_upload_id": name,
+        }, files={"file": (name, b"value\n1\n", "text/csv")})
+        assert response.status_code == 201, response.text
+        resource_id = response.json()["resource"]["id"]
+        assert (await client.post(f"/api/resources/{resource_id}/library", headers=demo_headers)).status_code == 201
+        return resource_id
+
+    await upload("workspace", workspace["id"], "direct.csv")
+    await upload("chat", chat.json()["chat"]["id"], "via-chat.csv")
+    await upload("chat", standalone["chat"]["id"], "loose.csv")
+
+    items = {item["name"]: item for item in (await client.get("/api/library", headers=demo_headers)).json()["items"]}
+    assert items["direct.csv"]["workspace_name"] == "Sales"
+    assert items["via-chat.csv"]["workspace_id"] == workspace["id"]
+    assert items["loose.csv"]["workspace_id"] is None
+
+
+async def test_workspace_invites_are_persisted_and_updatable(client: AsyncClient, demo_headers: dict[str, str]) -> None:
+    workspace = (await client.post("/api/workspaces", headers=demo_headers, json={"name": "Shared"})).json()
+    base = f"/api/workspaces/{workspace['id']}/invites"
+
+    created = await client.post(base, headers=demo_headers, json={"email": "Ana@Example.com", "role": "editor"})
+    assert created.status_code == 201, created.text
+    assert created.json()["email"] == "ana@example.com"
+    again = await client.post(base, headers=demo_headers, json={"email": "ana@example.com", "role": "viewer"})
+    assert again.json()["id"] == created.json()["id"]
+    assert again.json()["role"] == "viewer"
+    assert (await client.post(base, headers=demo_headers, json={"email": "not-an-email"})).status_code == 422
+
+    invite_id = created.json()["id"]
+    patched = await client.patch(f"{base}/{invite_id}", headers=demo_headers, json={"role": "editor"})
+    assert patched.json()["role"] == "editor"
+    assert [item["email"] for item in (await client.get(base, headers=demo_headers)).json()["items"]] == ["ana@example.com"]
+
+    assert (await client.delete(f"{base}/{invite_id}", headers=demo_headers)).status_code == 204
+    assert (await client.get(base, headers=demo_headers)).json()["items"] == []
+
+
+async def test_workspace_dataset_zip(client: AsyncClient, demo_headers: dict[str, str]) -> None:
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    workspace = (await client.post("/api/workspaces", headers=demo_headers, json={"name": "Reports"})).json()
+    scope = workspace["id"]
+    url = f"/api/workspaces/{scope}/datasets/download"
+    assert (await client.get(url, headers=demo_headers)).status_code == 404
+    chat = (await client.post("/api/chats", headers=demo_headers, json={
+        "workspace_id": scope, "content": "Analyze", "client_request_id": "zip-chat",
+    })).json()["chat"]
+    for index, (scope_type, scope_id, name) in enumerate([
+        ("workspace", scope, "iris.csv"), ("workspace", scope, "iris.csv"),
+        ("chat", chat["id"], "private.csv"), ("workspace", scope, "notes.txt"),
+    ]):
+        response = await client.post("/api/resources/upload", headers=demo_headers, data={
+            "scope_type": scope_type, "scope_id": scope_id, "client_upload_id": str(index),
+        }, files={"file": (name, f"value\n{index}\n".encode(), "text/plain")})
+        assert response.status_code == 201
+
+    assert (await client.get(url, headers={"X-Demo-User-Id": "user-shared"})).status_code == 403
+    response = await client.get(url, headers=demo_headers)
+    assert response.headers["content-type"] == "application/zip"
+    with ZipFile(BytesIO(response.content)) as archive:
+        assert sorted(archive.namelist()) == ["iris (2).csv", "iris.csv"]
+        assert {archive.read(name) for name in archive.namelist()} == {b"value\n0\n", b"value\n1\n"}

@@ -1,29 +1,14 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
-import {
-  AlertCircle,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  ChevronUp,
-  Circle,
-  Code2,
-  Copy,
-  Database,
-  FileText,
-  LoaderCircle,
-  RotateCcw,
-  Sparkles,
-  Terminal,
-  X,
-} from "lucide-react";
+import type { AgentRunDto } from "@/lib/api";
+import React, { useEffect, useMemo, useState } from "react";
+import { AlertCircle, Check, ChevronDown, ChevronRight, ChevronUp, Circle, Code2, Copy, Database, FileText, LoaderCircle, RotateCcw, Sparkles, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+} from "@radix-ui/react-collapsible";
 import type { TraceResourceReference, TraceStep } from "../types";
 
 /**
@@ -53,8 +38,8 @@ export function ReasoningEllipsis() {
  */
 function formatDuration(ms?: number): string | null {
   if (ms === undefined || ms === null) return null;
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 1000) return `${ms} ms`;
+  return `${(ms / 1000).toFixed(1)} s`;
 }
 
 /**
@@ -344,14 +329,9 @@ function TimelineStepItem({
   );
 }
 
-/**
- * Main Reasoning Trace Component
- * - Collapsible timeline organizing agent thoughts, tool executions, and data flows.
- * - Auto-expands while streaming/running, auto-collapses on complete.
- * - Deep-linking listener to expand and scroll to referenced tables or artifacts.
- */
-export const AgentTrace = React.memo(function AgentTrace({
+export function AgentTrace({
   steps,
+  run,
   isStreaming = false,
   isOpen: controlledIsOpen,
   onOpenChange,
@@ -359,13 +339,14 @@ export const AgentTrace = React.memo(function AgentTrace({
   onResourceSelect,
 }: {
   steps: TraceStep[];
+  run?: AgentRunDto;
   isStreaming?: boolean;
   isOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
   className?: string;
   onResourceSelect?: (id: string) => void;
 }) {
-  const [localIsOpen, setLocalIsOpen] = useState(isStreaming);
+  const [localIsOpen, setLocalIsOpen] = useState(isStreaming || Boolean(run));
   const isControlled = controlledIsOpen !== undefined;
   const isOpen = isControlled ? controlledIsOpen : localIsOpen;
 
@@ -423,6 +404,8 @@ export const AgentTrace = React.memo(function AgentTrace({
 
   const isCompleted = !isStreaming && steps.every((s) => s.status === "completed");
   const hasFailed = !isStreaming && steps.some((s) => s.status === "failed");
+  const elapsed = run?.started_at && run.finished_at ? Date.parse(run.finished_at) - Date.parse(run.started_at) : null;
+  const totalTime = elapsed !== null && Number.isFinite(elapsed) && elapsed >= 0 ? formatDuration(elapsed) : null;
 
   // Summary for header
   const stepLabel = activeStep.label;
@@ -464,6 +447,7 @@ export const AgentTrace = React.memo(function AgentTrace({
                 Completed
               </span>
             )}
+            {totalTime && <span className="shrink-0 text-[10px] text-muted-foreground">Total time · {totalTime}</span>}
             {hasFailed && (
               <span className="text-[11px] text-red-400 font-medium shrink-0 flex items-center gap-1 ml-auto mr-1">
                 <X className="size-3" />
@@ -502,6 +486,6 @@ export const AgentTrace = React.memo(function AgentTrace({
       </CollapsibleContent>
     </Collapsible>
   );
-});
+}
 
 export const AgentThoughtGroupRenderer = AgentTrace;

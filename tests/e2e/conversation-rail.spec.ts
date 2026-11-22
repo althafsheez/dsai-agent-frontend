@@ -60,7 +60,7 @@ test(`rail follows Send through persistence and streaming (scroll away: ${scroll
   const viewport = page.getByLabel("Conversation messages", { exact: true });
   const active = rail.locator('[aria-current="location"]');
   await expect(active).toHaveAccessibleName("Go to question: Question 29");
-  await page.getByRole("textbox", { name: "Ask anything about your data" }).fill("Newest question");
+  await page.getByRole("combobox", { name: "Ask anything about your data" }).fill("Newest question");
   await page.getByRole("button", { name: "Send message", exact: true }).click();
   await expect(active).toHaveAccessibleName("Go to question: Newest question");
   const bottomGap = () => viewport.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight);

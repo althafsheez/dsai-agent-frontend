@@ -9,7 +9,6 @@ import {
   FileSpreadsheet,
   Filter,
   GraduationCap,
-  HardDrive,
   Layers3,
   Mail,
   NotebookTabs,
@@ -18,13 +17,13 @@ import {
   Plug,
   Plus,
   Search,
-  Snowflake,
   Sparkles,
   Wrench,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { dataSourceConnector } from "../catalog";
 
 type ConnectorCategory = "all" | "skill" | "data" | "app";
 type Sort = "popular" | "name";
@@ -41,13 +40,13 @@ interface ConnectorPreview {
 
 const connectorPreviews: ConnectorPreview[] = [
   { id: "data-cleaning", name: "Data Cleaning", description: "Clean, transform, and prepare messy datasets.", category: "skill", group: "popular", icon: Sparkles, rank: 1 },
-  { id: "snowflake", name: "Snowflake", description: "Connect to your Snowflake warehouse and run analysis.", category: "data", group: "popular", icon: Snowflake, rank: 2 },
+  { ...dataSourceConnector("snowflake"), category: "data", group: "popular", rank: 2 },
   { id: "gmail", name: "Gmail", description: "Read emails and prepare automated reports.", category: "app", group: "popular", icon: Mail, rank: 3 },
-  { id: "postgresql", name: "PostgreSQL", description: "Query and analyze data from your database.", category: "data", group: "popular", icon: Database, rank: 4 },
+  { ...dataSourceConnector("postgresql"), category: "data", group: "popular", rank: 4 },
   { id: "notion", name: "Notion", description: "Create reports and manage documentation.", category: "app", group: "popular", icon: NotebookTabs, rank: 5 },
   { id: "jira", name: "Jira", description: "Turn insights into tasks and track issues.", category: "app", group: "popular", icon: PanelsTopLeft, rank: 6 },
   { id: "data-visualization", name: "Data Visualization", description: "Create charts and interactive visuals from your data.", category: "skill", group: "yours", icon: BarChart3, rank: 7 },
-  { id: "google-drive", name: "Google Drive", description: "Access and analyze files stored in Drive.", category: "data", group: "yours", icon: HardDrive, rank: 8 },
+  { ...dataSourceConnector("google-drive"), category: "data", group: "yours", rank: 8 },
 ];
 
 const tabs: Array<{ value: ConnectorCategory; label: string; icon: typeof Plug }> = [
