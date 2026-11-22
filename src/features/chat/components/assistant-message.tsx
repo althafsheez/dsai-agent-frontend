@@ -22,6 +22,55 @@ function StreamingCursor() {
   );
 }
 
+export function cleanLatexMath(text: string): string {
+  if (!text) return text;
+  return text
+    // 1. Block math $$...$$ and \[...\]
+    .replace(/\$\$([^\$]+)\$\$/g, "$1")
+    .replace(/\\\[([\s\S]*?)\\\]/g, "$1")
+    // 2. Un-nest text macros: \text{...}, \mathrm{...}, \operatorname{...}
+    .replace(/\\(?:text|mathrm|operatorname)\{([^{}]+)\}/g, "$1")
+    .replace(/\\(?:text|mathrm|operatorname)\{([^{}]+)\}/g, "$1")
+    // 3. Bold macros: \mathbf{...}, \textbf{...} -> **...**
+    .replace(/\\(?:mathbf|textbf)\{([^{}]+)\}/g, "**$1**")
+    .replace(/\\(?:mathbf|textbf)\{([^{}]+)\}/g, "**$1**")
+    // 4. Italic macros: \mathit{...}, \textit{...} -> *...*
+    .replace(/\\(?:mathit|textit)\{([^{}]+)\}/g, "*$1*")
+    // 5. Fractions: \frac{a}{b} -> (a / b)
+    .replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, "($1 / $2)")
+    .replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, "($1 / $2)")
+    // 6. Common operators to clean Unicode
+    .replace(/\\times\b/g, "×")
+    .replace(/\\cdot\b/g, "·")
+    .replace(/\\div\b/g, "÷")
+    .replace(/\\pm\b/g, "±")
+    .replace(/\\approx\b/g, "≈")
+    .replace(/\\neq\b/g, "≠")
+    .replace(/\\(?:leq|le)\b/g, "≤")
+    .replace(/\\(?:geq|ge)\b/g, "≥")
+    .replace(/\\(?:dots|cdots|ldots)\b/g, "...")
+    .replace(/\\%/g, "%")
+    .replace(/\\_/g, "_")
+    .replace(/\\alpha\b/g, "α")
+    .replace(/\\beta\b/g, "β")
+    .replace(/\\mu\b/g, "μ")
+    .replace(/\\sigma\b/g, "σ")
+    .replace(/\\sum\b/g, "Σ")
+    // 7. Inline math \(...\)
+    .replace(/\\\(([\s\S]*?)\\\)/g, "$1")
+    // 8. Dollar-enclosed math $...$
+    .replace(/\$([^\$\n]{1,200}?)\$/g, (match, inner) => {
+      const trimmed = inner.trim();
+      if (/^\d+(?:,\d{3})*(?:\.\d+)?(?:[kKmMbBtT]|\b)$/.test(trimmed)) {
+        return match;
+      }
+      if (/[=×·÷±≈≠≤≥%_^\(\)\+\-\*\/]|\b(?:Rise|Share|Rate|Total|Mean|Median|Churn|Score|Count)\b/i.test(trimmed)) {
+        return trimmed;
+      }
+      return match;
+    });
+}
+
 function MarkdownText({
   content,
   isStreaming,
@@ -35,7 +84,8 @@ function MarkdownText({
   availableResources?: DataReferenceResource[];
   onFileSelect?: (id: string) => void;
 }) {
-  const paragraphs = content.split("\n\n").filter(Boolean);
+  const cleaned = cleanLatexMath(content);
+  const paragraphs = cleaned.split("\n\n").filter(Boolean);
 
   if (!paragraphs.length) {
     if (isStreaming && isLast) {
@@ -50,6 +100,14 @@ function MarkdownText({
         const isLastParagraph = isLast && index === paragraphs.length - 1;
         const cursor = isStreaming && isLastParagraph ? <StreamingCursor /> : null;
 
+        if (paragraph.startsWith("### ")) {
+          return (
+            <h3 key={index} className="pt-1 text-sm font-semibold tracking-tight text-foreground">
+              {renderRichText(paragraph.slice(4), availableResources, onFileSelect)}
+              {cursor}
+            </h3>
+          );
+        }
         if (paragraph.startsWith("## ")) {
           return (
             <h2 key={index} className="pt-1 text-base font-medium tracking-tight text-foreground">
@@ -58,13 +116,13 @@ function MarkdownText({
             </h2>
           );
         }
-        if (paragraph.startsWith("- ")) {
+        if (paragraph.startsWith("- ") || paragraph.startsWith("* ")) {
           const items = paragraph.split("\n");
           return (
             <ul key={index} className="list-disc space-y-1 pl-5">
               {items.map((item, itemIdx) => (
                 <li key={itemIdx}>
-                  {renderRichText(item.replace(/^- /, ""), availableResources, onFileSelect)}
+                  {renderRichText(item.replace(/^[-*]\s+/, ""), availableResources, onFileSelect)}
                   {isLastParagraph && itemIdx === items.length - 1 ? cursor : null}
                 </li>
               ))}

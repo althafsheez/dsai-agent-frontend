@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:backend": "backend/.venv/bin/uvicorn backend.app.main:app --reload --port 8000",
+    "dev:backend": "uvicorn backend.app:app --reload --port 8000",
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
