@@ -145,4 +145,33 @@ describe("ContextSidebar", () => {
     await user.click(screen.getByRole("button", { name: "Close context" }));
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  it("filters datasets and artifacts in right sidebar using inline search bar", async () => {
+    const user = userEvent.setup();
+    render(<ContextSidebar {...baseProps} onClose={vi.fn()} onFileSelect={vi.fn()} />);
+
+    const searchInput = screen.getByRole("searchbox", { name: "Search datasets and artifacts" });
+    expect(searchInput).toBeInTheDocument();
+
+    const datasetsPanel = screen.getByRole("tabpanel", { name: "Datasets" });
+    // Both datasets visible initially in datasets panel
+    expect(within(datasetsPanel).getByText("Sales.csv")).toBeInTheDocument();
+    expect(within(datasetsPanel).getByText("Revenue.xlsx")).toBeInTheDocument();
+
+    // Type "sales" to filter
+    await user.type(searchInput, "sales");
+    expect(within(datasetsPanel).getByText("Sales.csv")).toBeInTheDocument();
+    expect(within(datasetsPanel).queryByText("Revenue.xlsx")).not.toBeInTheDocument();
+
+    // Switch to Artifacts tab while search query is active
+    await user.click(screen.getByRole("tab", { name: "Artifacts" }));
+    const artifactsPanel = screen.getByRole("tabpanel", { name: "Artifacts" });
+    expect(within(artifactsPanel).getByText(/No artifacts matching/i)).toBeInTheDocument();
+
+    // Clear search using clear button
+    const clearButton = screen.getByRole("button", { name: "Clear search" });
+    await user.click(clearButton);
+    expect(searchInput).toHaveValue("");
+    expect(within(artifactsPanel).getByText("Revenue report.pdf")).toBeInTheDocument();
+  });
 });

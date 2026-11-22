@@ -4,6 +4,7 @@ import Image from "next/image";
 import {
   ArrowUp,
   BarChart3,
+  BookOpen,
   BrainCircuit,
   Calculator,
   ChevronRight,
@@ -60,10 +61,13 @@ import {
   updateChat,
   uploadResource,
   type ExecutionEvent,
+  type LibraryResource,
   type MessageDto,
 } from "@/lib/api";
+import { LibraryImportDialog } from "@/features/library";
 import type { AssistantMessage, ChatMessage, MessageBlock, TraceStep } from "../types";
-import { asRecord, replayTrace, resources as extractTraceResources } from "../execution-trace";
+import { asRecord, classifyError, replayTrace, resources as extractTraceResources } from "../execution-trace";
+import type { DataReferenceResource } from "./data-reference";
 import { takePendingRun } from "../pending-run";
 import { useConversationScroll } from "../use-conversation-scroll";
 import { ChatHeader } from "./chat-header";
@@ -212,6 +216,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const [libraryDialogOpen, setLibraryDialogOpen] = useState(false);
   const [connectorCategory, setConnectorCategory] = useState<ConnectorCategory>("all");
   const [connectorQuery, setConnectorQuery] = useState("");
   const [modelId, setModelId] = useState("");
@@ -569,11 +574,14 @@ export function ChatPage({ chatId }: { chatId: string }) {
         const message = failure && typeof failure === "object" && "message" in failure
           ? String((failure as { message: unknown }).message)
           : "Gemini could not complete this response.";
+        const errorType = classifyError(message);
         setError(message);
         setQueuedQuestions((current) => current.map((item) => ({ ...item, paused: true })));
         updateAssistant((assistant) => ({
           ...assistant,
           status: "failed",
+          error: message,
+          errorType,
           trace: (assistant.trace ?? []).map((step) =>
             step.status === "running"
               ? { ...step, status: "failed", detail: message, error: message }
@@ -588,6 +596,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
         updateAssistant((message) => ({
           ...message,
           status: "interrupted",
+          error: reason,
+          errorType: "recoverable",
           trace: (message.trace ?? []).map((step) =>
             step.status === "running"
               ? { ...step, status: "failed", detail: "Interrupted", error: reason }
@@ -613,6 +623,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
         updateAssistant((message) => ({
           ...message,
           status: "interrupted",
+          error: "Run was cancelled by user.",
+          errorType: "recoverable",
           trace: (message.trace ?? []).map((step) =>
             step.status === "running"
               ? { ...step, status: "failed", detail: "Interrupted", error: "Run was cancelled by user." }
@@ -621,10 +633,13 @@ export function ChatPage({ chatId }: { chatId: string }) {
         }));
       } else {
         const message = caught instanceof Error ? caught.message : "The Gemini request failed.";
+        const errorType = classifyError(message);
         setError(message);
         updateAssistant((assistant) => ({
           ...assistant,
           status: "failed",
+          error: message,
+          errorType,
           trace: (assistant.trace ?? []).map((step) =>
             step.status === "running"
               ? { ...step, status: "failed", detail: message, error: message }
@@ -807,23 +822,23 @@ export function ChatPage({ chatId }: { chatId: string }) {
     }
   }
 
-  function selectFile(file: ContextFile) {
+  const selectFile = useCallback((file: ContextFile) => {
     setSelectedFile(file);
     setPreviewExpanded(false);
     setPanelOpen(true);
-  }
+  }, []);
 
-  function selectFileById(id: string) {
+  const selectFileById = useCallback((id: string) => {
     const resource = resources.get(id);
     if (resource) selectFile(resource);
-  }
+  }, [resources, selectFile]);
 
-  function downloadFileById(id: string) {
+  const downloadFileById = useCallback((id: string) => {
     const resource = resources.get(id);
     if (resource) void downloadResource(resource.download_url, resource.name);
-  }
+  }, [resources]);
 
-  async function toggleResourceLibrary(file: ContextFile) {
+  const toggleResourceLibrary = useCallback(async (file: ContextFile) => {
     try {
       if (file.in_library) await removeResourceFromLibrary(file.id);
       else await addResourceToLibrary(file.id);
@@ -835,7 +850,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not update the Library.");
     }
-  }
+  }, [chatId, queryClient]);
 
   function togglePanel() {
     setPanelOpen((open) => {
@@ -856,6 +871,18 @@ export function ChatPage({ chatId }: { chatId: string }) {
     setAttachments((current) => [...current, ...next]);
     setError(null);
     setAttachmentMenuOpen(false);
+  }
+
+  function handleAttachFromLibrary(items: LibraryResource[]) {
+    const next = items.map<DraftAttachment>((item) => ({
+      id: `lib-${item.id}-${crypto.randomUUID()}`,
+      file: new File([""], item.name, {
+        type: item.mime_type || "application/octet-stream",
+      }),
+      previewUrl: null,
+    }));
+    setAttachments((current) => [...current, ...next]);
+    setError(null);
   }
 
   function removeAttachment(id: string) {
@@ -1041,6 +1068,43 @@ export function ChatPage({ chatId }: { chatId: string }) {
     }
   }
 
+  const handleRetry = useCallback((failedMessage: AssistantMessage) => {
+    if (running) return;
+    const assistantIndex = messages.findIndex((m) => m.id === failedMessage.id);
+    if (assistantIndex === -1) return;
+
+    let targetUserMessage: Extract<ChatMessage, { role: "user" }> | undefined;
+    for (let i = assistantIndex - 1; i >= 0; i--) {
+      const candidate = messages[i];
+      if (candidate.role === "user") {
+        targetUserMessage = candidate;
+        break;
+      }
+    }
+    if (!targetUserMessage) return;
+
+    setError(null);
+    setComposerStatus(null);
+    void runMessage({
+      type: "message",
+      userMessageId: targetUserMessage.id,
+      modelId,
+      effort: effort || null,
+      clientRequestId: crypto.randomUUID(),
+    });
+  }, [messages, running, modelId, effort, runMessage]);
+
+  const availableResources = useMemo<DataReferenceResource[]>(() => {
+    const list: DataReferenceResource[] = [];
+    (datasetsQuery.data?.items ?? []).forEach((d) =>
+      list.push({ id: d.id, name: d.name, resourceType: "dataset" })
+    );
+    (artifactsQuery.data?.items ?? []).forEach((a) =>
+      list.push({ id: a.id, name: a.name, resourceType: "artifact", kind: a.kind })
+    );
+    return list;
+  }, [datasetsQuery.data?.items, artifactsQuery.data?.items]);
+
   return (
     <section className="relative flex min-h-0 flex-1 overflow-hidden">
       <div className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] bg-background">
@@ -1077,6 +1141,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
               runs={runsQuery.data?.items}
               onFileSelect={selectFileById}
               onFileDownload={downloadFileById}
+              resources={resources}
+              onLibraryToggle={toggleResourceLibrary}
               registerSection={conversationScroll.registerSection}
             />
           )}
@@ -1149,14 +1215,41 @@ export function ChatPage({ chatId }: { chatId: string }) {
                 ))}
               </div>
             ) : null}
-            <div className="flex items-end gap-2">
-              <div className="relative">
+            <div className="flex items-end gap-1.5">
+              <div className="relative flex items-center gap-1">
                 <button type="button" aria-label="Add files or connectors" aria-haspopup="dialog" aria-expanded={attachmentMenuOpen} disabled={running || messagesQuery.isError} onClick={() => setAttachmentMenuOpen((open) => !open)} className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40"><Plus className="size-4" /></button>
+                <button
+                  type="button"
+                  aria-label="Import from Library"
+                  disabled={running || messagesQuery.isError}
+                  onClick={() => setLibraryDialogOpen(true)}
+                  className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40"
+                  title="Import from Library"
+                >
+                  <BookOpen className="size-4" />
+                </button>
                 {attachmentMenuOpen ? (
                   <div role="dialog" aria-label="Add files and connectors" className="absolute bottom-[calc(100%+8px)] left-0 z-50 flex h-[320px] w-[min(300px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-xl border border-border-strong bg-[#191b1e] p-2 shadow-[0_18px_50px_rgba(0,0,0,0.48)]">
                     <button type="button" onClick={() => fileInputRef.current?.click()} className="flex w-full shrink-0 items-center gap-2 rounded-lg border border-border-strong bg-[linear-gradient(110deg,#303744,#242a33)] p-2 text-left hover:border-slate/70">
                       <span className="grid size-9 shrink-0 place-items-center rounded-md bg-[#b8cef0] text-[#172033]"><Paperclip className="size-[18px]" /></span>
                       <span><span className="block text-xs font-semibold leading-4 text-foreground">Add files</span><span className="block text-[10px] leading-4 text-foreground/65">From your device</span></span>
+                      <ChevronRight className="ml-auto size-3.5 text-foreground" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAttachmentMenuOpen(false);
+                        setLibraryDialogOpen(true);
+                      }}
+                      className="mt-1 flex w-full shrink-0 items-center gap-2 rounded-lg border border-border-strong bg-[linear-gradient(110deg,#242a33,#1a2028)] p-2 text-left hover:border-slate/70"
+                    >
+                      <span className="grid size-9 shrink-0 place-items-center rounded-md bg-[#c2d9b8] text-[#172e18]">
+                        <BookOpen className="size-[18px]" />
+                      </span>
+                      <span>
+                        <span className="block text-xs font-semibold leading-4 text-foreground">Import from Library</span>
+                        <span className="block text-[10px] leading-4 text-foreground/65">Browse saved assets</span>
+                      </span>
                       <ChevronRight className="ml-auto size-3.5 text-foreground" />
                     </button>
                     <label className="relative mt-2 block shrink-0"><span className="sr-only">Find a connector</span><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><input value={connectorQuery} onChange={(event) => setConnectorQuery(event.target.value)} placeholder="Find a connector…" className="h-8 w-full rounded-md border bg-transparent pl-8 pr-2.5 text-[11px] outline-none placeholder:text-muted-foreground focus:border-ring" /></label>
@@ -1270,6 +1363,12 @@ export function ChatPage({ chatId }: { chatId: string }) {
             {!error && composerStatus ? <p>{composerStatus}</p> : null}
           </div>
         </form>
+
+        <LibraryImportDialog
+          open={libraryDialogOpen}
+          onClose={() => setLibraryDialogOpen(false)}
+          onAttach={handleAttachFromLibrary}
+        />
       </div>
 
       {chatQuery.data?.workspace_id ? (

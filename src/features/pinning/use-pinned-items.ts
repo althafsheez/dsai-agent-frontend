@@ -49,11 +49,13 @@ export function useTogglePin() {
       if (kind === "chat") await updateChat(id, { pinned });
       else await updateWorkspace(id, { pinned });
     },
-    onSuccess: (_result, { kind, id }) => {
+    onSuccess: async (_result, { kind, id }) => {
       if (kind === "chat") {
-        void queryClient.invalidateQueries({ queryKey: CHATS_KEY });
-        void queryClient.invalidateQueries({ queryKey: ["history"] });
-        void queryClient.invalidateQueries({ queryKey: ["chat", id] });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: CHATS_KEY }),
+          queryClient.invalidateQueries({ queryKey: ["history"] }),
+          queryClient.invalidateQueries({ queryKey: ["chat", id] }),
+        ]);
       } else {
         void queryClient.invalidateQueries({ queryKey: WORKSPACES_KEY });
         void queryClient.invalidateQueries({ queryKey: ["workspace", id] });
@@ -64,5 +66,6 @@ export function useTogglePin() {
   return {
     togglePin: (kind: PinnedKind, id: string, pinned: boolean) => toggle.mutate({ kind, id, pinned }),
     isPending: toggle.isPending,
+    isError: toggle.isError,
   };
 }

@@ -44,6 +44,23 @@
   * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0s !important; animation: none !important; }
+    .reasoning-dot { animation: none !important; opacity: 0.7; }
   }
+}
+
+/* Animated 3-dot pulsating ellipsis for reasoning in progress */
+@keyframes reasoning-dot {
+  0%, 80%, 100% {
+    opacity: 0.25;
+    transform: scale(0.7);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.reasoning-dot {
+  animation: reasoning-dot 1.2s ease-in-out infinite;
 }
 

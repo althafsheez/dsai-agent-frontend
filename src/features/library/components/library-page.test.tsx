@@ -63,7 +63,7 @@ describe("library page", () => {
     await waitFor(() => expect(screen.getByText("Your Library is empty")).toBeVisible());
   });
 
-  it("groups a workspace with more than three items into a folder", async () => {
+  it("groups every workspace with saved files into a folder", async () => {
     const item = (id: string, name: string, workspace: [string, string] | null) => ({
       id, resource_type: "artifact", name, mime_type: "application/pdf", size_bytes: 10, origin: "generated", source: "output",
       preview_url: `/api/resources/${id}/preview`, download_url: `/api/resources/${id}/download`, kind: "pdf",
@@ -92,8 +92,8 @@ describe("library page", () => {
     expect(screen.getByText("Q1.pdf")).toBeVisible();
     await user.click(screen.getByRole("tab", { name: "Folders" }));
     const folder = await screen.findByRole("button", { name: "Open Sales folder" });
-    expect(screen.queryByRole("button", { name: "Open Small folder" })).not.toBeInTheDocument();
-    expect(screen.getByText("Tiny.pdf")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open Small folder" })).toBeVisible();
+    expect(screen.queryByText("Tiny.pdf")).not.toBeInTheDocument();
     expect(screen.getByText("Loose.pdf")).toBeVisible();
     expect(screen.queryByText("Q1.pdf")).not.toBeInTheDocument();
 
@@ -102,6 +102,9 @@ describe("library page", () => {
     expect(screen.queryByText("Loose.pdf")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Folders" }));
     expect(screen.getByText("Loose.pdf")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Open Small folder" }));
+    expect(screen.getByText("Tiny.pdf")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Folders" }));
 
     await user.type(screen.getByRole("textbox", { name: "Search library" }), "Q2");
     expect(screen.getByText("Q2.pdf")).toBeVisible();
