@@ -42,6 +42,16 @@ try:
     import scipy.stats as stats
 except ImportError:
     pass
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+except ImportError:
+    pass
+try:
+    import seaborn as sns
+except ImportError:
+    pass
 """
         self._globals = {
             "__name__": "__main__",
