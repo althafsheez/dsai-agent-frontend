@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Database, FileText, Folder, MessageSquare, Plus, Search, Workflow, X } from "lucide-react";
+import { ChevronRight, Database, FileText, Folder, MessageSquare, Plus, Workflow, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   createWorkspaceWorkflow,
@@ -18,6 +18,10 @@ import {
   uploadResource,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { HistoryToolbar } from "@/features/history/components/history-toolbar";
+import { filterHistory } from "@/features/history/logic/filter-history";
+import type { HistoryFilterOptions, HistoryFilters, HistoryRecord } from "@/features/history/types";
+import { currentDemoUser } from "@/features/history/types";
 import { WorkspaceDatasets } from "./workspace-datasets";
 import { WorkspaceAccessDialogs } from "./workspace-access-dialogs";
 
@@ -37,7 +41,15 @@ function formatDate(value: string) {
 export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("chats");
-  const [chatSearch, setChatSearch] = useState("");
+  const [chatFilters, setChatFilters] = useState<HistoryFilters>({
+    status: "active",
+    ownership: "all",
+    time: "any",
+    sort: "updated_desc",
+    search: "",
+    authorId: "all",
+    workspaceId: workspaceId,
+  });
   const [selectedContextId, setSelectedContextId] = useState<string | null>(null);
   const [contextDraft, setContextDraft] = useState("");
   const [workflowName, setWorkflowName] = useState("");
@@ -95,7 +107,6 @@ export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
     [workspaceId, workspace.data?.name]
   );
 
-  const visibleDatasets = useMemo(() => (datasets.data?.items ?? []).filter((dataset) => dataset.name.toLowerCase().includes(datasetSearch.toLowerCase())), [datasetSearch, datasets.data?.items]);
   const selectedContext = contextFiles.data?.items.find((file) => file.id === selectedContextId) ?? null;
 
   if (workspace.isLoading) return <section className="p-8 text-sm text-muted-foreground">Loading workspace…</section>;
