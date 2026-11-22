@@ -427,7 +427,11 @@ async def stream_chat_run(chat_id: str, req: StreamRunRequest = Body(default=Str
         tool_counter = 0
 
         try:
-            async for agent_evt in agent.stream_query(query=user_msg["content"], dataset_path=dataset_path):
+            async for agent_evt in agent.stream_query(
+                query=user_msg["content"],
+                dataset_path=dataset_path,
+                tracker=tracker,
+            ):
                 evt_type = agent_evt.get("type")
 
                 if evt_type == "tool_call":
@@ -740,7 +744,7 @@ async def query_endpoint(req: QueryRequest):
     async def event_generator():
         accumulated = ""
         try:
-            async for event in agent.stream_query(query=req.query, dataset_path=req.dataset_path):
+            async for event in agent.stream_query(query=req.query, dataset_path=req.dataset_path, tracker=tracker):
                 evt_type = event.get("type")
                 if evt_type == "delta":
                     tracker.record_first_token()

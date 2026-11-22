@@ -35,8 +35,11 @@ def get_langfuse() -> Optional[Any]:
             import backend.config  # ensures backend/.env is loaded
             pk = os.getenv("LANGFUSE_PUBLIC_KEY")
             sk = os.getenv("LANGFUSE_SECRET_KEY")
-            host = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+            host = os.getenv("LANGFUSE_HOST") or os.getenv("LANGFUSE_BASE_URL") or "https://cloud.langfuse.com"
             if pk and sk:
+                os.environ["LANGFUSE_PUBLIC_KEY"] = pk
+                os.environ["LANGFUSE_SECRET_KEY"] = sk
+                os.environ["LANGFUSE_HOST"] = host
                 from langfuse import Langfuse
                 _LANGFUSE_CLIENT = Langfuse(public_key=pk, secret_key=sk, host=host)
         except Exception:
@@ -65,12 +68,14 @@ class RunTracker:
         user_query: str,
         model: str,
         dataset_path: Optional[str] = None,
+        user_id: Optional[str] = "demo-user",
     ):
         self.run_id = run_id
         self.chat_id = chat_id
         self.user_query = user_query
         self.model = model
         self.dataset_path = dataset_path
+        self.user_id = user_id or "demo-user"
 
         self.t_start = time.perf_counter()
         self.start_timestamp = utc_now()
@@ -88,21 +93,84 @@ class RunTracker:
         self.lf = get_langfuse()
         self.lf_agent_obs: Optional[Any] = None
         self.lf_tool_obs: Dict[str, Any] = {}
+        self.lf_gen_obs: Dict[str, Any] = {}
         if self.lf:
             try:
-                self.lf_agent_obs = self.lf.start_observation(
-                    name="dsai_agent_run",
-                    as_type="agent",
-                    input={"query": self.user_query},
-                    metadata={
-                        "run_id": self.run_id,
-                        "chat_id": self.chat_id,
-                        "model": self.model,
-                        "dataset_path": self.dataset_path,
-                    },
-                )
+                try:
+                    from langfuse import propagate_attributes
+                    with propagate_attributes(
+                        trace_name="dsai-agent-run",
+                        session_id=self.chat_id,
+                        user_id=self.user_id,
+                        tags=["dsai-agent", "phase-0", self.model],
+                        metadata={
+                            "run_id": self.run_id,
+                            "chat_id": self.chat_id,
+                            "dataset_path": str(self.dataset_path or ""),
+                        },
+                    ):
+                        self.lf_agent_obs = self.lf.start_observation(
+                            name="dsai_agent_run",
+                            as_type="agent",
+                            input={"query": self.user_query},
+                            metadata={
+                                "run_id": self.run_id,
+                                "chat_id": self.chat_id,
+                                "model": self.model,
+                                "dataset_path": self.dataset_path,
+                            },
+                        )
+                except Exception:
+                    self.lf_agent_obs = self.lf.start_observation(
+                        name="dsai_agent_run",
+                        as_type="agent",
+                        input={"query": self.user_query},
+                        metadata={
+                            "run_id": self.run_id,
+                            "chat_id": self.chat_id,
+                            "model": self.model,
+                            "dataset_path": self.dataset_path,
+                        },
+                    )
             except Exception:
                 self.lf_agent_obs = None
+
+    def start_generation(
+        self,
+        name: str,
+        input_data: Any,
+        model: Optional[str] = None,
+    ) -> None:
+        """Start a Langfuse generation observation for an LLM inference call."""
+        if self.lf_agent_obs:
+            try:
+                gen_obs = self.lf_agent_obs.start_observation(
+                    name=name,
+                    as_type="generation",
+                    model=model or self.model,
+                    input=input_data,
+                )
+                self.lf_gen_obs[name] = gen_obs
+            except Exception:
+                pass
+
+    def end_generation(
+        self,
+        name: str,
+        output_data: Any,
+        usage_details: Optional[Dict[str, int]] = None,
+    ) -> None:
+        """Complete a Langfuse generation observation with output tokens and text."""
+        if name in self.lf_gen_obs:
+            try:
+                gen_obs = self.lf_gen_obs.pop(name)
+                gen_obs.update(
+                    output=output_data,
+                    usage_details=usage_details,
+                )
+                gen_obs.end()
+            except Exception:
+                pass
 
     def record_first_token(self) -> None:
         if self.t_first_token is None:
@@ -121,9 +189,10 @@ class RunTracker:
         # Langfuse tool span
         if self.lf_agent_obs:
             try:
+                obs_type = "retriever" if tool_name in ("web_search", "search_tool") else "tool"
                 t_obs = self.lf_agent_obs.start_observation(
                     name=tool_name,
-                    as_type="tool",
+                    as_type=obs_type,
                     input=arguments,
                     metadata={"call_id": call_id, "step_id": step_id},
                 )
@@ -229,6 +298,8 @@ class RunTracker:
                     self.lf_agent_obs.score_trace(name="ttft_ms", value=self.ttft_ms)
                 self.lf_agent_obs.score_trace(name="sub_5s", value=1.0 if total_time_ms < 5000 else 0.0)
                 self.lf_agent_obs.score_trace(name="turns", value=turn_count)
+                if self.completed_tools:
+                    self.lf_agent_obs.score_trace(name="tool_calls_count", value=len(self.completed_tools))
                 self.lf_agent_obs.end()
                 if self.lf:
                     self.lf.flush()

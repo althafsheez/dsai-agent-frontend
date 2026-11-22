@@ -61,7 +61,10 @@ class ReActAgent:
         return self.tool_registry.execute(name, args)
 
     async def stream_query(
-        self, query: str, dataset_path: Optional[str] = None
+        self,
+        query: str,
+        dataset_path: Optional[str] = None,
+        tracker: Optional[Any] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Stream the ReAct execution loop as SSE-friendly event dictionaries.
@@ -151,7 +154,7 @@ class ReActAgent:
 
         async for event in self.stream_turns(
             client=client, model=self.model, contents=contents, config=config,
-            max_turns=self.max_turns, execute_tool=execute,
+            max_turns=self.max_turns, execute_tool=execute, tracker=tracker,
         ):
             if event["type"] == "done":
                 event["metrics"]["total_time_ms"] = round((time.perf_counter() - start_time) * 1000, 2)
@@ -163,6 +166,7 @@ class ReActAgent:
         config: types.GenerateContentConfig, max_turns: int,
         execute_tool: Callable[[str, dict], Awaitable[dict]],
         is_cancelled: Callable[[], bool] | None = None,
+        tracker: Optional[Any] = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Run tool turns followed by a tool-free synthesis if the budget is exhausted."""
         final_answer = []
@@ -184,6 +188,15 @@ class ReActAgent:
                 turn_config = config
             label = "Synthesizing analytical findings…" if synthesis else f"Analysis turn {turn} of {max_turns}"
             yield {"type": "status", "content": label}
+
+            gen_name = f"gemini_turn_{turn}"
+            if tracker and hasattr(tracker, "start_generation"):
+                prompt_input = [
+                    {"role": c.role, "parts": [getattr(p, "text", "") or str(p) for p in (c.parts or [])]}
+                    for c in contents
+                ]
+                tracker.start_generation(gen_name, input_data=prompt_input, model=model)
+
             calls = []
             seen_ids = set()
             model_parts = []
@@ -219,6 +232,15 @@ class ReActAgent:
                     if attempt < max_retries - 1:
                         await asyncio.sleep(0.5)
                         continue
+
+            if tracker and hasattr(tracker, "end_generation"):
+                gen_text = "".join(part.text for part in model_parts if part.text and not part.thought)
+                output_summary = {
+                    "text": gen_text,
+                    "tool_calls": [c.name for c in calls],
+                }
+                tracker.end_generation(gen_name, output_data=output_summary)
+
             if not success:
                 yield {"type": "error", "content": f"Gemini generation failed: {type(last_err).__name__}: {str(last_err)}"}
                 return
