@@ -73,7 +73,7 @@ describe("WorkspaceDetailPage chats toolbar", () => {
     expect(screen.getByText("CAC Payback Review")).toBeInTheDocument();
 
     // Use search input from HistoryToolbar
-    const searchInput = screen.getByPlaceholderText("Search chats and workspaces...");
+    const searchInput = screen.getByPlaceholderText("Search chats...");
     await user.type(searchInput, "funnel");
 
     expect(screen.getByText("Q4 Funnel Analysis")).toBeInTheDocument();
