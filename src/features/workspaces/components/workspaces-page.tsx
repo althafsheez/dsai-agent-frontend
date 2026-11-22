@@ -7,22 +7,55 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Folder, Pin, PinOff, Search, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { deleteWorkspace, getWorkspaces, uploadResource, type WorkspaceDto } from "@/lib/api";
+import { useAuth } from "@/features/auth";
 import { useTogglePin } from "@/features/pinning";
 import { CreateWorkspaceDialog } from "./create-workspace-dialog";
 import { WorkspaceRowMenu } from "./workspace-row-menu";
 
-type Ownership = "all" | "owned" | "shared";
+export type Ownership = "all" | "owned" | "shared" | "contributed";
 type Sort = "updated_desc" | "updated_asc" | "name_asc";
 
 const ownershipOptions: Array<{ value: Ownership; label: string }> = [
   { value: "all", label: "All" },
   { value: "owned", label: "Owned" },
   { value: "shared", label: "Shared" },
+  { value: "contributed", label: "Contributed" },
 ];
+
+export function getWorkspaceAccess(workspace: WorkspaceDto, currentUserId: string): {
+  isOwned: boolean;
+  isContributed: boolean;
+  isShared: boolean;
+  roleLabel: string;
+} {
+  const isCreator = workspace.created_by === currentUserId;
+  const isOwnerRole = workspace.role === "owner" || workspace.role === "admin";
+  const isOwned = isCreator || isOwnerRole;
+
+  const isContributed = !isOwned && (
+    workspace.role === "contributor" ||
+    workspace.role === "editor" ||
+    workspace.permission === "edit"
+  );
+
+  const isShared = !isOwned && !isContributed && (
+    workspace.role === "viewer" ||
+    workspace.permission === "view" ||
+    (!isOwned && !isContributed)
+  );
+
+  let roleLabel = "Owner";
+  if (isContributed) roleLabel = "Contributor";
+  else if (isShared) roleLabel = "Viewer";
+
+  return { isOwned, isContributed, isShared, roleLabel };
+}
 
 export function WorkspacesPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const currentUserId = user?.id ?? "user-you";
   const [search, setSearch] = useState("");
   const [ownership, setOwnership] = useState<Ownership>("all");
   const [sort, setSort] = useState<Sort>("updated_desc");
@@ -36,13 +69,20 @@ export function WorkspacesPage() {
   const workspaces = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
     return [...(workspacesQuery.data?.items ?? [])]
-      .filter(() => ownership !== "shared")
+      .filter((workspace) => {
+        if (ownership === "all") return true;
+        const access = getWorkspaceAccess(workspace, currentUserId);
+        if (ownership === "owned") return access.isOwned;
+        if (ownership === "shared") return access.isShared;
+        if (ownership === "contributed") return access.isContributed;
+        return true;
+      })
       .filter((workspace) => !query || workspace.name.toLocaleLowerCase().includes(query))
       .sort((left, right) => {
         if (sort === "name_asc") return left.name.localeCompare(right.name);
         return sort === "updated_asc" ? left.updated_at.localeCompare(right.updated_at) : right.updated_at.localeCompare(left.updated_at);
       });
-  }, [ownership, search, sort, workspacesQuery.data?.items]);
+  }, [currentUserId, ownership, search, sort, workspacesQuery.data?.items]);
 
   const uploadInitialFiles = useMutation({
     mutationFn: async ({ workspace, files }: { workspace: WorkspaceDto; files: File[] }) => {
@@ -241,7 +281,29 @@ export function WorkspacesPage() {
                       </div>
                     </Link>
                   </td>
-                  <td className="truncate px-3.5 py-3 text-muted-foreground">You</td>
+                  <td className="truncate px-3.5 py-3 text-muted-foreground">
+                    {(() => {
+                      const access = getWorkspaceAccess(workspace, currentUserId);
+                      const isSelf = workspace.created_by === currentUserId || workspace.created_by === "user-you";
+                      return (
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate">{isSelf ? "You" : workspace.created_by}</span>
+                          <span
+                            className={cn(
+                              "rounded px-1.5 py-0.5 text-[9px] font-medium border leading-none tracking-wide uppercase",
+                              access.isOwned
+                                ? "bg-raised text-foreground border-border"
+                                : access.isContributed
+                                ? "bg-amber-500/10 text-amber-300 border-amber-500/20"
+                                : "bg-blue-500/10 text-blue-300 border-blue-500/20"
+                            )}
+                          >
+                            {access.roleLabel}
+                          </span>
+                        </div>
+                      );
+                    })()}
+                  </td>
                   <td className="whitespace-nowrap px-3.5 py-3 text-muted-foreground">
                     {new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(
                       new Date(workspace.created_at)

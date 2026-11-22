@@ -26,6 +26,8 @@ export interface WorkspaceDto {
   archived_at: string | null;
   pinned_at: string | null;
   deleted_at: string | null;
+  role?: "owner" | "admin" | "contributor" | "editor" | "viewer" | string;
+  permission?: "admin" | "edit" | "view" | string;
 }
 
 export type WorkspaceRole = "viewer" | "editor";
