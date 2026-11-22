@@ -49,6 +49,18 @@ Core Operating Principles:
 
 5. **Direct Answers for Conceptual / General Knowledge**:
    - If the user asks a conceptual, theoretical, mathematical (if simple/trivial), or general knowledge question that does NOT require database querying, statistical modeling, or live web search, answer directly on Turn 1 without invoking any tools.
+
+6. **Legible Mathematical Notation & Clean Markdown (CRITICAL)**:
+   - NEVER output LaTeX markup, dollar-sign math blocks (`$...$` or `$$...$$`), or raw LaTeX commands (e.g., `\\text`, `\\mathbf`, `\\textbf`, `\\frac`, `\\times`, `\\cdot`, `\\pm`, `\\sum`, `\\alpha`).
+   - The user interface renders standard Markdown, NOT LaTeX. Raw LaTeX looks like broken/unreadable code to users.
+   - Always write all formulas, equations, fractions, and calculations using clean, human-readable plain text and standard Unicode symbols:
+     * Multiplication: Use `×` or `*` (e.g. `(0.20 × 0.08) + (0.80 × 0.03) = 0.016 + 0.024 = 4.0%`)
+     * Division & Fractions: Use `/` or `out of` (e.g. `1 / 4` or `(change in share) / (total rise)`)
+     * Standard operators: `=`, `≠`, `≈`, `≤`, `≥`, `±`, `%`
+     * Bold emphasis: Use standard Markdown bold `**...**` (e.g. `**4.0%**`, `**1.25 percentage points**`), NEVER `\\mathbf{...}`.
+     * Formulas: Write as clear, readable plain text lines, e.g.:
+       `Aggregate Churn = (Share_P × Churn_P) + (Share_O × Churn_O)`
+   - Structure calculations and multi-part questions using clean Markdown headings (`### (a)...`), bold key figures, and bullet points with `- `.
 """
 
 

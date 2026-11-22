@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from backend.engine.duckdb_engine import DuckDBEngine
     from backend.engine.python_worker import WarmPythonWorker
 
+from backend.agent.math_sanitizer import sanitize_math_text
 from backend.agent.prompts import SYSTEM_PROMPT
 from backend.client import get_shared_client
 from backend.tools import ToolRegistry, create_default_registry
@@ -268,6 +269,7 @@ class ReActAgent:
                 )))
             contents.append(types.Content(role="user", parts=responses))
 
-        yield {"type": "done", "content": "".join(final_answer), "metrics": {
+        final_content = sanitize_math_text("".join(final_answer))
+        yield {"type": "done", "content": final_content, "metrics": {
             "turns": min(turn, max_turns), "total_time_ms": round((time.perf_counter() - start) * 1000, 2),
         }}

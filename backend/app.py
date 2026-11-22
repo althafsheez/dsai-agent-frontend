@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from backend import db
+from backend.agent.math_sanitizer import sanitize_math_text
 from backend.agent.react_loop import ReActAgent
 from backend.config import get_gemini_api_key, get_gemini_model
 from backend.engine.duckdb_engine import DuckDBEngine
@@ -475,7 +476,7 @@ async def stream_chat_run(chat_id: str, req: StreamRunRequest = Body(default=Str
                         })
 
                 elif evt_type == "done":
-                    final_text = agent_evt.get("content", "") or accumulated_text
+                    final_text = sanitize_math_text(agent_evt.get("content", "") or accumulated_text)
                     metrics_res = agent_evt.get("metrics", {})
                     turn_cnt = metrics_res.get("turns", 1)
 
@@ -754,7 +755,8 @@ async def query_endpoint(req: QueryRequest):
                 elif evt_type == "tool_result":
                     tracker.end_tool(event["tool"], output=event.get("result"))
                 elif evt_type == "done":
-                    tracker.finish(final_response=event.get("content") or accumulated, status="completed")
+                    clean_res = sanitize_math_text(event.get("content") or accumulated)
+                    tracker.finish(final_response=clean_res, status="completed")
 
                 yield f"data: {json.dumps(event, default=str)}\n\n"
         except Exception as e:
