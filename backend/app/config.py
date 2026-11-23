@@ -38,7 +38,7 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("DSAI_E2B_API_KEY", "E2B_API_KEY"),
     )
-    max_agent_steps: int = 8
+    max_agent_steps: int = Field(default=8, ge=1)
 
     @field_validator("cors_origins", mode="before")
     @classmethod

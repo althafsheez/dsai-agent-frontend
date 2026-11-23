@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 from sqlalchemy import text
 
 from ..errors import APIError
-from ..providers import ProviderError
+from agentic.runtime.contracts import ProviderError
 from ..schemas import ModelMetadata, ModelsResponse
 
 

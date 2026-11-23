@@ -1,0 +1,1001 @@
+transaction_id,category,revenue,unit_cost,units_sold,rating,is_returned
+1,Electronics,170.85,112.52,1,1.6,true
+2,Beauty,224.98,90.62,2,1.4,false
+3,Beauty,129.08,8.85,10,3.6,false
+4,Clothing,1629.55,90.44,8,1.0,false
+5,Books,402.15,45.29,6,4.1,true
+6,Electronics,306.45,19.02,7,3.4,true
+7,Books,498.75,23.1,9,1.3,false
+8,Beauty,1126.36,88.72,6,1.2,false
+9,Home & Kitchen,600.31,129.02,2,2.5,false
+10,Home & Kitchen,259.19,58.68,3,2.1,true
+11,Beauty,375.54,82.45,3,2.8,false
+12,Beauty,957.49,104.27,4,4.1,false
+13,Electronics,487.44,63.17,6,4.7,false
+14,Clothing,1191.97,62.37,8,2.8,false
+15,Clothing,859.26,113.02,4,4.0,false
+16,Beauty,1004.68,57.49,7,1.6,false
+17,Electronics,181.63,129.86,1,1.6,false
+18,Beauty,240.08,60.79,2,2.9,false
+19,Beauty,139.8,103.64,1,4.5,false
+20,Home & Kitchen,133.7,47.56,2,1.0,false
+21,Beauty,315.62,78.61,3,3.5,false
+22,Clothing,1318.21,115.56,6,4.1,true
+23,Beauty,612.3,75.85,6,2.5,false
+24,Clothing,77.37,39.93,1,1.3,false
+25,Electronics,1427.67,116.05,9,2.9,false
+26,Home & Kitchen,2071.22,131.5,9,1.8,false
+27,Home & Kitchen,2137.06,149.3,7,2.8,false
+28,Electronics,246.45,37.58,4,3.4,false
+29,Beauty,51.22,6.04,4,1.2,true
+30,Electronics,138.29,15.27,6,3.7,false
+31,Beauty,773.77,109.89,3,3.3,false
+32,Books,302.69,32.61,7,2.7,false
+33,Books,1323.88,130.26,8,3.6,true
+34,Electronics,1734.65,110.59,7,1.4,false
+35,Clothing,1102.31,70.05,9,2.1,false
+36,Electronics,2260.21,122.16,8,1.4,true
+37,Electronics,213.31,29.12,4,1.9,false
+38,Electronics,446.19,59.95,3,2.1,false
+39,Home & Kitchen,1595.2,106.01,7,4.1,false
+40,Clothing,472.39,48.02,4,3.3,true
+41,Home & Kitchen,22.33,12.27,1,4.7,false
+42,Electronics,215.63,16.62,9,3.4,false
+43,Books,549.3,141.53,2,3.3,true
+44,Beauty,257.74,65.79,2,3.1,false
+45,Clothing,407.47,39.61,6,3.7,false
+46,Books,2025.62,139.71,6,1.0,true
+47,Electronics,499.25,35.91,9,4.7,true
+48,Clothing,491.82,46.32,6,3.2,false
+49,Beauty,124.81,6.13,9,2.2,true
+50,Clothing,145.57,21.74,5,3.2,false
+51,Home & Kitchen,584.9,35.54,10,3.7,false
+52,Beauty,788.65,41.41,8,1.2,false
+53,Home & Kitchen,12.14,5.51,1,3.5,false
+54,Clothing,1193.93,84.99,8,1.0,true
+55,Clothing,154.52,10.22,9,3.2,false
+56,Clothing,117.72,49.7,1,4.2,true
+57,Home & Kitchen,859.05,103.9,4,2.4,false
+58,Beauty,629.82,139.24,3,1.7,false
+59,Books,74.48,31.01,1,4.1,false
+60,Clothing,296.48,28.08,5,2.5,true
+61,Books,325.01,33.94,4,2.4,false
+62,Clothing,173.0,100.7,1,2.1,true
+63,Home & Kitchen,1011.22,98.01,6,4.9,false
+64,Electronics,406.97,132.17,2,3.3,false
+65,Electronics,301.84,91.5,2,4.1,false
+66,Beauty,464.23,21.77,9,1.8,true
+67,Books,180.75,80.39,1,3.7,false
+68,Home & Kitchen,218.84,15.15,7,2.3,false
+69,Electronics,811.59,78.53,5,2.3,false
+70,Beauty,203.26,32.82,3,2.5,false
+71,Beauty,930.15,48.64,10,1.0,false
+72,Clothing,1655.72,118.94,7,2.3,false
+73,Books,706.34,79.12,4,4.8,false
+74,Electronics,806.5,79.74,5,2.3,false
+75,Home & Kitchen,678.8,121.95,4,1.2,false
+76,Beauty,334.17,71.04,2,3.3,false
+77,Books,580.27,40.38,7,1.0,true
+78,Books,298.33,30.5,4,3.1,true
+79,Beauty,749.65,138.03,4,1.5,false
+80,Beauty,2001.76,91.34,9,4.6,false
+81,Beauty,2341.83,135.1,8,2.9,false
+82,Clothing,1089.44,116.04,5,3.5,false
+83,Books,326.43,108.46,2,2.3,true
+84,Clothing,242.99,38.53,3,3.8,true
+85,Books,669.66,52.98,7,1.2,false
+86,Books,1742.26,142.18,10,4.5,false
+87,Books,225.05,141.7,1,2.6,false
+88,Beauty,2577.41,120.98,9,3.0,false
+89,Books,120.61,9.21,8,3.7,false
+90,Clothing,2738.87,138.33,8,3.1,false
+91,Beauty,1323.92,101.13,10,2.7,false
+92,Clothing,69.44,42.72,1,2.8,false
+93,Books,1300.91,114.04,5,2.0,true
+94,Books,144.02,113.61,1,4.8,false
+95,Electronics,278.41,114.36,1,1.8,true
+96,Beauty,215.64,39.59,3,1.5,false
+97,Books,823.93,116.2,5,3.4,true
+98,Clothing,127.47,20.67,5,2.2,false
+99,Books,134.43,16.02,4,3.5,true
+100,Home & Kitchen,2722.35,121.8,10,3.3,true
+101,Home & Kitchen,1015.76,67.11,9,3.0,false
+102,Electronics,1162.94,124.24,7,4.8,false
+103,Clothing,401.54,30.54,7,3.6,false
+104,Books,1720.22,124.73,7,2.3,false
+105,Electronics,1007.61,132.84,5,2.9,false
+106,Home & Kitchen,124.4,76.67,1,3.0,false
+107,Home & Kitchen,539.77,45.55,6,4.5,true
+108,Beauty,148.76,17.41,4,3.0,false
+109,Books,684.46,69.99,8,2.2,false
+110,Clothing,850.53,101.27,5,3.2,false
+111,Books,1007.48,52.96,9,2.1,false
+112,Clothing,352.93,109.59,2,4.0,false
+113,Clothing,699.26,112.1,4,3.4,false
+114,Electronics,320.21,47.96,4,2.2,false
+115,Home & Kitchen,280.75,146.27,1,3.8,false
+116,Books,512.03,131.54,2,2.9,false
+117,Home & Kitchen,664.78,145.0,3,4.4,true
+118,Electronics,1041.56,76.3,7,3.7,false
+119,Clothing,1869.37,142.62,10,2.0,false
+120,Beauty,1786.99,119.66,10,3.1,false
+121,Books,1613.09,129.72,5,2.2,true
+122,Beauty,418.69,142.4,2,1.8,true
+123,Clothing,156.75,30.2,4,1.0,false
+124,Beauty,567.11,47.23,8,3.8,false
+125,Electronics,1236.38,138.97,4,3.5,false
+126,Books,342.88,83.96,2,4.6,false
+127,Electronics,46.49,29.06,1,4.0,false
+128,Books,232.79,72.96,2,2.6,false
+129,Beauty,899.37,76.6,9,1.2,false
+130,Home & Kitchen,544.63,41.3,10,4.8,true
+131,Home & Kitchen,236.44,10.83,10,2.9,false
+132,Home & Kitchen,792.66,149.56,3,4.3,true
+133,Books,623.11,64.21,6,1.4,false
+134,Home & Kitchen,1163.79,105.58,7,4.8,true
+135,Books,163.97,50.6,2,4.9,false
+136,Beauty,191.22,100.36,1,2.7,false
+137,Beauty,1056.49,95.28,6,2.8,true
+138,Clothing,1018.21,84.64,5,2.8,false
+139,Electronics,290.98,146.11,1,2.0,false
+140,Home & Kitchen,108.7,6.98,9,1.9,true
+141,Books,277.01,98.92,2,4.7,false
+142,Beauty,596.14,65.25,5,2.9,false
+143,Beauty,436.18,60.62,3,3.0,false
+144,Electronics,1352.24,117.04,5,2.4,false
+145,Electronics,1262.0,110.28,5,3.3,false
+146,Clothing,1095.9,83.09,8,3.2,false
+147,Books,1946.69,131.09,6,2.0,false
+148,Clothing,171.95,11.33,7,3.8,false
+149,Books,287.64,76.82,3,3.0,false
+150,Electronics,371.07,19.46,8,1.1,false
+151,Books,105.37,15.85,3,2.1,false
+152,Electronics,1787.77,128.59,6,2.5,false
+153,Books,118.44,10.21,9,3.5,false
+154,Clothing,180.42,67.93,2,3.5,true
+155,Books,752.44,105.63,3,1.2,true
+156,Home & Kitchen,494.71,59.35,6,3.1,false
+157,Clothing,115.09,16.45,3,3.5,false
+158,Books,463.37,25.75,10,2.0,false
+159,Electronics,2258.69,135.68,8,1.6,false
+160,Home & Kitchen,1185.62,48.38,10,3.8,false
+161,Home & Kitchen,1384.77,149.91,4,1.4,false
+162,Beauty,1320.21,88.35,6,2.2,false
+163,Home & Kitchen,182.09,87.06,1,4.0,true
+164,Beauty,2388.25,125.76,8,4.1,false
+165,Beauty,319.19,36.76,6,2.0,false
+166,Electronics,88.3,49.8,1,3.3,false
+167,Electronics,455.66,52.37,5,1.8,false
+168,Beauty,2820.2,137.46,9,2.0,false
+169,Home & Kitchen,1319.83,121.61,6,1.3,false
+170,Books,1163.76,58.04,9,1.1,true
+171,Books,1276.28,102.56,6,3.3,false
+172,Electronics,588.47,73.36,4,4.8,false
+173,Beauty,801.58,98.91,4,2.9,false
+174,Books,122.82,25.27,2,2.2,false
+175,Electronics,148.3,39.05,2,2.6,false
+176,Beauty,1353.49,90.16,7,4.5,true
+177,Books,1564.05,64.18,10,1.1,false
+178,Clothing,837.62,69.48,8,2.5,false
+179,Beauty,128.87,13.78,6,4.9,false
+180,Electronics,775.1,98.05,4,1.1,false
+181,Clothing,524.12,119.11,3,4.3,false
+182,Beauty,738.76,122.89,4,4.1,true
+183,Home & Kitchen,845.7,148.19,3,4.2,true
+184,Electronics,47.77,7.15,3,2.0,false
+185,Electronics,178.02,43.48,3,2.7,true
+186,Electronics,935.56,70.0,8,3.4,false
+187,Beauty,714.07,142.09,4,4.1,false
+188,Books,25.19,13.82,1,2.6,true
+189,Books,163.49,15.66,8,3.4,true
+190,Clothing,936.66,95.53,5,3.8,false
+191,Beauty,798.31,47.76,9,2.7,true
+192,Beauty,634.4,67.36,4,2.7,false
+193,Books,1245.74,110.79,7,2.3,false
+194,Home & Kitchen,569.98,104.59,3,1.4,true
+195,Electronics,287.34,19.0,7,4.2,true
+196,Beauty,1611.17,86.44,9,2.6,false
+197,Electronics,762.78,92.06,5,3.3,false
+198,Clothing,402.42,37.52,8,4.4,false
+199,Electronics,992.43,88.24,5,4.4,true
+200,Beauty,71.54,9.2,5,4.0,false
+201,Home & Kitchen,43.39,31.3,1,3.6,true
+202,Clothing,34.58,18.3,1,2.5,false
+203,Home & Kitchen,376.26,58.66,3,4.1,true
+204,Electronics,167.19,27.82,3,3.7,false
+205,Books,936.91,75.42,7,2.1,true
+206,Home & Kitchen,307.17,21.08,7,3.4,false
+207,Electronics,493.28,62.31,4,1.0,false
+208,Clothing,547.6,115.8,3,1.5,false
+209,Books,134.72,23.73,3,1.9,false
+210,Electronics,1141.69,129.96,7,1.1,true
+211,Home & Kitchen,1160.57,67.25,10,3.6,false
+212,Electronics,91.07,8.02,7,4.2,false
+213,Home & Kitchen,182.77,68.32,2,2.7,false
+214,Beauty,200.07,62.39,2,2.4,false
+215,Clothing,213.08,79.02,2,3.0,false
+216,Home & Kitchen,163.76,39.26,3,1.8,false
+217,Electronics,864.64,142.94,3,2.9,false
+218,Beauty,1277.18,51.87,10,2.3,false
+219,Electronics,881.23,69.12,8,2.1,true
+220,Home & Kitchen,255.35,15.76,9,1.2,false
+221,Home & Kitchen,486.61,98.48,2,1.4,false
+222,Books,1903.43,85.38,10,4.6,false
+223,Beauty,375.45,51.62,4,1.6,true
+224,Books,561.12,122.59,2,4.9,true
+225,Beauty,67.92,10.68,3,5.0,false
+226,Home & Kitchen,1411.64,138.1,6,4.1,true
+227,Home & Kitchen,203.36,52.81,2,2.5,false
+228,Beauty,313.25,53.34,3,1.6,false
+229,Home & Kitchen,351.95,23.7,7,1.3,false
+230,Home & Kitchen,698.12,102.17,3,4.0,true
+231,Books,864.49,57.47,9,1.7,false
+232,Home & Kitchen,656.79,32.84,8,1.6,false
+233,Electronics,2402.27,116.78,9,4.5,true
+234,Home & Kitchen,405.54,24.0,10,1.6,false
+235,Books,134.26,64.57,1,2.0,false
+236,Beauty,1265.91,114.1,5,1.9,false
+237,Home & Kitchen,1580.95,136.08,8,3.7,false
+238,Books,1092.15,117.83,5,2.7,false
+239,Clothing,382.32,25.07,10,3.6,false
+240,Beauty,404.63,108.15,2,1.5,true
+241,Clothing,654.98,70.15,5,4.3,true
+242,Clothing,2569.03,133.27,8,2.7,false
+243,Beauty,586.18,39.19,6,2.5,true
+244,Home & Kitchen,518.11,126.68,2,4.2,false
+245,Electronics,1251.97,138.02,5,4.3,false
+246,Books,75.05,5.76,10,2.0,false
+247,Beauty,1096.21,81.53,10,2.2,false
+248,Electronics,80.35,39.57,1,3.5,true
+249,Electronics,894.33,91.53,8,3.1,false
+250,Clothing,672.15,67.24,5,2.0,false
+251,Clothing,270.04,80.91,2,4.8,true
+252,Books,154.08,11.31,8,2.5,true
+253,Home & Kitchen,236.81,55.0,2,3.5,false
+254,Clothing,91.98,56.08,1,3.6,false
+255,Books,471.8,122.67,3,4.1,false
+256,Electronics,381.4,34.23,5,4.5,false
+257,Home & Kitchen,1276.15,62.74,9,2.9,true
+258,Clothing,628.64,56.76,5,4.5,false
+259,Home & Kitchen,427.51,120.9,2,2.6,false
+260,Books,1618.38,146.19,6,3.0,false
+261,Electronics,228.23,16.44,7,4.3,false
+262,Home & Kitchen,68.41,16.61,2,2.2,false
+263,Clothing,561.97,55.97,8,4.5,false
+264,Beauty,776.03,44.81,7,4.8,true
+265,Books,1036.11,79.4,6,1.6,true
+266,Clothing,1828.38,103.32,10,1.5,false
+267,Home & Kitchen,703.4,60.51,6,3.4,false
+268,Home & Kitchen,541.07,69.37,6,1.6,false
+269,Books,907.29,99.19,6,1.5,false
+270,Books,1061.58,61.11,9,2.0,false
+271,Books,939.42,149.47,4,4.7,false
+272,Clothing,63.98,24.68,2,1.7,false
+273,Electronics,1296.87,101.84,6,3.2,false
+274,Home & Kitchen,780.9,108.21,3,3.6,false
+275,Beauty,132.1,22.6,4,1.6,false
+276,Electronics,859.91,85.33,6,4.2,false
+277,Beauty,49.91,14.53,2,3.9,false
+278,Beauty,1851.94,116.53,7,1.3,false
+279,Electronics,1086.84,72.55,8,1.5,false
+280,Clothing,1270.15,77.92,7,4.3,false
+281,Home & Kitchen,206.42,28.49,3,1.9,false
+282,Electronics,408.76,33.46,5,2.1,false
+283,Beauty,339.46,18.55,9,3.4,false
+284,Clothing,2175.22,109.49,10,4.4,true
+285,Electronics,47.15,11.59,2,3.3,false
+286,Beauty,820.97,94.63,7,4.6,false
+287,Home & Kitchen,729.04,40.51,8,2.6,false
+288,Electronics,48.59,27.92,1,2.9,false
+289,Beauty,322.13,50.32,3,3.9,false
+290,Books,646.65,115.3,3,1.4,false
+291,Books,133.29,43.78,2,1.4,false
+292,Books,1608.91,65.63,10,4.6,false
+293,Beauty,274.65,32.53,6,5.0,false
+294,Books,507.86,77.12,5,2.6,false
+295,Clothing,452.65,89.58,4,2.1,false
+296,Home & Kitchen,74.64,6.19,9,1.5,false
+297,Home & Kitchen,699.35,58.06,7,3.3,false
+298,Home & Kitchen,717.76,46.85,9,2.8,false
+299,Beauty,548.55,22.23,10,2.6,false
+300,Beauty,1001.92,114.47,6,3.0,true
+301,Electronics,40.61,24.87,1,2.9,false
+302,Clothing,1858.41,134.5,10,4.7,false
+303,Clothing,2248.6,148.64,7,2.2,false
+304,Beauty,1569.19,82.19,9,2.2,true
+305,Home & Kitchen,1524.4,102.7,6,3.3,true
+306,Beauty,714.19,43.5,8,4.9,false
+307,Electronics,1404.92,74.67,10,3.9,false
+308,Clothing,93.22,9.58,4,1.4,true
+309,Books,684.87,65.72,6,1.8,false
+310,Electronics,464.21,80.21,3,5.0,false
+311,Beauty,503.69,50.49,7,4.6,false
+312,Beauty,1438.67,103.0,6,3.7,false
+313,Beauty,399.95,32.88,8,3.2,false
+314,Home & Kitchen,1124.26,107.21,5,3.0,false
+315,Home & Kitchen,2822.72,140.39,9,2.1,true
+316,Beauty,1337.41,60.06,9,4.3,false
+317,Home & Kitchen,99.42,46.71,1,2.4,false
+318,Home & Kitchen,656.13,36.03,8,2.1,false
+319,Clothing,370.08,94.27,2,2.0,false
+320,Clothing,31.82,19.53,1,2.9,false
+321,Electronics,1856.71,146.8,9,3.6,false
+322,Books,721.32,114.61,4,2.1,true
+323,Electronics,835.39,38.67,10,4.4,true
+324,Clothing,1329.26,132.93,7,4.7,false
+325,Books,1035.28,140.81,3,4.7,true
+326,Electronics,585.02,87.35,5,4.9,false
+327,Books,1718.19,81.03,9,1.5,false
+328,Home & Kitchen,797.21,122.28,4,3.9,false
+329,Clothing,249.11,111.81,1,3.3,false
+330,Clothing,3055.65,129.14,10,4.3,false
+331,Electronics,1028.72,102.04,7,1.6,false
+332,Clothing,64.48,42.81,1,4.0,false
+333,Home & Kitchen,1334.17,109.82,10,3.6,false
+334,Electronics,204.05,72.48,2,3.7,false
+335,Electronics,433.42,58.29,5,4.8,false
+336,Clothing,1803.34,113.42,8,2.7,false
+337,Beauty,962.76,115.47,4,3.4,true
+338,Beauty,1090.25,81.59,8,4.7,true
+339,Electronics,1789.42,135.92,9,3.1,false
+340,Home & Kitchen,1295.72,69.07,9,3.9,false
+341,Electronics,796.87,69.59,9,1.5,false
+342,Books,240.81,13.37,10,4.2,true
+343,Books,1338.5,123.39,5,3.3,true
+344,Books,1217.03,106.56,6,1.2,true
+345,Books,66.87,46.63,1,1.5,false
+346,Home & Kitchen,1172.87,70.04,7,2.5,true
+347,Beauty,494.44,99.76,3,1.7,false
+348,Beauty,493.95,110.54,3,1.0,true
+349,Home & Kitchen,1566.82,102.66,8,3.1,false
+350,Clothing,688.04,55.19,8,4.7,true
+351,Electronics,1593.17,94.16,7,4.6,false
+352,Clothing,48.83,19.63,2,3.4,true
+353,Clothing,95.29,63.33,1,1.9,true
+354,Clothing,2018.23,149.06,9,4.7,false
+355,Beauty,2649.21,117.02,10,1.9,false
+356,Beauty,404.82,64.97,4,3.2,false
+357,Books,1704.65,76.87,9,4.8,false
+358,Beauty,1100.33,105.96,6,2.2,false
+359,Beauty,477.03,39.94,8,4.4,false
+360,Books,212.75,86.55,1,3.2,false
+361,Books,273.53,41.97,4,1.3,false
+362,Home & Kitchen,376.68,82.67,2,1.2,false
+363,Beauty,138.91,10.73,10,4.2,false
+364,Books,856.07,131.07,4,4.8,true
+365,Clothing,781.75,144.5,4,5.0,false
+366,Clothing,1836.57,107.05,10,2.0,false
+367,Home & Kitchen,1038.57,72.61,7,2.2,false
+368,Beauty,1302.58,72.57,8,3.9,false
+369,Clothing,380.62,50.37,6,4.5,false
+370,Electronics,834.93,85.23,5,3.9,false
+371,Clothing,357.93,52.83,4,4.3,false
+372,Beauty,575.77,42.31,6,4.9,false
+373,Books,553.3,111.25,3,1.6,false
+374,Clothing,3269.15,148.6,9,3.1,true
+375,Electronics,148.74,64.8,1,1.9,false
+376,Electronics,527.99,78.33,4,3.5,false
+377,Books,11.43,5.96,1,1.0,false
+378,Beauty,84.53,7.49,5,3.7,false
+379,Electronics,245.27,81.04,2,3.5,false
+380,Home & Kitchen,783.39,120.27,5,4.8,false
+381,Beauty,887.68,148.58,4,3.7,true
+382,Electronics,215.58,63.77,2,2.9,true
+383,Clothing,273.36,77.48,2,4.1,true
+384,Beauty,90.88,38.32,1,3.8,false
+385,Home & Kitchen,290.48,139.0,1,2.1,true
+386,Clothing,64.09,7.27,6,1.6,false
+387,Electronics,216.0,28.56,5,4.3,false
+388,Beauty,786.76,60.66,6,4.2,true
+389,Beauty,135.69,12.79,6,4.4,false
+390,Beauty,2461.19,143.45,10,4.1,true
+391,Home & Kitchen,1012.7,76.14,8,4.8,false
+392,Clothing,1321.89,100.8,10,3.5,false
+393,Electronics,148.6,43.86,2,4.1,false
+394,Books,453.46,57.3,6,4.8,false
+395,Home & Kitchen,130.17,19.82,5,2.7,false
+396,Electronics,34.55,17.99,1,3.4,false
+397,Books,80.64,47.32,1,1.3,false
+398,Beauty,451.38,29.59,9,1.6,false
+399,Home & Kitchen,296.63,26.16,8,2.1,false
+400,Books,278.48,57.36,2,3.9,false
+401,Beauty,446.58,33.35,10,2.2,false
+402,Home & Kitchen,1394.37,60.08,10,2.8,false
+403,Beauty,289.05,48.56,3,3.8,false
+404,Home & Kitchen,1068.78,144.86,3,2.2,false
+405,Beauty,326.96,52.25,4,4.1,false
+406,Electronics,848.04,33.97,10,1.7,true
+407,Books,433.08,68.58,4,3.8,false
+408,Books,439.98,96.83,3,3.6,false
+409,Books,277.26,70.11,2,3.3,false
+410,Beauty,199.5,119.65,1,4.6,true
+411,Electronics,666.93,100.35,4,3.6,true
+412,Beauty,1657.71,145.19,7,4.2,true
+413,Electronics,158.5,42.52,2,3.1,false
+414,Books,816.07,61.71,6,3.4,false
+415,Home & Kitchen,118.8,75.0,1,4.7,true
+416,Electronics,274.11,55.51,3,4.1,false
+417,Home & Kitchen,327.8,19.16,8,2.8,true
+418,Home & Kitchen,165.3,122.48,1,4.4,true
+419,Clothing,612.21,79.82,4,2.3,false
+420,Books,974.38,120.67,4,1.7,false
+421,Books,262.79,111.92,1,2.8,false
+422,Books,157.3,107.19,1,4.0,true
+423,Beauty,459.04,120.93,2,2.5,false
+424,Books,199.83,43.04,2,3.1,false
+425,Beauty,1286.78,93.64,7,2.4,false
+426,Beauty,781.4,122.99,3,2.2,true
+427,Clothing,211.67,22.09,6,1.7,false
+428,Beauty,633.73,65.64,7,2.5,false
+429,Books,1936.79,105.55,9,5.0,false
+430,Books,203.85,25.34,5,2.8,true
+431,Home & Kitchen,109.42,75.27,1,2.5,false
+432,Books,1196.72,65.27,8,3.0,true
+433,Beauty,179.0,120.4,1,1.1,false
+434,Beauty,263.7,29.39,5,4.0,false
+435,Beauty,259.96,21.42,9,4.1,false
+436,Beauty,204.34,115.2,1,1.9,false
+437,Electronics,481.53,48.17,4,2.8,false
+438,Electronics,1411.79,130.47,8,4.2,false
+439,Beauty,1553.01,129.85,6,2.7,false
+440,Clothing,945.62,121.79,4,3.1,false
+441,Home & Kitchen,363.29,46.95,5,4.4,true
+442,Clothing,2409.4,138.22,7,4.5,false
+443,Clothing,169.71,26.21,4,2.0,false
+444,Books,412.42,88.73,3,2.7,false
+445,Electronics,275.8,63.41,2,3.8,false
+446,Books,504.97,52.46,8,4.1,true
+447,Books,1719.62,128.27,6,2.6,false
+448,Clothing,800.36,43.94,8,2.4,false
+449,Beauty,2254.68,119.3,8,4.0,true
+450,Electronics,141.8,7.36,8,1.6,false
+451,Electronics,503.64,34.34,7,1.5,false
+452,Clothing,154.59,18.53,5,1.3,false
+453,Electronics,1436.27,95.71,7,4.0,false
+454,Electronics,18.78,5.16,2,1.5,false
+455,Beauty,106.9,6.35,8,4.3,false
+456,Clothing,207.43,15.27,8,3.9,true
+457,Electronics,555.84,58.3,6,2.5,false
+458,Clothing,198.41,81.92,2,3.6,false
+459,Home & Kitchen,536.76,96.07,4,2.6,false
+460,Clothing,373.17,135.01,2,1.5,false
+461,Home & Kitchen,489.43,50.6,7,2.1,true
+462,Clothing,1772.57,92.14,9,2.1,true
+463,Home & Kitchen,596.48,80.07,4,4.0,false
+464,Electronics,413.45,76.76,4,3.0,true
+465,Beauty,357.53,148.1,1,1.5,false
+466,Home & Kitchen,2051.88,104.03,9,4.8,true
+467,Electronics,227.89,14.79,10,1.2,true
+468,Books,890.67,46.54,9,4.1,false
+469,Books,371.74,97.88,2,1.6,true
+470,Home & Kitchen,231.75,79.14,2,4.2,false
+471,Books,2215.65,96.97,10,3.7,true
+472,Home & Kitchen,1784.84,110.84,7,1.2,true
+473,Books,281.75,70.74,2,2.2,false
+474,Electronics,227.35,107.65,1,1.7,false
+475,Beauty,2279.68,118.53,9,1.7,false
+476,Home & Kitchen,289.38,116.86,2,4.2,false
+477,Beauty,212.85,43.13,2,3.5,false
+478,Books,952.45,57.22,9,3.3,false
+479,Clothing,1383.63,117.13,5,3.7,true
+480,Clothing,111.95,5.37,9,1.0,true
+481,Books,506.68,60.53,6,4.7,true
+482,Beauty,400.25,37.55,7,4.7,false
+483,Home & Kitchen,238.17,87.87,2,3.7,true
+484,Clothing,1204.54,121.63,4,4.8,true
+485,Books,939.57,117.16,5,1.3,false
+486,Electronics,395.48,34.1,6,2.2,false
+487,Books,1003.18,90.8,6,4.1,false
+488,Beauty,258.87,26.83,4,1.1,false
+489,Electronics,64.22,5.21,6,4.4,false
+490,Electronics,494.07,81.82,4,3.0,true
+491,Clothing,221.66,18.49,5,4.6,false
+492,Home & Kitchen,1533.77,146.31,8,1.4,false
+493,Books,232.67,90.82,2,3.6,false
+494,Clothing,344.76,42.84,5,4.2,false
+495,Home & Kitchen,461.04,44.43,8,1.8,true
+496,Clothing,104.13,28.83,2,2.6,false
+497,Clothing,614.1,49.7,8,1.5,false
+498,Home & Kitchen,248.11,10.85,10,2.3,true
+499,Clothing,473.56,62.46,6,2.2,false
+500,Electronics,1735.16,128.92,7,3.2,true
+501,Books,335.95,121.57,2,1.0,false
+502,Clothing,838.12,124.43,4,3.5,true
+503,Beauty,959.72,42.53,10,1.1,true
+504,Clothing,1291.6,122.35,8,4.4,false
+505,Electronics,179.28,141.63,1,4.7,false
+506,Books,154.86,9.27,8,1.7,false
+507,Clothing,535.21,45.58,5,1.1,false
+508,Home & Kitchen,992.28,64.74,8,1.2,false
+509,Books,401.74,65.79,3,4.2,false
+510,Beauty,329.06,148.46,1,2.4,false
+511,Home & Kitchen,1327.26,77.85,10,1.7,false
+512,Beauty,83.39,9.25,4,2.1,false
+513,Beauty,1742.49,116.19,6,4.9,true
+514,Clothing,394.8,43.65,4,4.7,true
+515,Clothing,2857.04,127.74,10,2.4,false
+516,Clothing,817.58,90.92,4,3.8,true
+517,Home & Kitchen,1675.47,86.72,10,1.8,false
+518,Beauty,190.28,30.46,5,1.2,false
+519,Electronics,1090.97,74.31,9,3.5,false
+520,Home & Kitchen,952.71,138.22,3,2.3,true
+521,Clothing,1483.53,107.18,10,1.4,false
+522,Electronics,1325.0,107.16,6,3.3,false
+523,Home & Kitchen,208.94,24.79,6,4.8,false
+524,Home & Kitchen,622.84,107.54,3,4.6,false
+525,Clothing,2082.73,123.1,10,3.9,false
+526,Clothing,807.99,110.68,3,4.8,false
+527,Beauty,50.67,31.4,1,4.2,false
+528,Beauty,389.46,140.82,2,4.0,false
+529,Home & Kitchen,413.86,29.34,6,1.4,false
+530,Books,66.25,43.46,1,1.3,false
+531,Electronics,21.2,11.98,1,2.7,false
+532,Books,1760.77,132.86,8,2.5,false
+533,Beauty,148.19,28.59,4,4.4,false
+534,Electronics,343.6,42.86,6,2.4,false
+535,Clothing,399.27,84.32,2,1.4,false
+536,Electronics,1402.54,141.65,7,4.6,false
+537,Electronics,261.52,53.01,2,2.6,false
+538,Home & Kitchen,249.36,39.44,5,3.3,false
+539,Clothing,100.65,57.32,1,2.2,false
+540,Clothing,24.83,8.73,2,2.2,true
+541,Books,170.68,49.71,2,3.0,false
+542,Electronics,926.47,61.19,9,2.5,false
+543,Books,77.92,43.18,1,1.9,false
+544,Beauty,56.66,26.91,1,1.4,false
+545,Beauty,2006.47,145.75,7,3.2,false
+546,Beauty,2124.88,145.02,7,4.7,false
+547,Books,195.23,16.45,5,3.9,false
+548,Electronics,596.51,30.07,8,4.9,false
+549,Clothing,164.96,66.39,1,2.7,false
+550,Beauty,550.9,51.36,5,4.2,true
+551,Books,915.23,62.62,9,2.1,false
+552,Electronics,1999.0,90.2,10,1.5,false
+553,Clothing,1972.77,90.25,10,4.8,true
+554,Beauty,553.67,118.93,2,4.5,false
+555,Home & Kitchen,1359.72,99.94,7,2.9,false
+556,Home & Kitchen,360.46,25.86,7,3.8,true
+557,Books,797.28,105.12,6,2.9,false
+558,Home & Kitchen,120.49,53.99,1,2.2,false
+559,Electronics,241.62,24.49,4,2.8,false
+560,Home & Kitchen,854.18,92.72,7,2.8,false
+561,Books,2667.87,130.74,9,3.1,false
+562,Electronics,930.23,107.89,5,4.1,true
+563,Clothing,770.79,131.9,4,1.2,true
+564,Books,292.24,138.11,1,2.1,false
+565,Beauty,925.38,97.13,7,1.1,false
+566,Books,1706.24,69.68,10,2.9,false
+567,Home & Kitchen,582.83,126.46,3,4.3,true
+568,Home & Kitchen,86.19,61.05,1,3.3,false
+569,Clothing,640.19,103.27,4,2.6,true
+570,Electronics,2240.35,137.17,8,3.4,true
+571,Clothing,1130.59,93.21,5,3.9,false
+572,Books,1615.88,128.48,7,1.9,false
+573,Beauty,834.33,62.59,10,3.0,false
+574,Beauty,1481.78,93.31,10,1.4,true
+575,Home & Kitchen,1135.49,97.89,5,2.0,false
+576,Clothing,363.02,80.01,3,1.2,false
+577,Home & Kitchen,674.64,109.59,3,5.0,false
+578,Books,534.62,61.3,7,3.8,false
+579,Home & Kitchen,848.62,104.52,4,2.9,false
+580,Beauty,1462.71,127.59,5,4.5,false
+581,Home & Kitchen,316.95,73.26,2,3.9,false
+582,Home & Kitchen,110.97,37.23,2,4.5,false
+583,Home & Kitchen,406.14,42.78,6,4.4,false
+584,Electronics,1789.11,89.15,10,2.9,false
+585,Beauty,443.68,130.79,2,2.2,true
+586,Clothing,734.98,148.89,3,4.9,false
+587,Clothing,1119.31,130.05,6,1.3,false
+588,Clothing,701.97,97.0,6,2.1,false
+589,Beauty,499.86,75.99,3,1.4,false
+590,Books,856.55,67.21,7,1.0,false
+591,Home & Kitchen,293.39,134.34,1,3.1,true
+592,Electronics,353.91,37.81,4,2.2,true
+593,Books,1152.46,90.36,9,4.3,false
+594,Home & Kitchen,1746.78,110.54,8,2.4,false
+595,Home & Kitchen,659.94,57.09,8,4.8,false
+596,Electronics,372.35,37.53,4,1.8,true
+597,Beauty,445.13,29.5,9,3.6,true
+598,Books,1174.19,116.83,5,3.4,true
+599,Electronics,16.19,11.99,1,2.8,true
+600,Beauty,516.19,73.79,5,3.8,true
+601,Home & Kitchen,1456.42,100.94,7,2.1,false
+602,Books,317.2,79.18,2,2.1,true
+603,Books,825.36,93.31,4,4.3,false
+604,Home & Kitchen,418.92,47.83,7,3.0,false
+605,Books,284.68,39.0,6,1.4,true
+606,Beauty,280.6,26.63,8,3.0,true
+607,Home & Kitchen,703.89,71.23,4,2.1,true
+608,Electronics,912.21,131.75,3,2.4,false
+609,Books,82.05,18.77,2,1.2,false
+610,Clothing,603.31,56.84,6,3.5,true
+611,Home & Kitchen,325.48,31.52,6,4.8,false
+612,Books,1977.94,120.99,8,4.2,true
+613,Clothing,338.51,147.33,1,1.4,false
+614,Beauty,423.83,31.28,8,2.4,true
+615,Clothing,1491.84,138.46,8,2.6,true
+616,Electronics,607.85,99.97,5,4.5,false
+617,Home & Kitchen,1535.89,80.85,9,1.4,false
+618,Books,1235.43,101.24,6,1.6,true
+619,Electronics,425.24,78.31,3,3.0,false
+620,Electronics,671.5,51.49,8,2.1,false
+621,Beauty,668.98,63.48,7,2.8,false
+622,Electronics,756.47,69.82,8,3.0,true
+623,Electronics,872.71,64.79,7,1.0,true
+624,Beauty,2296.8,97.44,10,3.2,false
+625,Home & Kitchen,1691.7,124.67,6,4.4,false
+626,Beauty,1960.91,91.99,10,2.5,false
+627,Electronics,342.6,115.1,2,2.4,false
+628,Beauty,713.12,59.21,9,4.6,false
+629,Clothing,286.29,20.51,7,1.8,false
+630,Clothing,1442.66,124.56,8,2.4,false
+631,Electronics,539.57,22.87,10,2.8,false
+632,Books,103.45,81.9,1,4.7,false
+633,Beauty,450.44,105.31,3,4.3,true
+634,Books,1503.33,92.89,10,4.5,false
+635,Beauty,438.24,44.67,4,4.9,false
+636,Clothing,410.5,64.85,3,4.0,false
+637,Beauty,1568.86,108.22,6,3.5,false
+638,Clothing,2272.35,108.59,10,4.7,false
+639,Clothing,1526.92,83.66,9,3.8,false
+640,Beauty,1736.83,89.51,8,3.8,false
+641,Books,99.61,80.8,1,1.6,true
+642,Clothing,801.7,113.78,5,2.1,false
+643,Clothing,166.51,105.14,1,4.0,true
+644,Home & Kitchen,369.94,19.86,8,4.0,false
+645,Beauty,612.94,39.45,7,4.2,false
+646,Electronics,1046.89,61.2,7,4.9,false
+647,Beauty,10.5,6.88,1,3.5,false
+648,Clothing,1312.47,114.49,6,3.4,false
+649,Home & Kitchen,513.18,30.73,8,1.7,false
+650,Beauty,209.76,59.69,2,3.2,false
+651,Clothing,1541.41,127.67,10,2.9,false
+652,Electronics,827.82,139.65,3,4.1,false
+653,Books,1097.56,84.77,10,3.8,false
+654,Clothing,248.81,14.89,9,2.7,false
+655,Electronics,328.59,37.07,6,2.3,false
+656,Home & Kitchen,1144.47,142.79,4,2.9,true
+657,Electronics,992.44,69.62,6,3.5,false
+658,Electronics,808.65,60.3,6,1.5,false
+659,Beauty,80.31,8.58,5,4.1,false
+660,Books,98.21,47.98,1,2.3,true
+661,Electronics,965.2,145.89,3,3.1,true
+662,Clothing,913.71,130.42,4,1.4,false
+663,Electronics,53.98,8.44,3,1.2,true
+664,Electronics,694.11,120.16,3,3.3,false
+665,Home & Kitchen,865.91,61.26,7,2.7,true
+666,Books,335.79,82.55,2,3.5,true
+667,Electronics,1120.45,139.57,6,4.1,false
+668,Beauty,220.37,45.82,2,2.5,true
+669,Books,340.26,82.35,3,2.6,false
+670,Clothing,1232.54,103.21,5,4.2,false
+671,Electronics,1641.95,131.84,9,1.2,false
+672,Beauty,2044.27,142.31,9,4.0,false
+673,Clothing,2201.33,136.32,7,1.6,false
+674,Clothing,1830.89,126.04,10,1.7,true
+675,Beauty,1020.32,98.48,8,3.7,false
+676,Electronics,808.21,110.21,4,2.3,false
+677,Clothing,119.63,46.34,2,1.8,false
+678,Books,904.47,94.37,6,3.3,false
+679,Home & Kitchen,331.32,29.45,7,4.1,false
+680,Home & Kitchen,316.08,24.47,6,4.5,false
+681,Books,1290.55,117.34,6,1.4,true
+682,Home & Kitchen,586.1,134.24,3,3.9,true
+683,Electronics,259.09,128.19,1,4.3,false
+684,Beauty,1046.03,136.41,4,3.2,false
+685,Clothing,876.23,61.91,6,3.4,false
+686,Clothing,818.67,77.66,8,2.5,true
+687,Clothing,2276.11,104.2,10,1.6,false
+688,Clothing,2932.8,142.56,10,4.9,false
+689,Home & Kitchen,67.36,36.73,1,1.3,false
+690,Clothing,190.96,101.94,1,4.2,false
+691,Books,1330.29,132.83,8,3.6,true
+692,Beauty,972.12,126.06,5,3.2,false
+693,Books,831.6,57.97,7,4.3,false
+694,Books,529.94,79.87,4,4.5,false
+695,Books,139.86,5.96,10,2.8,false
+696,Electronics,1304.91,98.3,9,1.7,false
+697,Beauty,350.79,100.86,2,2.3,true
+698,Books,1172.32,74.46,8,3.6,false
+699,Electronics,87.63,11.26,4,1.6,true
+700,Beauty,60.4,13.11,3,1.7,false
+701,Beauty,2282.57,97.46,10,3.9,false
+702,Electronics,698.67,70.13,4,4.5,false
+703,Clothing,1439.93,92.12,7,4.3,false
+704,Beauty,835.68,43.36,9,2.4,false
+705,Beauty,253.41,14.98,10,1.5,true
+706,Clothing,2165.12,129.64,9,2.7,false
+707,Beauty,145.79,30.73,2,3.4,true
+708,Electronics,1909.64,100.61,8,3.2,true
+709,Books,1388.34,66.0,9,3.8,false
+710,Clothing,1620.87,119.49,8,3.4,true
+711,Books,276.05,41.91,3,4.6,true
+712,Home & Kitchen,2287.49,132.13,10,1.8,true
+713,Beauty,240.43,22.09,9,3.6,false
+714,Books,215.2,20.45,6,3.3,false
+715,Beauty,1213.55,86.88,7,5.0,false
+716,Clothing,1146.08,85.06,7,1.7,false
+717,Home & Kitchen,979.22,88.76,5,2.6,false
+718,Electronics,588.52,69.76,4,1.6,false
+719,Beauty,1866.53,118.98,7,3.5,true
+720,Clothing,1223.8,144.86,7,1.4,false
+721,Books,874.32,68.13,10,1.9,true
+722,Beauty,265.21,110.05,1,2.6,false
+723,Beauty,322.11,142.13,1,3.6,false
+724,Electronics,1237.09,128.33,4,3.1,false
+725,Electronics,1665.94,79.03,10,3.5,true
+726,Home & Kitchen,987.14,99.98,4,1.3,false
+727,Books,1058.01,102.1,6,1.8,true
+728,Electronics,363.15,84.69,2,3.2,false
+729,Home & Kitchen,463.55,37.81,5,2.8,false
+730,Beauty,74.12,42.86,1,1.4,true
+731,Beauty,367.1,54.3,5,3.1,false
+732,Beauty,732.79,41.27,10,2.5,false
+733,Clothing,1556.27,144.38,6,2.8,true
+734,Books,143.88,42.38,2,4.2,false
+735,Clothing,645.03,64.8,6,3.1,false
+736,Clothing,191.91,18.49,5,4.3,true
+737,Beauty,368.93,74.1,3,4.6,false
+738,Clothing,451.59,77.35,4,3.9,false
+739,Clothing,209.79,34.4,4,3.5,false
+740,Electronics,575.47,138.43,2,3.7,true
+741,Beauty,215.3,127.96,1,2.3,false
+742,Books,1059.65,147.74,3,2.1,false
+743,Beauty,86.32,12.85,3,2.9,true
+744,Beauty,779.44,62.09,6,1.7,true
+745,Beauty,491.84,50.77,8,3.7,false
+746,Beauty,208.41,52.19,2,2.0,false
+747,Clothing,732.4,73.35,5,2.5,false
+748,Books,572.95,65.77,4,2.5,false
+749,Home & Kitchen,340.76,31.08,8,3.3,false
+750,Electronics,1168.44,121.59,5,4.4,false
+751,Clothing,267.68,73.58,3,2.7,false
+752,Beauty,2188.33,109.48,9,2.2,true
+753,Books,268.72,105.13,2,4.3,false
+754,Electronics,1389.71,112.97,8,2.4,false
+755,Home & Kitchen,107.19,64.71,1,3.7,false
+756,Beauty,1885.34,99.23,10,4.9,false
+757,Home & Kitchen,1128.96,102.61,6,3.9,true
+758,Books,940.88,46.55,10,1.6,false
+759,Home & Kitchen,1312.99,96.53,7,4.4,true
+760,Electronics,264.42,54.83,3,3.6,false
+761,Beauty,551.85,44.33,7,4.5,false
+762,Beauty,2268.33,145.0,9,1.7,true
+763,Clothing,978.62,100.99,4,3.8,true
+764,Clothing,248.57,62.57,3,4.7,false
+765,Beauty,15.14,8.82,1,4.1,true
+766,Electronics,619.57,94.62,5,4.7,false
+767,Home & Kitchen,256.57,40.87,4,3.5,false
+768,Beauty,56.56,9.14,3,4.4,false
+769,Books,2228.06,146.37,8,2.1,false
+770,Clothing,545.67,30.67,9,3.5,false
+771,Beauty,741.61,49.9,9,3.2,true
+772,Books,446.25,58.04,5,2.2,true
+773,Beauty,297.88,54.86,3,1.0,false
+774,Books,55.6,6.32,5,2.2,false
+775,Electronics,924.23,59.18,9,3.2,false
+776,Clothing,664.99,108.67,3,4.3,false
+777,Home & Kitchen,200.17,66.22,2,4.1,false
+778,Home & Kitchen,1911.36,122.28,9,4.4,false
+779,Clothing,188.15,21.0,5,2.8,false
+780,Clothing,59.26,7.81,6,3.1,false
+781,Electronics,468.87,44.03,5,3.9,false
+782,Electronics,31.75,7.14,3,2.7,false
+783,Home & Kitchen,1053.18,106.06,8,1.3,false
+784,Electronics,759.33,117.47,5,2.9,false
+785,Home & Kitchen,1189.68,125.1,7,4.1,false
+786,Books,814.48,40.84,8,1.8,true
+787,Beauty,613.75,73.56,4,2.2,false
+788,Clothing,216.31,112.99,1,1.5,false
+789,Home & Kitchen,290.36,57.26,4,3.7,true
+790,Clothing,516.49,52.05,7,2.1,true
+791,Books,31.57,6.29,4,4.1,false
+792,Beauty,232.4,58.85,3,1.6,true
+793,Beauty,2096.25,139.97,6,3.5,true
+794,Home & Kitchen,713.41,106.69,3,1.5,false
+795,Home & Kitchen,2345.43,119.34,9,4.2,false
+796,Clothing,174.79,104.94,1,1.5,true
+797,Books,1311.94,86.06,8,3.0,false
+798,Beauty,563.62,51.93,6,4.5,false
+799,Electronics,391.85,27.48,9,2.1,false
+800,Books,218.3,117.51,1,3.9,true
+801,Beauty,1065.03,117.52,6,3.9,false
+802,Clothing,2056.33,104.07,9,1.6,false
+803,Home & Kitchen,921.05,97.93,7,3.1,true
+804,Electronics,115.01,30.9,3,1.4,false
+805,Electronics,200.82,87.8,1,3.6,false
+806,Electronics,473.57,37.0,6,1.1,false
+807,Books,295.94,72.87,2,2.4,false
+808,Home & Kitchen,192.31,124.43,1,1.2,true
+809,Home & Kitchen,695.3,141.97,2,1.4,false
+810,Beauty,428.23,32.47,7,2.0,false
+811,Beauty,784.65,65.2,9,3.6,false
+812,Books,1319.19,133.01,7,1.7,false
+813,Beauty,1140.31,100.34,6,3.4,false
+814,Home & Kitchen,2171.67,148.76,9,2.5,false
+815,Home & Kitchen,761.82,39.9,10,2.5,false
+816,Home & Kitchen,959.57,69.89,8,3.9,false
+817,Beauty,199.44,80.05,1,2.2,false
+818,Clothing,634.15,129.08,4,4.3,false
+819,Beauty,1853.32,85.67,9,1.6,true
+820,Books,256.14,27.64,6,4.6,false
+821,Clothing,808.91,122.61,5,2.6,false
+822,Electronics,1025.58,119.97,6,4.3,true
+823,Beauty,117.27,10.42,5,2.5,true
+824,Home & Kitchen,1403.59,132.57,6,4.7,true
+825,Clothing,2826.59,139.65,10,3.5,true
+826,Home & Kitchen,187.78,10.97,9,1.6,false
+827,Clothing,256.35,102.68,1,4.9,true
+828,Clothing,563.69,47.02,7,1.5,true
+829,Books,2162.57,113.07,10,2.1,false
+830,Beauty,1123.53,117.2,7,1.5,false
+831,Books,1014.17,99.58,7,3.5,false
+832,Clothing,153.43,43.61,2,3.7,true
+833,Electronics,768.34,66.41,7,2.3,true
+834,Home & Kitchen,889.74,148.21,3,5.0,false
+835,Beauty,496.17,68.87,3,1.9,false
+836,Clothing,54.11,21.29,2,4.8,false
+837,Home & Kitchen,122.99,54.77,1,2.2,false
+838,Electronics,402.41,35.31,6,1.8,false
+839,Beauty,1899.17,95.34,8,3.8,true
+840,Books,2570.54,136.38,10,2.0,true
+841,Home & Kitchen,957.04,119.43,4,1.2,true
+842,Electronics,1454.14,100.75,7,4.7,false
+843,Electronics,111.34,47.41,1,2.5,false
+844,Beauty,498.0,136.06,2,3.4,true
+845,Clothing,557.21,77.59,4,4.7,true
+846,Electronics,885.88,138.73,4,3.0,false
+847,Electronics,1039.38,104.23,6,2.2,false
+848,Electronics,1560.8,132.41,5,4.3,true
+849,Beauty,310.04,37.71,5,2.6,false
+850,Electronics,1172.87,80.5,7,4.5,false
+851,Books,618.04,88.07,4,2.2,false
+852,Books,444.44,24.11,9,3.3,false
+853,Clothing,1241.43,104.84,5,4.6,false
+854,Clothing,2225.27,137.98,10,3.2,true
+855,Clothing,1056.3,126.73,6,1.1,false
+856,Books,743.92,48.99,7,4.3,false
+857,Clothing,117.98,20.48,4,4.0,false
+858,Beauty,1852.6,93.79,10,1.9,true
+859,Home & Kitchen,381.31,104.78,2,3.0,false
+860,Home & Kitchen,709.22,128.56,3,1.6,false
+861,Clothing,158.02,64.25,1,4.7,false
+862,Clothing,590.93,114.88,4,4.7,false
+863,Beauty,1949.68,104.74,8,4.6,false
+864,Books,211.6,93.15,1,3.9,false
+865,Beauty,1715.23,91.1,10,4.5,true
+866,Beauty,320.7,70.48,2,1.2,false
+867,Beauty,1209.88,62.36,9,3.2,true
+868,Clothing,807.6,68.74,5,4.1,false
+869,Books,396.98,66.26,3,1.2,false
+870,Books,268.15,18.11,8,1.7,false
+871,Books,447.73,51.9,7,2.8,false
+872,Books,173.23,41.26,2,4.6,false
+873,Electronics,76.9,21.55,2,2.5,false
+874,Beauty,2415.06,142.71,10,2.5,false
+875,Home & Kitchen,3049.02,131.34,10,1.6,false
+876,Clothing,105.5,65.84,1,4.1,false
+877,Home & Kitchen,90.69,22.05,3,1.8,false
+878,Electronics,1140.88,77.16,8,4.2,false
+879,Clothing,657.47,90.39,4,2.6,true
+880,Beauty,139.64,5.95,10,2.1,false
+881,Electronics,162.92,26.5,3,1.1,true
+882,Beauty,1156.79,48.27,10,1.2,false
+883,Clothing,612.98,102.45,3,3.8,false
+884,Books,713.42,57.23,10,4.1,false
+885,Home & Kitchen,1896.51,123.94,7,4.4,true
+886,Home & Kitchen,412.36,24.51,8,2.1,false
+887,Beauty,845.37,105.9,4,1.4,true
+888,Books,3485.2,140.41,10,2.1,false
+889,Home & Kitchen,1599.33,88.4,9,4.7,false
+890,Beauty,876.5,76.41,8,3.4,false
+891,Clothing,39.95,22.14,1,4.2,false
+892,Beauty,743.9,65.04,7,3.2,false
+893,Electronics,643.22,105.05,4,1.3,false
+894,Beauty,565.0,51.97,9,3.7,false
+895,Books,1167.54,94.32,10,1.7,false
+896,Home & Kitchen,2466.16,137.84,8,3.6,false
+897,Clothing,2040.03,134.35,8,2.3,false
+898,Electronics,933.25,48.4,9,2.3,true
+899,Clothing,2337.93,104.4,10,4.6,false
+900,Electronics,169.96,45.67,3,4.9,false
+901,Beauty,1213.66,61.49,10,4.5,false
+902,Home & Kitchen,58.25,44.37,1,4.5,false
+903,Books,289.45,36.34,5,1.4,true
+904,Clothing,170.94,69.35,2,2.9,false
+905,Clothing,1794.01,138.93,6,3.1,false
+906,Clothing,601.04,124.21,2,3.7,false
+907,Clothing,152.37,71.61,1,3.1,true
+908,Home & Kitchen,206.37,104.62,1,1.3,false
+909,Electronics,331.04,80.48,2,2.2,false
+910,Clothing,321.55,34.08,6,3.1,false
+911,Electronics,207.3,26.65,5,1.1,true
+912,Clothing,810.57,55.8,9,1.6,false
+913,Beauty,191.48,29.83,4,4.6,false
+914,Electronics,65.53,9.2,3,1.2,false
+915,Electronics,191.52,66.84,2,3.4,false
+916,Beauty,682.88,50.3,6,3.9,true
+917,Books,544.09,24.11,10,4.7,false
+918,Electronics,815.26,50.01,8,4.1,false
+919,Clothing,244.39,25.84,4,2.0,false
+920,Books,659.31,106.44,3,4.2,false
+921,Books,136.56,9.39,8,2.4,false
+922,Clothing,1155.22,116.35,5,1.5,true
+923,Books,213.63,52.25,2,4.2,false
+924,Books,1303.64,64.95,10,3.2,false
+925,Books,245.68,54.4,2,3.4,false
+926,Beauty,759.17,83.96,6,3.7,true
+927,Beauty,340.95,21.58,8,2.3,true
+928,Books,257.42,49.67,3,3.4,false
+929,Home & Kitchen,1008.79,98.52,8,1.9,false
+930,Beauty,236.35,114.78,1,2.8,false
+931,Books,1291.48,88.8,10,3.7,false
+932,Home & Kitchen,2503.86,120.18,10,4.7,false
+933,Home & Kitchen,357.09,89.5,2,3.0,false
+934,Home & Kitchen,112.02,58.54,1,1.2,false
+935,Electronics,982.69,130.52,5,3.8,false
+936,Home & Kitchen,789.45,63.87,7,1.8,false
+937,Books,164.68,32.29,3,4.7,false
+938,Clothing,1549.48,149.63,5,1.5,true
+939,Electronics,602.54,109.59,3,2.7,false
+940,Electronics,512.42,98.13,3,2.8,false
+941,Beauty,372.46,70.89,3,4.3,false
+942,Home & Kitchen,253.72,31.94,4,3.3,false
+943,Beauty,616.65,64.57,5,2.5,true
+944,Beauty,1155.39,107.21,8,2.9,true
+945,Clothing,3293.24,147.62,9,4.1,false
+946,Beauty,322.44,80.89,2,2.0,true
+947,Beauty,638.24,50.31,10,2.4,true
+948,Books,1148.84,79.34,8,3.9,false
+949,Home & Kitchen,292.42,46.94,5,4.7,false
+950,Beauty,126.24,13.91,5,1.7,true
+951,Home & Kitchen,163.98,8.96,10,1.5,true
+952,Home & Kitchen,189.55,24.22,5,4.4,true
+953,Electronics,597.09,30.32,10,1.6,false
+954,Home & Kitchen,271.56,42.88,3,2.9,true
+955,Home & Kitchen,573.59,145.27,2,4.3,false
+956,Books,490.02,39.5,7,3.6,false
+957,Beauty,119.3,12.88,6,4.3,true
+958,Clothing,799.96,62.82,8,4.0,false
+959,Books,717.59,73.82,7,4.5,true
+960,Home & Kitchen,778.01,60.39,8,3.1,true
+961,Electronics,2142.23,97.43,9,2.7,false
+962,Home & Kitchen,290.31,43.73,5,3.6,false
+963,Books,876.39,111.48,4,1.8,false
+964,Clothing,1050.6,84.4,6,4.3,true
+965,Books,339.44,81.16,2,2.4,false
+966,Home & Kitchen,79.73,9.94,4,1.2,false
+967,Beauty,291.99,107.67,2,4.4,false
+968,Books,1749.27,121.46,10,1.4,false
+969,Home & Kitchen,878.71,72.71,5,3.6,false
+970,Books,562.29,42.31,6,2.1,true
+971,Books,476.22,53.23,7,4.8,false
+972,Clothing,297.98,15.06,8,1.8,false
+973,Clothing,315.41,20.72,8,2.7,true
+974,Books,129.35,19.98,5,3.3,false
+975,Books,188.11,134.99,1,3.6,true
+976,Books,219.72,26.98,5,2.6,true
+977,Beauty,1025.81,74.33,8,3.9,true
+978,Beauty,53.49,5.48,4,4.3,false
+979,Electronics,2056.48,82.62,10,2.3,false
+980,Books,236.52,96.68,1,1.4,false
+981,Electronics,1454.2,115.27,8,1.8,true
+982,Books,330.09,48.34,4,1.4,false
+983,Books,471.93,133.36,2,1.8,true
+984,Clothing,215.53,109.36,1,3.0,true
+985,Beauty,950.48,77.45,5,4.2,true
+986,Electronics,175.22,13.13,6,1.2,true
+987,Clothing,1338.7,71.46,9,4.5,false
+988,Beauty,694.35,139.1,4,1.6,true
+989,Books,245.8,11.64,10,1.5,false
+990,Electronics,822.48,124.01,5,3.4,true
+991,Electronics,345.2,77.09,2,1.9,false
+992,Books,1823.01,122.67,6,3.7,false
+993,Electronics,1361.6,84.15,10,4.9,false
+994,Electronics,386.58,30.15,10,2.1,false
+995,Clothing,905.38,85.24,6,4.7,true
+996,Clothing,484.03,119.7,2,2.5,false
+997,Electronics,161.57,16.7,8,4.7,false
+998,Books,1237.71,105.39,8,3.6,false
+999,Books,1124.61,141.02,4,1.2,false
+1000,Books,2877.72,142.79,10,4.1,false

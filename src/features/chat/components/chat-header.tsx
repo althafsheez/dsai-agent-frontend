@@ -1,6 +1,6 @@
 "use client";
 
-import { Folder, Menu, PanelRight, Share2 } from "lucide-react";
+import { Folder, Menu, PanelRight, Share2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useUiStore } from "@/stores/ui-store";
 import { cn } from "@/lib/utils";
@@ -10,11 +10,19 @@ export function ChatHeader({
   workspaceName,
   panelOpen,
   onToggleRightPanel,
+  quickAssistantOpen,
+  onToggleQuickAssistant,
+  onShare,
 }: {
   title: string;
   workspaceName?: string;
   panelOpen: boolean;
   onToggleRightPanel: () => void;
+  quickAssistantOpen?: boolean;
+  /** Omitted before the chat exists: Quick Assistant needs a saved transcript to read. */
+  onToggleQuickAssistant?: () => void;
+  /** Sharing works at workspace level, so standalone chats get a disabled button explaining why. */
+  onShare?: () => void;
 }) {
   const setMobileOpen = useUiStore((state) => state.setMobileSidebarOpen);
 
@@ -47,12 +55,29 @@ export function ChatHeader({
         Live Gemini
       </span>
 
+      {onToggleQuickAssistant ? <Button
+        variant="ghost"
+        size="sm"
+        onClick={onToggleQuickAssistant}
+        aria-label="Quick Assistant"
+        aria-expanded={quickAssistantOpen ?? false}
+        title="Ask a side question without adding it to this chat"
+        className={cn(
+          "h-8 gap-1.5 text-xs transition-colors",
+          quickAssistantOpen ? "bg-raised text-foreground" : "text-muted-foreground hover:bg-raised hover:text-foreground"
+        )}
+      >
+        <Sparkles className="size-3.5 text-sage" />
+        <span className="hidden sm:inline">Quick Assistant</span>
+      </Button> : null}
+
       <Button
         variant="ghost"
         size="sm"
-        disabled
-        title="Sharing will be connected later"
-        className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+        disabled={!onShare}
+        onClick={onShare}
+        title={onShare ? "Share this chat's workspace" : "Move this chat into a workspace to share it"}
+        className="h-8 gap-1.5 text-xs text-muted-foreground hover:bg-raised hover:text-foreground"
       >
         <Share2 className="size-3.5" />
         <span className="hidden sm:inline">Share</span>

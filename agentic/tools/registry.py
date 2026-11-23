@@ -1,35 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
-
-@dataclass
-class ToolContext:
-    run_id: str
-    chat_id: str
-    user_id: str
-    assistant_message_id: str = ""
-    step_id: str | None = None
-    tool_name: str | None = None
-    input_resources: tuple[dict[str, Any], ...] = ()
-
-    def for_step(self, step_id: str, tool_name: str) -> "ToolContext":
-        return ToolContext(
-            run_id=self.run_id,
-            chat_id=self.chat_id,
-            user_id=self.user_id,
-            assistant_message_id=self.assistant_message_id,
-            step_id=step_id,
-            tool_name=tool_name,
-            input_resources=self.input_resources,
-        )
+from ..runtime.contracts import ToolContext
 
 
 ToolHandler = Callable[[dict[str, Any], ToolContext], Awaitable[dict[str, Any]]]
 CleanupHandler = Callable[[ToolContext], Awaitable[None]]
 PrepareHandler = Callable[[ToolContext], Awaitable[dict[str, Any]]]
+InputSelector = Callable[[dict[str, Any], ToolContext], tuple[dict[str, Any], ...]]
 
 
 @dataclass(frozen=True)
@@ -38,6 +19,7 @@ class ToolDefinition:
     description: str
     parameters: dict[str, Any]
     handler: ToolHandler
+    select_inputs: InputSelector | None = None
 
 
 class ToolRegistry:
@@ -63,7 +45,19 @@ class ToolRegistry:
         return tuple(self._tools.values())
 
     async def execute(self, name: str, arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-        return await self.get(name).handler(arguments, context)
+        tool = self.get(name)
+        try:
+            inputs = tool.select_inputs(arguments, context) if tool.select_inputs else ()
+        except ValueError as exc:
+            return {"error": str(exc)}
+        return await tool.handler(arguments, replace(context, input_resources=inputs))
+
+    def input_resources(self, name: str, arguments: dict[str, Any], context: ToolContext) -> tuple[dict[str, Any], ...]:
+        try:
+            selector = self.get(name).select_inputs
+            return selector(arguments, context) if selector else ()
+        except ValueError:
+            return ()
 
     async def cleanup(self, context: ToolContext) -> None:
         if self._cleanup is not None:

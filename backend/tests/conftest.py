@@ -8,7 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.config import Settings
 from app.main import create_app
-from app.providers import ChatTurn, ModelInfo, ProviderError
+from agentic.runtime.contracts import ChatTurn, ModelInfo, ProviderError
 
 
 class FakeProvider:

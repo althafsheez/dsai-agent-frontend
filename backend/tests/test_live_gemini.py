@@ -93,3 +93,38 @@ async def test_real_gemini_initial_and_follow_up(tmp_path) -> None:
                 "assistant",
             ]
             assert all(message["content"] for message in messages)
+
+
+@pytest.mark.live
+@pytest.mark.skipif(os.getenv("DSAI_LIVE_E2B") != "1", reason="Set DSAI_LIVE_E2B=1 to run")
+async def test_live_react_python_output(tmp_path) -> None:
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'tools.db'}", storage_root=tmp_path / "files")
+    if not settings.gemini_api_key or not settings.e2b_api_key:
+        pytest.skip("Gemini and E2B credentials are required")
+    app = create_app(settings=settings)
+    headers = {"X-Demo-User-Id": "user-you"}
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            available = (await client.get("/api/models", headers=headers)).json()["models"]
+            model = next(m for m in available if m["id"] == app.state.provider.default_model_id)
+            question = (
+                "Use execute_python to calculate the squares of 2 and 3. "
+                "Write the results with header square to /home/user/outputs/squares.csv, "
+                "one integer per line, and tell me when it is ready."
+            )
+            created = (await client.post("/api/chats", headers=headers, json={
+                "content": question, "client_request_id": "live-react-file",
+            })).json()
+            chat_id = created["chat"]["id"]
+            result = await client.post(f"/api/chats/{chat_id}/messages/stream", headers=headers, json={
+                "user_message_id": created["message"]["id"], "model_id": model["id"],
+                "client_request_id": "live-react-python",
+            })
+            events = parse_sse(result.text)
+            assert events[-1]["type"] == "agent.completed"
+            assert any(e["type"] == "tool.completed" and e["data"]["name"] == "execute_python" for e in events)
+            assert any(e["type"] == "dataset.created" for e in events)
+            files = (await client.get("/api/datasets", headers=headers, params={"chat_id": chat_id})).json()["items"]
+            dataset = next(item for item in files if item["name"] == "squares.csv")
+            download = await client.get(dataset["download_url"], headers=headers)
+            assert download.text.strip().splitlines() == ["square", "4", "9"]
