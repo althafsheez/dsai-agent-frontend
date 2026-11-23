@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { HardDrive, Zap } from "lucide-react";
+import { Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface SidebarUsageStatsProps {
@@ -9,18 +9,20 @@ interface SidebarUsageStatsProps {
   className?: string;
 }
 
-export function SidebarUsageStats({ compact = false, className }: SidebarUsageStatsProps) {
-  // Usage statistics aligned with DSAI Free preview quota limits
-  const runsUsed = 19;
-  const runsLimit = 50;
-  const runPercentage = Math.round((runsUsed / runsLimit) * 100);
-  const storageText = "40.4 KB / 100 MB";
+const stats = [
+  { label: "AI Credits", value: "3,250 / 5,000", percent: 65, barClass: "bg-sage" },
+  { label: "Disk Space", value: "0 MB / 100 MB", percent: 0, barClass: "bg-slate" },
+  { label: "Compute Time", value: "42h / 100h", percent: 42, barClass: "bg-[oklch(0.76_0.07_50)]" },
+];
 
+const OVERALL_PERCENT = 65;
+
+export function SidebarUsageStats({ compact = false, className }: SidebarUsageStatsProps) {
   if (compact) {
     return (
       <Link
         href="/settings"
-        title={`Usage: ${runsUsed}/${runsLimit} runs (${runPercentage}%), ${storageText}`}
+        title={`Usage: ${OVERALL_PERCENT}% used`}
         aria-label="View usage statistics"
         className={cn(
           "group relative mx-auto mb-2 flex size-8 items-center justify-center rounded-lg border border-sidebar-border/40 bg-surface/40 hover:border-border-strong hover:bg-surface transition-colors",
@@ -28,57 +30,43 @@ export function SidebarUsageStats({ compact = false, className }: SidebarUsageSt
         )}
       >
         <Zap className="size-3.5 text-slate group-hover:text-foreground transition-colors" />
-        <span
-          className="absolute -top-1 -right-1 size-2 rounded-full bg-slate"
-          aria-hidden="true"
-        />
       </Link>
     );
   }
 
   return (
-    <div
-      data-testid="sidebar-usage-stats"
-      className={cn(
-        "mx-3 mb-2 rounded-lg border border-sidebar-border/50 bg-surface/40 p-2.5 transition-colors hover:border-border-strong",
-        className
-      )}
-    >
-      <div className="flex items-center justify-between text-[11px]">
-        <Link
-          href="/settings"
-          className="flex items-center gap-1.5 font-medium text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <Zap className="size-3 text-slate" />
-          <span>Usage Statistics</span>
-        </Link>
-        <span className="rounded bg-raised px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground border border-border/40">
-          Free Tier
-        </span>
-      </div>
-
-      <div className="mt-2 space-y-1">
-        <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-          <span>Monthly runs</span>
-          <span className="font-medium text-foreground">
-            {runsUsed} / {runsLimit}
-          </span>
+    <div data-testid="sidebar-usage-stats" className={cn("px-3 pb-3", className)}>
+      <section aria-label="Usage stats" className="rounded-lg border border-sidebar-border/60 p-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">Usage Stats</h2>
+          <span className="text-[11px] text-muted-foreground">{OVERALL_PERCENT}% used</span>
         </div>
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-raised">
-          <div
-            className="h-full rounded-full bg-slate transition-all"
-            style={{ width: `${runPercentage}%` }}
-          />
+        <div className="mt-3 space-y-3">
+          {stats.map((stat) => (
+            <div key={stat.label}>
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-medium text-foreground">{stat.label}</span>
+                <span className="text-muted-foreground">{stat.value}</span>
+              </div>
+              {stat.percent > 0 && (
+                <div
+                  role="progressbar"
+                  aria-label={stat.label}
+                  aria-valuenow={stat.percent}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  className="mt-1.5 h-1 w-full"
+                >
+                  <div className={cn("h-full rounded-full", stat.barClass)} style={{ width: `${stat.percent}%` }} />
+                </div>
+              )}
+            </div>
+          ))}
         </div>
-      </div>
-
-      <div className="mt-2.5 flex items-center justify-between border-t border-sidebar-border/40 pt-1.5 text-[10px] text-muted-foreground">
-        <div className="flex items-center gap-1">
-          <HardDrive className="size-2.5 text-muted-foreground" />
-          <span>Storage</span>
-        </div>
-        <span className="font-mono text-[9px] text-foreground/80">{storageText}</span>
-      </div>
+      </section>
+      <p className="mt-3 px-0.5 text-xs leading-snug text-muted-foreground">
+        AI can make mistakes. Always verify important results.
+      </p>
     </div>
   );
 }
