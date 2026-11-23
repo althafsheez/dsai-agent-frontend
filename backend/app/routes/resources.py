@@ -1,25 +1,27 @@
 from __future__ import annotations
 
-import mimetypes
-import hashlib
+import re
+import subprocess
+from tempfile import TemporaryFile
+from zipfile import ZipFile, ZIP_DEFLATED
 from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile, status
-from sqlalchemy import select
+from starlette.background import BackgroundTask
+from starlette.responses import StreamingResponse
+from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_current_user, get_db
 from ..errors import APIError
-from ..models import FileObject, LibraryEntry, Message, Resource, ResourceLink, User
+from ..models import Chat, FileObject, LibraryEntry, Message, Resource, ResourceLink, User, Workspace
 from ..services.records import require_chat, require_workspace
-from ..services.dataset_preview import MAX_PREVIEW_ROWS, inspect_dataset
+from ..services.dataset_preview import MAX_PREVIEW_ROWS
+from ..services.resource_uploads import CODE_EXTENSIONS, read_upload, register_upload
 from ..storage import LocalFileStorage
 router = APIRouter(prefix="/api/resources", tags=["resources"])
 catalog_router = APIRouter(prefix="/api", tags=["resources"])
-DATASET_EXTENSIONS = {".csv", ".parquet", ".xlsx", ".xls"}
-CODE_EXTENSIONS = {".py", ".js", ".ts", ".tsx", ".jsx", ".sql", ".html", ".css", ".yaml", ".yml", ".sh", ".r"}
-ALLOWED_EXTENSIONS = DATASET_EXTENSIONS | CODE_EXTENSIONS | {".png", ".jpg", ".jpeg", ".pdf", ".txt", ".md", ".json"}
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
@@ -54,45 +56,11 @@ async def upload_resource(
         resource = session.get(Resource, existing.resource_id)
         if resource is not None:
             return {"resource": _summary(resource), "link_id": existing.id}
-    filename = Path(file.filename or "upload.bin").name
-    extension = Path(filename).suffix.lower()
-    if extension not in ALLOWED_EXTENSIONS:
-        raise APIError(415, "unsupported_file", "This file type is not supported.")
-    content = await file.read(25 * 1024 * 1024 + 1)
-    if len(content) > 25 * 1024 * 1024:
-        raise APIError(413, "file_too_large", "Files are limited to 25 MB.")
-    storage: LocalFileStorage = request.app.state.storage
-    digest = hashlib.sha256(content).hexdigest()
-    file_object = session.scalar(select(FileObject).where(FileObject.content_hash == digest))
-    if file_object is None:
-        stored = storage.store_bytes(content)
-        file_object = FileObject(
-            content_hash=stored.content_hash,
-            relative_storage_path=stored.relative_path,
-            mime_type=file.content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream",
-            size_bytes=stored.size_bytes,
-        )
-        session.add(file_object)
-        session.flush()
-    resource = Resource(
-        resource_type="dataset" if extension in DATASET_EXTENSIONS else "artifact",
-        file_object_id=file_object.id,
-        name=filename,
-        origin="uploaded",
-        source="input",
-        created_by=user.id,
-        metadata_json={"size_bytes": len(content), **inspect_dataset(filename, content)},
-    )
-    session.add(resource)
-    session.flush()
-    link = ResourceLink(
-        resource_id=resource.id,
-        scope_type=scope_type,
-        scope_id=scope_id,
-        message_id=message_id,
+    resource, link = register_upload(
+        session, request.app.state.storage, await read_upload(file),
+        user_id=user.id, scope_type=scope_type, scope_id=scope_id, message_id=message_id,
         client_upload_id=client_upload_id,
     )
-    session.add(link)
     session.commit()
     session.refresh(resource)
     return {"resource": _summary(resource), "link_id": link.id}
@@ -169,17 +137,19 @@ def _catalog_item(
 
 def _chat_catalog(session: Session, user: User, chat_id: str) -> list[tuple[Resource, FileObject, str]]:
     chat = require_chat(session, user, chat_id)
-    scope_filters = [(ResourceLink.scope_type == "chat") & (ResourceLink.scope_id == chat.id)]
+    scope_filters = [
+        (ResourceLink.scope_type == "chat") & (ResourceLink.scope_id == chat.id),
+        (ResourceLink.scope_type == "message") & (Message.chat_id == chat.id),
+    ]
     if chat.workspace_id is not None:
         scope_filters.append(
             (ResourceLink.scope_type == "workspace") & (ResourceLink.scope_id == chat.workspace_id)
         )
-    from sqlalchemy import or_
-
     rows = list(session.execute(
-        select(Resource, FileObject, ResourceLink.scope_type)
+        select(Resource, FileObject, case((ResourceLink.scope_type == "message", "chat"), else_=ResourceLink.scope_type))
         .join(ResourceLink, ResourceLink.resource_id == Resource.id)
         .join(FileObject, FileObject.id == Resource.file_object_id)
+        .outerjoin(Message, Message.id == ResourceLink.message_id)
         .where(or_(*scope_filters))
         .order_by(Resource.created_at.desc(), Resource.id.desc())
     ).all())
@@ -187,6 +157,55 @@ def _chat_catalog(session: Session, user: User, chat_id: str) -> list[tuple[Reso
     # is one effective input, so prefer the direct chat link and emit it once.
     seen: set[str] = set()
     return [row for row in sorted(rows, key=lambda row: row[2] != "chat") if not (row[0].id in seen or seen.add(row[0].id))]
+
+
+def _workspace_datasets(session: Session, workspace_id: str):
+    return session.execute(
+        select(Resource, FileObject, ResourceLink.scope_type)
+        .join(ResourceLink, ResourceLink.resource_id == Resource.id)
+        .join(FileObject, FileObject.id == Resource.file_object_id)
+        .where(ResourceLink.scope_type == "workspace", ResourceLink.scope_id == workspace_id,
+               Resource.resource_type == "dataset")
+        .order_by(Resource.created_at.desc(), Resource.id.desc())
+    ).unique().all()
+
+
+@catalog_router.get("/workspaces/{workspace_id}/datasets/download")
+def download_workspace_datasets(
+    workspace_id: str,
+    request: Request,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    workspace = require_workspace(session, user, workspace_id)
+    rows = _workspace_datasets(session, workspace_id)
+    if not rows:
+        raise APIError(404, "no_datasets", "This workspace has no datasets.")
+    storage: LocalFileStorage = request.app.state.storage
+    used_names: set[str] = set()
+    archive = TemporaryFile()
+    try:
+        with ZipFile(archive, "w", compression=ZIP_DEFLATED, compresslevel=1) as bundle:
+            for resource, file_object, _ in rows:
+                original = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", resource.name).strip(" .") or "dataset"
+                path = Path(original)
+                name = original
+                number = 2
+                while name.casefold() in used_names:
+                    name = f"{path.stem} ({number}){path.suffix}"
+                    number += 1
+                used_names.add(name.casefold())
+                bundle.writestr(name, storage.read_bytes(file_object.relative_storage_path))
+        archive.seek(0)
+        filename = quote(f"{workspace.name}-datasets.zip", safe="")
+        return StreamingResponse(
+            iter(lambda: archive.read(65536), b""), media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+            background=BackgroundTask(archive.close),
+        )
+    except Exception:
+        archive.close()
+        raise
 
 
 @catalog_router.get("/datasets")
@@ -201,13 +220,7 @@ async def list_datasets(
     library_ids = set(session.scalars(select(LibraryEntry.resource_id).where(LibraryEntry.user_id == user.id)))
     if workspace_id:
         require_workspace(session, user, workspace_id)
-        rows = session.execute(
-            select(Resource, FileObject, ResourceLink.scope_type)
-            .join(ResourceLink, ResourceLink.resource_id == Resource.id)
-            .join(FileObject, FileObject.id == Resource.file_object_id)
-            .where(ResourceLink.scope_type == "workspace", ResourceLink.scope_id == workspace_id)
-            .order_by(Resource.created_at.desc(), Resource.id.desc())
-        ).all()
+        rows = _workspace_datasets(session, workspace_id)
     else:
         rows = _chat_catalog(session, user, chat_id or "")
     items = [
@@ -245,16 +258,49 @@ async def list_library(
         .where(LibraryEntry.user_id == user.id, Resource.created_by == user.id)
         .order_by(LibraryEntry.created_at.desc(), LibraryEntry.id.desc())
     ).all()
+    workspaces = _library_workspaces(session, user, [resource.id for _, resource, _ in rows])
     items = []
     for entry, resource, file_object in rows:
         item = _catalog_item(resource, file_object, "library", True)
+        workspace = workspaces.get(resource.id)
         items.append({
             **item,
             "resource_type": resource.resource_type,
             "library_category": _library_category(resource),
             "library_created_at": entry.created_at,
+            "workspace_id": workspace.id if workspace else None,
+            "workspace_name": workspace.name if workspace else None,
         })
     return {"items": items, "next_cursor": None}
+
+
+def _library_workspaces(session: Session, user: User, resource_ids: list[str]) -> dict[str, Workspace]:
+    """Map each saved resource to the live workspace it belongs to, directly or through a workspace chat."""
+    if not resource_ids:
+        return {}
+    links = session.execute(
+        select(ResourceLink.resource_id, ResourceLink.scope_type, ResourceLink.scope_id)
+        .where(ResourceLink.resource_id.in_(resource_ids), ResourceLink.scope_type.in_(("workspace", "chat")))
+        .order_by(ResourceLink.created_at)
+    ).all()
+    chat_ids = {scope_id for _, scope_type, scope_id in links if scope_type == "chat"}
+    chat_workspace = dict(session.execute(
+        select(Chat.id, Chat.workspace_id).where(Chat.id.in_(chat_ids), Chat.workspace_id.is_not(None))
+    ).all()) if chat_ids else {}
+    workspace_ids = {scope_id for _, scope_type, scope_id in links if scope_type == "workspace"} | set(chat_workspace.values())
+    live = {
+        workspace.id: workspace
+        for workspace in session.scalars(select(Workspace).where(
+            Workspace.id.in_(workspace_ids), Workspace.created_by == user.id, Workspace.deleted_at.is_(None),
+        ))
+    } if workspace_ids else {}
+    result: dict[str, Workspace] = {}
+    # A direct workspace link wins over one inherited from a chat.
+    for resource_id, scope_type, scope_id in sorted(links, key=lambda link: link[1] != "workspace"):
+        workspace_id = scope_id if scope_type == "workspace" else chat_workspace.get(scope_id)
+        if resource_id not in result and workspace_id in live:
+            result[resource_id] = live[workspace_id]
+    return result
 
 
 @router.post("/{resource_id}/library", status_code=status.HTTP_201_CREATED)
@@ -343,9 +389,10 @@ async def download_resource(
 
 
 @router.get("/{resource_id}/preview")
-async def preview_resource(
+def preview_resource(
     resource_id: str,
     request: Request,
+    thumbnail: bool = False,
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
@@ -356,6 +403,17 @@ async def preview_resource(
         raise APIError(415, "preview_unavailable", "A browser preview is not available for this file.")
     storage: LocalFileStorage = request.app.state.storage
     content = storage.read_bytes(file_object.relative_storage_path)
+    if thumbnail:
+        if file_object.mime_type != "application/pdf":
+            raise APIError(415, "preview_unavailable", "Page thumbnails require a PDF.")
+        try:
+            page = subprocess.run(
+                ["pdftocairo", "-png", "-f", "1", "-l", "1", "-singlefile", "-scale-to", "640", "-", "-"],
+                input=content, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5, check=True,
+            )
+        except (OSError, subprocess.SubprocessError):
+            raise APIError(422, "preview_unavailable", "PDF thumbnail unavailable.")
+        return Response(content=page.stdout, media_type="image/png")
     if extension in CODE_EXTENSIONS | {".txt", ".md", ".json"}:
         content = content[:1_000_000]
     return Response(content=content, media_type=file_object.mime_type)

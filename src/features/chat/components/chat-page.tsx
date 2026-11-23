@@ -7,9 +7,7 @@ import {
   BookOpen,
   BrainCircuit,
   Calculator,
-  CircleStop,
   ChevronRight,
-  CirclePause,
   CornerDownRight,
   Database,
   FileSearch,
@@ -36,6 +34,8 @@ import {
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { useUiStore } from "@/stores/ui-store";
 import { ContextSidebar, FilePreviewSidebar, type ContextFile } from "@/features/context-sidebar";
 import {
   addResourceToLibrary,
@@ -43,6 +43,7 @@ import {
   downloadResource,
   cancelQueuedRun,
   cancelRun,
+  editQueuedRun,
   getArtifacts,
   getChatRuns,
   getChat,
@@ -52,6 +53,7 @@ import {
   getModels,
   getWorkspaces,
   queueRun,
+  reorderChatQueue,
   resumeChatQueue,
   removeResourceFromLibrary,
   setChatPresence,
@@ -70,8 +72,14 @@ import type { DataReferenceResource } from "./data-reference";
 import { takePendingRun } from "../pending-run";
 import { useConversationScroll } from "../use-conversation-scroll";
 import { ChatHeader } from "./chat-header";
+import { QuickAssistantPopup } from "@/features/quick-assistant";
+import { ShareWorkspaceDialog } from "@/features/workspaces/components/share-workspace-dialog";
+import { parseSlashCommand, suggestSlashCommands, type SlashCommand } from "../slash-commands/commands";
+import { SlashCommandMenu, slashOptionId } from "../slash-commands/slash-command-menu";
+import { assistantText, transcriptMarkdown } from "../slash-commands/transcript";
 import { ConversationNavigator } from "./conversation-navigator";
 import { MessageList } from "./message-list";
+import { QueuedQuestions, type QueuedQuestion } from "./queued-questions";
 
 function toMessage(message: MessageDto, resources = new Map<string, ContextFile>()): ChatMessage {
   if (message.role === "user") {
@@ -82,11 +90,12 @@ function toMessage(message: MessageDto, resources = new Map<string, ContextFile>
       createdAt: message.created_at,
       attachments: message.attachment_refs.map((reference) => {
         const resource = resources.get(reference.resource_id);
+        const size = resource?.size_bytes ?? reference.size_bytes;
         return {
           id: reference.resource_id,
-          name: resource?.name ?? "Attached file",
+          name: resource?.name ?? reference.name ?? "Attached file",
           kind: resource && "scope_type" in resource ? "Dataset" : resource?.kind ?? "File",
-          size: resource ? formatFileSize(resource.size_bytes) : "Loading…",
+          size: size == null ? "Loading…" : formatFileSize(size),
         };
       }),
     };
@@ -127,44 +136,48 @@ function toolLabel(name: string): string {
   return name.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
 }
 
-interface QueuedQuestion {
+interface QueueEdit {
   runId: string;
   content: string;
-  position: number;
-  removing: boolean;
-  paused: boolean;
+  files: MessageDto["attachment_refs"];
+  addedFiles: (DraftAttachment & { file: File })[];
+  removedResourceIds: string[];
+  saving: boolean;
 }
 
-interface DraftAttachment {
+type DraftAttachment = {
   id: string;
-  file: File;
+  name: string;
+  size: number;
   previewUrl: string | null;
-}
+} & ({ file: File; resourceId?: never } | { file?: never; resourceId: string });
+
+const chatFileExtensions = ".csv,.xls,.xlsx,.parquet,.png,.jpg,.jpeg,.pdf,.txt,.md,.json,.py,.js,.ts,.tsx,.jsx,.sql,.html,.css,.yaml,.yml,.sh,.r";
 
 type ConnectorCategory = "all" | "skills" | "data" | "apps";
 
 const connectorItems = [
-  { name: "Data Cleaning", category: "skills" as const, icon: Sparkles },
-  { name: "Data Visualization", category: "skills" as const, icon: BarChart3 },
-  { name: "Forecasting", category: "skills" as const, icon: TrendingUp },
-  { name: "Statistical Analysis", category: "skills" as const, icon: Sigma },
-  { name: "Anomaly Detection", category: "skills" as const, icon: FileSearch },
-  { name: "Machine Learning", category: "skills" as const, icon: BrainCircuit },
-  { name: "Report Generation", category: "skills" as const, icon: FileText },
-  { name: "Snowflake", category: "data" as const, icon: Snowflake },
-  { name: "Google BigQuery", category: "data" as const, icon: Database },
-  { name: "PostgreSQL", category: "data" as const, icon: Database },
-  { name: "MySQL", category: "data" as const, icon: Database },
-  { name: "Google Sheets", category: "data" as const, icon: FileSpreadsheet },
-  { name: "Microsoft Excel", category: "data" as const, icon: FileSpreadsheet },
-  { name: "Google Drive", category: "data" as const, icon: HardDrive },
-  { name: "Gmail", category: "apps" as const, icon: Mail },
-  { name: "Slack", category: "apps" as const, icon: MessageSquare },
-  { name: "Notion", category: "apps" as const, icon: NotebookTabs },
-  { name: "Jira", category: "apps" as const, icon: PanelsTopLeft },
-  { name: "GitHub", category: "apps" as const, icon: Github },
-  { name: "Zapier", category: "apps" as const, icon: Workflow },
-  { name: "Calculator", category: "apps" as const, icon: Calculator },
+  { name: "Data Cleaning", description: "Clean, validate, and prepare data for analysis", category: "skills" as const, icon: Sparkles },
+  { name: "Data Visualization", description: "Create charts, plots, and interactive visuals", category: "skills" as const, icon: BarChart3 },
+  { name: "PostgreSQL", description: "Connect to a PostgreSQL database", category: "data" as const, icon: Database },
+  { name: "Google BigQuery", description: "Connect to and query data from BigQuery", category: "data" as const, icon: Database },
+  { name: "Snowflake", description: "Connect to your Snowflake data warehouse", category: "data" as const, icon: Snowflake },
+  { name: "Forecasting", description: "Forecast trends and future values", category: "skills" as const, icon: TrendingUp },
+  { name: "Statistical Analysis", description: "Test hypotheses and measure relationships", category: "skills" as const, icon: Sigma },
+  { name: "Anomaly Detection", description: "Find unusual values and patterns", category: "skills" as const, icon: FileSearch },
+  { name: "Machine Learning", description: "Build and evaluate predictive models", category: "skills" as const, icon: BrainCircuit },
+  { name: "Report Generation", description: "Turn analysis results into reports", category: "skills" as const, icon: FileText },
+  { name: "MySQL", description: "Connect to a MySQL database", category: "data" as const, icon: Database },
+  { name: "Google Sheets", description: "Import data from a Google spreadsheet", category: "data" as const, icon: FileSpreadsheet },
+  { name: "Microsoft Excel", description: "Import data from an Excel workbook", category: "data" as const, icon: FileSpreadsheet },
+  { name: "Google Drive", description: "Browse and import files from Google Drive", category: "data" as const, icon: HardDrive },
+  { name: "Gmail", description: "Find relevant emails and attachments", category: "apps" as const, icon: Mail },
+  { name: "Slack", description: "Find messages and shared files", category: "apps" as const, icon: MessageSquare },
+  { name: "Notion", description: "Bring in pages and database content", category: "apps" as const, icon: NotebookTabs },
+  { name: "Jira", description: "Bring in issues and project details", category: "apps" as const, icon: PanelsTopLeft },
+  { name: "GitHub", description: "Reference repositories and issues", category: "apps" as const, icon: Github },
+  { name: "Zapier", description: "Connect to app automations", category: "apps" as const, icon: Workflow },
+  { name: "Calculator", description: "Evaluate numerical expressions", category: "apps" as const, icon: Calculator },
 ];
 
 function formatFileSize(bytes: number) {
@@ -173,8 +186,8 @@ function formatFileSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function fileType(file: File) {
-  return file.name.split(".").pop()?.toUpperCase() || "FILE";
+function fileType(name: string) {
+  return name.split(".").pop()?.toUpperCase() || "FILE";
 }
 
 function appendMessageOnce(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {
@@ -197,6 +210,14 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const conversationScroll = useConversationScroll(messages);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  // Holds the main-chat snapshot taken when Quick Assistant opened; null means closed.
+  const [quickAssistant, setQuickAssistant] = useState<{ snapshotMessageId: string | null; minimized: boolean; autoAsk?: string; session: number } | null>(null);
+  const [slashIndex, setSlashIndex] = useState(0);
+  // The draft the user pressed Escape on; the picker stays closed until the draft changes.
+  const [slashDismissedFor, setSlashDismissedFor] = useState<string | null>(null);
+  const router = useRouter();
+  const toggleSidebar = useUiStore((state) => state.toggleSidebar);
   const [selectedFile, setSelectedFile] = useState<ContextFile | null>(null);
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [draft, setDraft] = useState("");
@@ -210,10 +231,19 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [running, setRunning] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [queuedQuestions, setQueuedQuestions] = useState<QueuedQuestion[]>([]);
+  const [queueEdit, setQueueEdit] = useState<QueueEdit | null>(null);
+  const [queueReordering, setQueueReordering] = useState(false);
   const [composerPending, setComposerPending] = useState<"queue" | "steer" | null>(null);
   const [stopPending, setStopPending] = useState(false);
   const [composerStatus, setComposerStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const composerText = queueEdit?.content ?? draft;
+  const composerAttachments = queueEdit ? [...queueEdit.files.map((file) => ({
+    id: file.resource_id,
+    name: file.name ?? "Attached file",
+    size: file.size_bytes,
+    previewUrl: null,
+  })), ...queueEdit.addedFiles] : attachments;
   const [traceEvents, setTraceEvents] = useState<ExecutionEvent[]>([]);
   const datasetsQuery = useQuery({
     queryKey: ["chat", chatId, "datasets"],
@@ -236,6 +266,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const initialRunChecked = useRef(false);
   const streamController = useRef<AbortController | null>(null);
   const queuedQuestionsRef = useRef<QueuedQuestion[]>([]);
+  const startedRunsRef = useRef(new Set<string>());
   const submittingRef = useRef(false);
   const models = useMemo(() => modelsQuery.data?.models ?? [], [modelsQuery.data?.models]);
   const selectedModel = models.find((model) => model.id === modelId) ?? models[0];
@@ -245,7 +276,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
   )?.name;
   const visibleConnectors = connectorItems.filter((connector) => (
     (connectorCategory === "all" || connector.category === connectorCategory)
-    && connector.name.toLowerCase().includes(connectorQuery.trim().toLowerCase())
+    && `${connector.name} ${connector.description}`.toLowerCase().includes(connectorQuery.trim().toLowerCase())
   ));
   const resources = useMemo(() => new Map<string, ContextFile>([
     ...(datasetsQuery.data?.items ?? []),
@@ -263,13 +294,14 @@ export function ChatPage({ chatId }: { chatId: string }) {
   }, [chatId, queryClient]);
 
   useEffect(() => {
-    const active = runsQuery.data?.items.find((run) => run.status === "running" || run.status === "queued");
+    const active = runsQuery.data?.items.find((run) => run.status === "running");
     if (active) {
       setActiveRunId(active.id);
       setRunning(true);
     } else if (!streamController.current) {
       setActiveRunId(null);
       setRunning(false);
+      setStopPending(false);
     }
   }, [runsQuery.data?.items]);
 
@@ -279,7 +311,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
 
   useEffect(() => {
     if (!messagesQuery.data) return;
-    const next = messagesQuery.data.items.map((message) => toMessage(message, resources));
+    const next = messagesQuery.data.items.filter((message) => message.status !== "queued").map((message) => toMessage(message, resources));
     setMessages((current) => {
       const hydrated = next.map((message) => {
       if (message.role !== "assistant") return message;
@@ -332,7 +364,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
 
   useEffect(() => {
     resizeComposer(textareaRef.current);
-  }, [draft, resizeComposer]);
+  }, [composerText, resizeComposer]);
 
   useEffect(() => {
     attachmentsRef.current = attachments;
@@ -401,11 +433,15 @@ export function ChatPage({ chatId }: { chatId: string }) {
           const runData = run as { id?: unknown; assistant_message_id?: unknown };
           const nextRunId = typeof runData.id === "string" ? runData.id : null;
           const id = runData.assistant_message_id;
-          if (nextRunId) setActiveRunId(nextRunId);
+          if (nextRunId) {
+            startedRunsRef.current.add(nextRunId);
+            setActiveRunId(nextRunId);
+          }
           const startsQueuedRun = nextRunId && typeof id === "string" && (
             (streamRunId !== null && nextRunId !== streamRunId) || input.type === "resume-queue"
           );
           if (startsQueuedRun) {
+            setQueueEdit((edit) => edit?.runId === nextRunId ? null : edit);
             const queued = queuedQuestionsRef.current.find((item) => item.runId === nextRunId);
             setQueuedQuestions((current) => {
               const next = current.filter((item) => item.runId !== nextRunId);
@@ -415,7 +451,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
             assistantId = id;
             if (queued) {
               setMessages((current) => appendMessageOnce(appendMessageOnce(current,
-                { id: `queued-user-${nextRunId}`, role: "user", content: queued.content, createdAt: new Date().toISOString() },
+                toMessage(queued.message),
               ), { id, role: "assistant", status: "running", createdAt: new Date().toISOString(), blocks: [{ type: "markdown", content: "" }] }));
             }
           } else if (typeof id === "string") {
@@ -636,6 +672,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
       if (streamController.current === controller) streamController.current = null;
       setActiveRunId(null);
       setRunning(false);
+      setStopPending(false);
       await queryClient.invalidateQueries({ queryKey: ["chat", chatId, "messages"] });
       await queryClient.invalidateQueries({ queryKey: ["chat", chatId] });
       await queryClient.invalidateQueries({ queryKey: ["activity"] });
@@ -660,23 +697,169 @@ export function ChatPage({ chatId }: { chatId: string }) {
     });
   }, [chatId, messagesQuery.data, runMessage]);
 
-  function selectFile(file: ContextFile) {
+  // The header button opens a fresh snapshot, or minimizes/restores an existing session without losing it.
+  function toggleQuickAssistant() {
+    setQuickAssistant((current) => current
+      ? { ...current, minimized: !current.minimized }
+      : { snapshotMessageId: messagesQuery.data?.items.at(-1)?.id ?? null, minimized: false, session: Date.now() });
+  }
+  const minimizeQuickAssistant = useCallback(() => setQuickAssistant((current) => current && { ...current, minimized: true }), []);
+  const restoreQuickAssistant = useCallback(() => setQuickAssistant((current) => current && { ...current, minimized: false }), []);
+  const closeQuickAssistant = useCallback(() => setQuickAssistant(null), []);
+
+  const slashSuggestions = slashDismissedFor === draft ? null : suggestSlashCommands(draft);
+  const slashMenuOpen = !queueEdit && slashSuggestions !== null && !attachmentMenuOpen;
+  const activeSlashIndex = slashSuggestions?.length ? Math.min(slashIndex, slashSuggestions.length - 1) : 0;
+
+  function clearDraft(status: string | null) {
+    setDraft("");
+    setComposerStatus(status);
+    setError(null);
+    window.requestAnimationFrame(() => resizeComposer(textareaRef.current));
+  }
+
+  function pickSlashCommand(command: SlashCommand) {
+    if (command.args && !command.args.startsWith("[")) {
+      setDraft(`/${command.name} `);
+      setSlashIndex(0);
+      textareaRef.current?.focus();
+      return;
+    }
+    void runSlashCommand(command, "");
+  }
+
+  async function runSlashCommand(command: SlashCommand | null, args: string, typedName?: string) {
+    setSlashIndex(0);
+    if (!command) return clearDraft(`Unknown command /${typedName}. Type / to see every command.`);
+    if (command.unavailable) return clearDraft(`/${command.name}: ${command.unavailable}`);
+    const lastAssistant = [...messages].reverse().find((message): message is AssistantMessage => message.role === "assistant");
+    switch (command.name) {
+      case "help":
+        setDraft("/");
+        setSlashDismissedFor(null);
+        setComposerStatus("Pick a command, or keep typing to filter.");
+        return;
+      case "btw": {
+        if (!args) return clearDraft("Add your side question after /btw.");
+        setQuickAssistant({ snapshotMessageId: messagesQuery.data?.items.at(-1)?.id ?? null, minimized: false, autoAsk: args, session: Date.now() });
+        return clearDraft("Asked in Quick Assistant. It won't be added to this chat.");
+      }
+      case "recap":
+        if (running) return clearDraft("Wait for the current run to finish, then try /recap again.");
+        setDraft("Give me a short recap of this analysis so far: key findings, the files used, and open questions.");
+        // Let React commit the new draft before the normal submit path reads it.
+        window.setTimeout(() => textareaRef.current?.form?.requestSubmit(), 0);
+        return;
+      case "rename": {
+        if (!args) return clearDraft("Add the new title after /rename.");
+        try {
+          await updateChat(chatId, { title: args.slice(0, 160) });
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["chat", chatId] }),
+            queryClient.invalidateQueries({ queryKey: ["sidebar", "recent-chats"] }),
+            queryClient.invalidateQueries({ queryKey: ["history"] }),
+          ]);
+          return clearDraft(`Renamed this chat to “${args.slice(0, 160)}”.`);
+        } catch (caught) {
+          return clearDraft(caught instanceof Error ? caught.message : "Could not rename this chat.");
+        }
+      }
+      case "copy": {
+        const text = lastAssistant ? assistantText(lastAssistant) : "";
+        if (!text) return clearDraft("There is no answer to copy yet.");
+        await navigator.clipboard.writeText(text);
+        return clearDraft("Copied the latest answer.");
+      }
+      case "export": {
+        const title = chatQuery.data?.title ?? "Conversation";
+        const url = URL.createObjectURL(new Blob([transcriptMarkdown(title, messages)], { type: "text/markdown" }));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${title.replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "conversation"}.md`;
+        link.click();
+        URL.revokeObjectURL(url);
+        return clearDraft("Downloaded this conversation as Markdown.");
+      }
+      case "context":
+        setSelectedFile(null);
+        setPanelOpen(true);
+        return clearDraft(null);
+      case "focus":
+        toggleSidebar();
+        return clearDraft("Toggled focus mode. Run /focus again to bring the sidebar back.");
+      case "clear":
+      case "exit":
+        clearDraft(null);
+        router.push("/");
+        return;
+      case "model": {
+        if (!args) return clearDraft(`Model: ${selectedModel?.label ?? "none"}. Available: ${models.map((model) => model.id).join(", ")}.`);
+        const next = models.find((model) => model.id.toLowerCase() === args.toLowerCase() || model.label.toLowerCase() === args.toLowerCase());
+        if (!next) return clearDraft(`No model named “${args}”. Available: ${models.map((model) => model.id).join(", ")}.`);
+        if (running) return clearDraft("Change the model after the current run finishes.");
+        setModelId(next.id);
+        return clearDraft(`Switched to ${next.label}.`);
+      }
+      case "effort": {
+        if (!args) return clearDraft(`Effort: ${effort || "default"}. Supported: ${supportedEfforts.join(", ") || "none"}.`);
+        const level = args.toLowerCase();
+        if (!supportedEfforts.includes(level)) return clearDraft(`${selectedModel?.label ?? "This model"} supports: ${supportedEfforts.join(", ") || "no effort levels"}.`);
+        if (running) return clearDraft("Change the effort after the current run finishes.");
+        setEffort(level);
+        return clearDraft(`Effort set to ${level}.`);
+      }
+      case "status":
+        return clearDraft(`${selectedModel?.label ?? "No model"} · effort ${effort || "default"} · ${running ? "running" : "idle"} · ${queuedQuestions.length} queued`);
+      case "tasks":
+        return clearDraft(running || queuedQuestions.length
+          ? `${running ? "1 analysis running" : "Nothing running"}${queuedQuestions.length ? ` · queued: ${queuedQuestions.map((item) => `“${item.message.content.slice(0, 40)}”`).join(", ")}` : ""}`
+          : "No running or queued questions.");
+      case "agents":
+        return clearDraft("One analysis agent works on this chat: Gemini with a Python sandbox. Quick Assistant is a separate read-only helper.");
+      case "stop":
+        if (!running || !activeRunId) return clearDraft("Nothing is running.");
+        clearDraft(null);
+        await stopActiveRun();
+        return;
+      case "resume":
+        clearDraft(null);
+        router.push("/history");
+        return;
+      case "workflows":
+      case "workflow-authoring":
+        clearDraft(null);
+        router.push("/workflows");
+        return;
+      case "mcp":
+      case "skills":
+        clearDraft(null);
+        router.push("/connectors");
+        return;
+      case "memory":
+        if (!chatQuery.data?.workspace_id) return clearDraft("Memory lives in a workspace's AI context. Move this chat into a workspace first.");
+        clearDraft(null);
+        router.push(`/workspaces/${chatQuery.data.workspace_id}`);
+        return;
+    }
+  }
+
+  const selectFile = useCallback((file: ContextFile) => {
     setSelectedFile(file);
     setPreviewExpanded(false);
     setPanelOpen(true);
-  }
+  }, []);
 
-  function selectFileById(id: string) {
+  const selectFileById = useCallback((id: string) => {
     const resource = resources.get(id);
     if (resource) selectFile(resource);
-  }
+  }, [resources, selectFile]);
 
-  function downloadFileById(id: string) {
+  const downloadFileById = useCallback((id: string) => {
     const resource = resources.get(id);
     if (resource) void downloadResource(resource.download_url, resource.name);
-  }
+  }, [resources]);
 
-  async function toggleResourceLibrary(file: ContextFile) {
+  const toggleResourceLibrary = useCallback(async (file: ContextFile) => {
     try {
       if (file.in_library) await removeResourceFromLibrary(file.id);
       else await addResourceToLibrary(file.id);
@@ -688,7 +871,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not update the Library.");
     }
-  }
+  }, [chatId, queryClient]);
 
   function togglePanel() {
     setPanelOpen((open) => {
@@ -699,14 +882,20 @@ export function ChatPage({ chatId }: { chatId: string }) {
 
   function addFiles(fileList: FileList | null) {
     if (!fileList?.length) return;
-    const next = Array.from(fileList).map<DraftAttachment>((file) => ({
-      id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+    const next = Array.from(fileList).map((file) => ({
+      id: crypto.randomUUID(),
       file,
-      previewUrl: file.type.startsWith("image/") && typeof URL.createObjectURL === "function"
+      name: file.name,
+      size: file.size,
+      previewUrl: !queueEdit && file.type.startsWith("image/") && typeof URL.createObjectURL === "function"
         ? URL.createObjectURL(file)
         : null,
     }));
-    setAttachments((current) => [...current, ...next]);
+    if (queueEdit) {
+      setQueueEdit({ ...queueEdit, addedFiles: [...queueEdit.addedFiles, ...next] });
+    } else {
+      setAttachments((current) => [...current, ...next]);
+    }
     setError(null);
     setAttachmentMenuOpen(false);
   }
@@ -714,9 +903,9 @@ export function ChatPage({ chatId }: { chatId: string }) {
   function handleAttachFromLibrary(items: LibraryResource[]) {
     const next = items.map<DraftAttachment>((item) => ({
       id: `lib-${item.id}-${crypto.randomUUID()}`,
-      file: new File([""], item.name, {
-        type: item.mime_type || "application/octet-stream",
-      }),
+      resourceId: item.id,
+      name: item.name,
+      size: item.size_bytes,
       previewUrl: null,
     }));
     setAttachments((current) => [...current, ...next]);
@@ -731,8 +920,20 @@ export function ChatPage({ chatId }: { chatId: string }) {
     });
   }
 
+  function clearSubmittedAttachments(submitted: DraftAttachment[]) {
+    const ids = new Set(submitted.map((attachment) => attachment.id));
+    for (const attachment of submitted) {
+      if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+    }
+    setAttachments((current) => current.filter((attachment) => !ids.has(attachment.id)));
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (queueEdit) {
+      await saveQueuedQuestion();
+      return;
+    }
     const content = draft.trim();
     if (!content || !selectedModel || running || submittingRef.current) return;
     // React state updates are asynchronous; this guard closes the short window
@@ -748,9 +949,9 @@ export function ChatPage({ chatId }: { chatId: string }) {
       createdAt: new Date().toISOString(),
       attachments: submittedAttachments.map((attachment) => ({
         id: attachment.id,
-        name: attachment.file.name,
-        kind: fileType(attachment.file),
-        size: formatFileSize(attachment.file.size),
+        name: attachment.name,
+        kind: fileType(attachment.name),
+        size: formatFileSize(attachment.size),
       })),
     };
     // Show the question before the network request starts. Streaming assistant
@@ -761,12 +962,15 @@ export function ChatPage({ chatId }: { chatId: string }) {
     setRunning(true);
     setError(null);
     try {
+      const resourceIds = submittedAttachments.flatMap(({ resourceId }) => resourceId ? [resourceId] : []);
       const userMessage = await createMessage(chatId, {
         content,
+        ...(resourceIds.length ? { resource_ids: resourceIds } : {}),
         client_request_id: clientRequestId,
       });
       setMessages((current) => replaceMessageId(current, temporaryUserId, toMessage(userMessage, resources)));
       for (const attachment of submittedAttachments) {
+        if (!attachment.file) continue;
         await uploadResource({
           file: attachment.file,
           scopeType: "chat",
@@ -775,12 +979,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
           clientUploadId: attachment.id,
         });
       }
-      setAttachments((current) => {
-        current.forEach((attachment) => {
-          if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
-        });
-        return [];
-      });
+      clearSubmittedAttachments(submittedAttachments);
       if (submittedAttachments.length) {
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ["chat", chatId, "datasets"] }),
@@ -809,6 +1008,9 @@ export function ChatPage({ chatId }: { chatId: string }) {
   async function queueDraft() {
     const content = draft.trim();
     if (!content || !activeRunId || !selectedModel || composerPending) return;
+    const submittedAttachments = [...attachments];
+    const resourceIds = submittedAttachments.flatMap(({ resourceId }) => resourceId ? [resourceId] : []);
+    const files = submittedAttachments.flatMap(({ file }) => file ? [file] : []);
     setComposerPending("queue");
     setComposerStatus(null);
     setError(null);
@@ -818,20 +1020,26 @@ export function ChatPage({ chatId }: { chatId: string }) {
         model_id: selectedModel.id,
         effort: effort || undefined,
         client_request_id: crypto.randomUUID(),
-      });
+        ...(resourceIds.length ? { resource_ids: resourceIds } : {}),
+      }, files);
       const queuedQuestion = {
         runId: result.run.id,
-        content: result.message.content,
-        position: result.position,
+        message: result.message,
         removing: false,
         paused: false,
       };
       setQueuedQuestions((current) => {
+        if (startedRunsRef.current.has(queuedQuestion.runId)) return current;
         const next = [...current, queuedQuestion];
         queuedQuestionsRef.current = next;
         return next;
       });
-      setDraft("");
+      setDraft((current) => current.trim() === content ? "" : current);
+      clearSubmittedAttachments(submittedAttachments);
+      if (submittedAttachments.length) {
+        void queryClient.invalidateQueries({ queryKey: ["chat", chatId, "datasets"] });
+        void queryClient.invalidateQueries({ queryKey: ["chat", chatId, "artifacts"] });
+      }
       setComposerStatus("Question added to the queue.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not queue this question.");
@@ -842,7 +1050,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
 
   async function steerDraft() {
     const content = draft.trim();
-    if (!content || !activeRunId || composerPending) return;
+    if (!content || !activeRunId || composerPending || attachments.length) return;
     setComposerPending("steer");
     setComposerStatus(null);
     setError(null);
@@ -884,6 +1092,86 @@ export function ChatPage({ chatId }: { chatId: string }) {
     } catch (caught) {
       setQueuedQuestions((current) => current.map((item) => item.runId === runId ? { ...item, removing: false } : item));
       setError(caught instanceof Error ? caught.message : "Could not remove the queued question.");
+    }
+  }
+
+  function startQueueEdit(item: QueuedQuestion) {
+    setAttachmentMenuOpen(false);
+    setQueueEdit({
+      runId: item.runId,
+      content: item.message.content,
+      files: item.message.attachment_refs,
+      addedFiles: [],
+      removedResourceIds: [],
+      saving: false,
+    });
+    setError(null);
+    setComposerStatus(null);
+    textareaRef.current?.focus();
+  }
+
+  function removeComposerAttachment(id: string) {
+    if (!queueEdit) {
+      removeAttachment(id);
+      return;
+    }
+    setQueueEdit({
+      ...queueEdit,
+      files: queueEdit.files.filter((file) => file.resource_id !== id),
+      addedFiles: queueEdit.addedFiles.filter((file) => file.id !== id),
+      removedResourceIds: queueEdit.files.some((file) => file.resource_id === id)
+        ? [...queueEdit.removedResourceIds, id]
+        : queueEdit.removedResourceIds,
+    });
+  }
+
+  async function saveQueuedQuestion() {
+    if (!queueEdit || queueEdit.saving || !queueEdit.content.trim()) return;
+    const { runId, content, removedResourceIds, addedFiles } = queueEdit;
+    setQueueEdit({ ...queueEdit, saving: true });
+    setError(null);
+    try {
+      const message = await editQueuedRun(runId, content.trim(), removedResourceIds, addedFiles);
+      setQueuedQuestions((current) => {
+        const next = current.map((item) => item.runId === runId ? { ...item, message } : item);
+        queuedQuestionsRef.current = next;
+        return next;
+      });
+      setQueueEdit((edit) => edit?.runId === runId ? null : edit);
+      if (removedResourceIds.length || addedFiles.length) {
+        void queryClient.invalidateQueries({ queryKey: ["chat", chatId, "datasets"] });
+        void queryClient.invalidateQueries({ queryKey: ["chat", chatId, "artifacts"] });
+      }
+      setComposerStatus("Queued question updated.");
+    } catch (caught) {
+      setQueueEdit((edit) => edit?.runId === runId ? { ...edit, saving: false } : edit);
+      setError(caught instanceof Error ? caught.message : "Could not edit the queued question.");
+    }
+  }
+
+  async function moveQueuedQuestion(from: string, to: string) {
+    if (queueReordering || composerPending || queuedQuestions.some((item) => item.removing) || from === to) return;
+    const runIds = queuedQuestions.map((item) => item.runId);
+    const fromIndex = runIds.indexOf(from);
+    const toIndex = runIds.indexOf(to);
+    if (fromIndex < 0 || toIndex < 0) return;
+    runIds.splice(fromIndex, 1);
+    runIds.splice(toIndex, 0, from);
+    setQueueReordering(true);
+    setError(null);
+    try {
+      await reorderChatQueue(chatId, runIds);
+      setQueuedQuestions((current) => {
+        const byId = new Map(current.map((item) => [item.runId, item]));
+        const next = [...runIds.flatMap((id) => byId.get(id) ?? []), ...current.filter((item) => !runIds.includes(item.runId))];
+        queuedQuestionsRef.current = next;
+        return next;
+      });
+      setComposerStatus("Queued question moved.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not reorder the queue.");
+    } finally {
+      setQueueReordering(false);
     }
   }
 
@@ -952,6 +1240,9 @@ export function ChatPage({ chatId }: { chatId: string }) {
             workspaceName={workspaceName}
             panelOpen={panelOpen}
             onToggleRightPanel={togglePanel}
+            quickAssistantOpen={quickAssistant !== null && !quickAssistant.minimized}
+            onToggleQuickAssistant={toggleQuickAssistant}
+            onShare={chatQuery.data?.workspace_id ? () => setShareOpen(true) : undefined}
           />
         </div>
         <ConversationNavigator
@@ -973,52 +1264,33 @@ export function ChatPage({ chatId }: { chatId: string }) {
           ) : (
             <MessageList
               messages={messages}
-              availableResources={availableResources}
-              onRetry={handleRetry}
+              runs={runsQuery.data?.items}
               onFileSelect={selectFileById}
               onFileDownload={downloadFileById}
+              resources={resources}
+              onLibraryToggle={toggleResourceLibrary}
               registerSection={conversationScroll.registerSection}
             />
           )}
         </div>
         <form className="col-start-2 row-start-3 bg-background p-3 sm:p-4" onSubmit={submit}>
-          {queuedQuestions.length ? (
-            <div className="mx-auto mb-2 max-w-3xl space-y-1.5" aria-label="Queued questions">
-              {queuedQuestions.map((item) => (
-                <div key={item.runId} className="flex items-center gap-2 rounded-md border border-border bg-raised px-3 py-2 text-xs">
-                  {item.paused ? <CirclePause className="size-3.5 shrink-0 text-amber-300" aria-hidden="true" /> : <LoaderCircle className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />}
-                  <span className="shrink-0 font-medium text-foreground">{item.paused ? "Paused" : `Queued${item.position > 1 ? ` · ${item.position}` : ""}`}</span>
-                  <span className="min-w-0 flex-1 truncate text-muted-foreground">{item.content}</span>
-                  {item.paused ? (
-                    <button type="button" onClick={resumePausedQueue} aria-label="Resume queued questions" className="rounded px-1.5 py-1 text-[11px] font-medium text-amber-200 hover:bg-surface hover:text-amber-100">
-                      Resume
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => void removeQueuedQuestion(item.runId)}
-                    disabled={item.removing}
-                    aria-label={`Remove queued question: ${item.content}`}
-                    className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-surface hover:text-foreground disabled:opacity-50"
-                  >
-                    {item.removing ? <LoaderCircle className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : null}
-          {running && activeRunId ? (
+          <QueuedQuestions
+            items={queuedQuestions}
+            editingId={queueEdit?.runId}
+            busy={queueReordering || Boolean(composerPending || queueEdit?.saving) || queuedQuestions.some((item) => item.removing)}
+            onMove={(from, to) => void moveQueuedQuestion(from, to)}
+            onEdit={startQueueEdit}
+            onRemove={(runId) => void removeQueuedQuestion(runId)}
+            onResume={resumePausedQueue}
+          />
+          {!queueEdit && running && activeRunId && draft.trim() ? (
             <div className="mx-auto mb-2 flex max-w-3xl items-center gap-2" aria-label="Active run actions">
-              <button type="button" onClick={() => void stopActiveRun()} disabled={stopPending} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-400/40 bg-red-950/20 px-3 text-xs font-medium text-red-200 hover:bg-red-950/40 disabled:opacity-40">
-                {stopPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <CircleStop className="size-3.5" />}
-                Stop
-              </button>
               {draft.trim() ? <>
-              <button type="button" onClick={() => void queueDraft()} disabled={Boolean(composerPending)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border-strong bg-raised px-3 text-xs font-medium text-foreground hover:bg-surface disabled:opacity-40">
+              <button type="button" onClick={() => void queueDraft()} disabled={Boolean(composerPending) || queueReordering} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border-strong bg-raised px-3 text-xs font-medium text-foreground hover:bg-surface disabled:opacity-40">
                 {composerPending === "queue" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ListPlus className="size-3.5" />}
                 Queue
               </button>
-              <button type="button" onClick={() => void steerDraft()} disabled={Boolean(composerPending)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40">
+              <button type="button" onClick={() => void steerDraft()} disabled={Boolean(composerPending) || attachments.length > 0} title={attachments.length ? "Queue the follow-up to include its files." : undefined} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40">
                 {composerPending === "steer" ? <LoaderCircle className="size-3.5 animate-spin" /> : <CornerDownRight className="size-3.5" />}
                 Steer
               </button>
@@ -1026,9 +1298,19 @@ export function ChatPage({ chatId }: { chatId: string }) {
             </div>
           ) : null}
           <div ref={composerRef} className="relative mx-auto max-w-3xl rounded-lg border border-border-strong bg-surface p-2 focus-within:border-ring">
-            {attachments.length ? (
+            {queueEdit && <p className="mb-2 px-1 text-xs font-medium text-muted-foreground">Editing queued question</p>}
+            {slashMenuOpen ? (
+              <SlashCommandMenu
+                id="slash-command-menu"
+                commands={slashSuggestions}
+                activeIndex={activeSlashIndex}
+                onHover={setSlashIndex}
+                onPick={pickSlashCommand}
+              />
+            ) : null}
+            {composerAttachments.length ? (
               <div aria-label="Selected chat attachments" className="mb-2 flex gap-2 overflow-x-auto pb-1">
-                {attachments.map((attachment) => (
+                {composerAttachments.map((attachment) => (
                   <div key={attachment.id} className="relative flex min-w-[180px] max-w-[240px] items-center gap-2 rounded-lg border bg-raised p-2 pr-8">
                     <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md border bg-surface text-muted-foreground">
                       {attachment.previewUrl ? (
@@ -1036,21 +1318,28 @@ export function ChatPage({ chatId }: { chatId: string }) {
                       ) : <FileText className="size-4" />}
                     </span>
                     <span className="min-w-0">
-                      <span className="block truncate text-[11px] font-medium text-foreground">{attachment.file.name}</span>
-                      <span className="mt-0.5 block text-[10px] text-muted-foreground">{fileType(attachment.file)} · {formatFileSize(attachment.file.size)}</span>
+                      <span className="block truncate text-[11px] font-medium text-foreground">{attachment.name}</span>
+                      <span className="mt-0.5 block text-[10px] text-muted-foreground">{fileType(attachment.name)}{attachment.size == null ? "" : ` · ${formatFileSize(attachment.size)}`}</span>
                     </span>
-                    <button type="button" onClick={() => removeAttachment(attachment.id)} aria-label={`Remove ${attachment.file.name}`} className="absolute right-1 top-1 grid size-6 place-items-center rounded text-muted-foreground hover:bg-surface hover:text-foreground"><X className="size-3.5" /></button>
+                    <button type="button" disabled={queueEdit?.saving} onClick={() => removeComposerAttachment(attachment.id)} aria-label={`Remove ${attachment.name}`} className="absolute right-1 top-1 grid size-6 place-items-center rounded text-muted-foreground hover:bg-surface hover:text-foreground disabled:opacity-50"><X className="size-3.5" /></button>
                   </div>
                 ))}
               </div>
             ) : null}
             <div className="flex items-end gap-1.5">
-              <div className="relative flex items-center gap-1">
-                <button type="button" aria-label="Add files or connectors" aria-haspopup="dialog" aria-expanded={attachmentMenuOpen} disabled={running || messagesQuery.isError} onClick={() => setAttachmentMenuOpen((open) => !open)} className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40"><Plus className="size-4" /></button>
+              {queueEdit ? (
+                <button type="button" disabled={queueEdit.saving} onClick={() => fileInputRef.current?.click()} aria-label="Add files to queued question" title="Add files" className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-50">
+                  <Paperclip aria-hidden="true" className="size-4" />
+                </button>
+              ) : <div className="flex items-center gap-1">
+                <button type="button" aria-label="Add files or connectors" aria-haspopup="dialog" aria-expanded={attachmentMenuOpen} disabled={messagesQuery.isError} onClick={() => {
+                  if (slashMenuOpen) setSlashDismissedFor(draft);
+                  setAttachmentMenuOpen((open) => !open);
+                }} className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40"><Plus className="size-4" /></button>
                 <button
                   type="button"
                   aria-label="Import from Library"
-                  disabled={running || messagesQuery.isError}
+                  disabled={messagesQuery.isError}
                   onClick={() => setLibraryDialogOpen(true)}
                   className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40"
                   title="Import from Library"
@@ -1058,68 +1347,177 @@ export function ChatPage({ chatId }: { chatId: string }) {
                   <BookOpen className="size-4" />
                 </button>
                 {attachmentMenuOpen ? (
-                  <div role="dialog" aria-label="Add files and connectors" className="absolute bottom-[calc(100%+8px)] left-0 z-50 flex h-[320px] w-[min(300px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-xl border border-border-strong bg-[#191b1e] p-2 shadow-[0_18px_50px_rgba(0,0,0,0.48)]">
-                    <button type="button" onClick={() => fileInputRef.current?.click()} className="flex w-full shrink-0 items-center gap-2 rounded-lg border border-border-strong bg-[linear-gradient(110deg,#303744,#242a33)] p-2 text-left hover:border-slate/70">
-                      <span className="grid size-9 shrink-0 place-items-center rounded-md bg-[#b8cef0] text-[#172033]"><Paperclip className="size-[18px]" /></span>
-                      <span><span className="block text-xs font-semibold leading-4 text-foreground">Add files</span><span className="block text-[10px] leading-4 text-foreground/65">From your device</span></span>
-                      <ChevronRight className="ml-auto size-3.5 text-foreground" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAttachmentMenuOpen(false);
-                        setLibraryDialogOpen(true);
-                      }}
-                      className="mt-1 flex w-full shrink-0 items-center gap-2 rounded-lg border border-border-strong bg-[linear-gradient(110deg,#242a33,#1a2028)] p-2 text-left hover:border-slate/70"
-                    >
-                      <span className="grid size-9 shrink-0 place-items-center rounded-md bg-[#c2d9b8] text-[#172e18]">
-                        <BookOpen className="size-[18px]" />
-                      </span>
-                      <span>
-                        <span className="block text-xs font-semibold leading-4 text-foreground">Import from Library</span>
-                        <span className="block text-[10px] leading-4 text-foreground/65">Browse saved assets</span>
-                      </span>
-                      <ChevronRight className="ml-auto size-3.5 text-foreground" />
-                    </button>
-                    <label className="relative mt-2 block shrink-0"><span className="sr-only">Find a connector</span><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><input value={connectorQuery} onChange={(event) => setConnectorQuery(event.target.value)} placeholder="Find a connector…" className="h-8 w-full rounded-md border bg-transparent pl-8 pr-2.5 text-[11px] outline-none placeholder:text-muted-foreground focus:border-ring" /></label>
-                    <div role="tablist" aria-label="Connector categories" className="mt-1.5 grid shrink-0 grid-cols-4 gap-0.5 border-b pb-1.5">
-                      {([['all', 'All'], ['skills', 'Skills'], ['data', 'Data Sources'], ['apps', 'Apps & Tools']] as const).map(([value, label]) => (
-                        <button key={value} type="button" role="tab" aria-selected={connectorCategory === value} onClick={() => setConnectorCategory(value)} className={`min-h-8 rounded px-1 py-0.5 text-[11px] leading-[14px] ${connectorCategory === value ? "bg-raised text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>
-                      ))}
+                  <div
+                    role="dialog"
+                    aria-label="Add files and connectors"
+                    className="absolute inset-x-0 bottom-full z-30 mb-2 flex h-[min(26rem,65dvh)] flex-col overflow-hidden rounded-xl border border-border-strong bg-[#191b1e] shadow-2xl"
+                    onKeyDown={(event) => {
+                      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+                      const actions = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("[data-attachment-action]"));
+                      const index = actions.findIndex((action) => action === document.activeElement);
+                      if (index === -1 && event.target instanceof HTMLButtonElement) return;
+                      event.preventDefault();
+                      const next = event.key === "ArrowDown" ? (index + 1) % actions.length : (index <= 0 ? actions.length - 1 : index - 1);
+                      actions[next]?.focus();
+                    }}
+                  >
+                    <div className="shrink-0 space-y-2 px-2.5 pt-2.5 sm:px-3 sm:pt-3">
+                      <label className="relative block">
+                        <span className="sr-only">Find a connector, skill, or tool</span>
+                        <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                        <input
+                          value={connectorQuery}
+                          onChange={(event) => setConnectorQuery(event.target.value)}
+                          placeholder="Find a connector, skill, or tool…"
+                          className="h-9 w-full rounded-lg border border-border-strong bg-transparent pl-9 pr-3 text-xs outline-none placeholder:text-muted-foreground focus:border-ring"
+                        />
+                      </label>
+                      <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                        <button
+                          type="button"
+                          data-attachment-action
+                          onClick={() => fileInputRef.current?.click()}
+                          className="flex min-w-0 items-center gap-2 rounded-lg border border-border-strong bg-gradient-to-br from-[#29323e] to-[#20272f] p-2 text-left hover:border-slate/70 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ring"
+                        >
+                          <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#b8cef0] text-[#172033] sm:size-9"><Paperclip aria-hidden="true" className="size-4" /></span>
+                          <span className="min-w-0"><span className="block text-xs font-semibold leading-4">Add files</span><span className="hidden text-[10px] leading-4 text-muted-foreground sm:block">From your device</span></span>
+                          <ChevronRight aria-hidden="true" className="ml-auto hidden size-3.5 shrink-0 sm:block" />
+                        </button>
+                        <button
+                          type="button"
+                          data-attachment-action
+                          onClick={() => {
+                            setAttachmentMenuOpen(false);
+                            setLibraryDialogOpen(true);
+                          }}
+                          className="flex min-w-0 items-center gap-2 rounded-lg border border-border-strong bg-gradient-to-br from-[#26313a] to-[#20272f] p-2 text-left hover:border-slate/70 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ring"
+                        >
+                          <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#c2d9b8] text-[#172e18] sm:size-9"><BookOpen aria-hidden="true" className="size-4" /></span>
+                          <span className="min-w-0"><span className="block text-xs font-semibold leading-4">Import from Library</span><span className="hidden text-[10px] leading-4 text-muted-foreground sm:block">Browse saved assets</span></span>
+                          <ChevronRight aria-hidden="true" className="ml-auto hidden size-3.5 shrink-0 sm:block" />
+                        </button>
+                      </div>
+                      <div role="tablist" aria-label="Connector categories" className="flex flex-wrap gap-1 border-b pb-1.5">
+                        {([["all", "All"], ["skills", "Skills"], ["data", "Data Sources"], ["apps", "Apps & Tools"]] as const).map(([value, label]) => (
+                          <button key={value} type="button" role="tab" aria-selected={connectorCategory === value} onClick={() => setConnectorCategory(value)} className={`h-8 rounded-md px-2 text-[11px] sm:px-4 ${connectorCategory === value ? "bg-raised text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>
+                        ))}
+                      </div>
                     </div>
-                    <div className="min-h-0 flex-1 overflow-y-auto py-0.5">
-                      {visibleConnectors.map(({ name, icon: Icon }) => (
-                        <button key={name} type="button" disabled title={`${name} is coming soon`} className="flex w-full cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[11px] text-foreground opacity-70"><Icon className="size-3.5" /><span>{name}</span><span className="ml-auto text-[8px] uppercase tracking-wide text-muted-foreground">Soon</span></button>
+                    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 sm:px-3">
+                      {visibleConnectors.map(({ name, description, icon: Icon }) => (
+                        <div key={name} aria-disabled="true" className="flex items-center gap-3 border-b px-2 py-2 last:border-b-0 sm:px-3">
+                          <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-xs font-medium">{name}</span>
+                            <span className="block truncate text-[11px] text-muted-foreground">{description}</span>
+                          </span>
+                          <span className="shrink-0 rounded-full border bg-raised px-2 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground">Soon</span>
+                        </div>
                       ))}
-                      {!visibleConnectors.length ? <p className="px-2 py-3 text-center text-[11px] text-muted-foreground">No matching connectors.</p> : null}
+                      {!visibleConnectors.length ? <p className="px-3 py-4 text-xs text-muted-foreground">No matching connectors.</p> : null}
                     </div>
-                    <p className="shrink-0 border-t px-1.5 pt-1.5 text-[9px] text-muted-foreground">Local files are available now. External connectors are coming soon.</p>
+                    <div className="flex shrink-0 items-center justify-between gap-3 border-t px-2.5 py-2 text-[10px] text-muted-foreground sm:px-3">
+                      <span>Local files are available now. External connectors are coming soon.</span>
+                      <span className="hidden shrink-0 gap-1 lg:flex">
+                        <span className="rounded-md border px-1.5 py-0.5"><kbd>↑↓</kbd> to move</span>
+                        <span className="rounded-md border px-1.5 py-0.5"><kbd>Enter</kbd> to select</span>
+                        <span className="rounded-md border px-1.5 py-0.5"><kbd>Esc</kbd> to close</span>
+                      </span>
+                    </div>
                   </div>
                 ) : null}
-              </div>
-              <label htmlFor="chat-message" className="sr-only">Ask anything about your data</label>
+              </div>}
+              <label htmlFor="chat-message" className="sr-only">{queueEdit ? "Edit queued question" : "Ask anything about your data"}</label>
               <textarea
                 id="chat-message"
                 ref={textareaRef}
-                value={draft}
-                disabled={messagesQuery.isError}
-                onChange={(event) => { setDraft(event.target.value); resizeComposer(event.currentTarget); setError(null); setComposerStatus(null); }}
+                value={composerText}
+                disabled={messagesQuery.isError || queueEdit?.saving}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (queueEdit) {
+                    setQueueEdit({ ...queueEdit, content: value });
+                  } else {
+                    if (attachmentMenuOpen && suggestSlashCommands(value) !== null) setAttachmentMenuOpen(false);
+                    setDraft(value);
+                  }
+                  resizeComposer(event.currentTarget);
+                  setError(null);
+                  setComposerStatus(null);
+                }}
+                role={queueEdit ? undefined : "combobox"}
+                aria-expanded={queueEdit ? undefined : slashMenuOpen}
+                aria-controls={slashMenuOpen ? "slash-command-menu" : undefined}
+                aria-autocomplete={queueEdit ? undefined : "list"}
+                aria-activedescendant={slashMenuOpen && slashSuggestions.length ? slashOptionId("slash-command-menu", activeSlashIndex) : undefined}
                 onKeyDown={(event) => {
+                  if (queueEdit) {
+                    if (event.key === "Escape") setQueueEdit(null);
+                    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                      event.preventDefault();
+                      event.currentTarget.form?.requestSubmit();
+                    }
+                    return;
+                  }
+                  if (slashMenuOpen) {
+                    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                      event.preventDefault();
+                      const step = event.key === "ArrowDown" ? 1 : -1;
+                      setSlashIndex((activeSlashIndex + step + slashSuggestions.length) % Math.max(slashSuggestions.length, 1));
+                      return;
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setSlashDismissedFor(draft);
+                      return;
+                    }
+                    if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") {
+                      const picked = slashSuggestions[activeSlashIndex];
+                      if (picked) {
+                        event.preventDefault();
+                        pickSlashCommand(picked);
+                        return;
+                      }
+                    }
+                  }
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
+                    const slash = parseSlashCommand(draft);
+                    if (slash) {
+                      void runSlashCommand(slash.command, slash.args, slash.name);
+                      return;
+                    }
                     event.currentTarget.form?.requestSubmit();
                   }
                 }}
                 rows={1}
-                placeholder={running ? "Type a follow-up to queue or steer…" : "Ask anything about your data…"}
+                placeholder={queueEdit ? "Edit your queued question…" : running ? "Type a follow-up to queue or steer…" : "Ask anything about your data, or type / for commands"}
                 className="min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm leading-5 outline-none placeholder:text-muted-foreground disabled:opacity-60"
               />
-              <button type="submit" disabled={!draft.trim() || running || !selectedModel} aria-label="Send message" className="grid size-8 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground disabled:opacity-30">
-                {running ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
-              </button>
+              {!queueEdit && <button type={running ? "button" : "submit"} onClick={running ? () => void stopActiveRun() : undefined} disabled={running ? !activeRunId || stopPending : !draft.trim() || !selectedModel} aria-label={running ? "Stop" : "Send message"} className={`grid size-8 shrink-0 place-items-center rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${running ? "bg-[#292b30] text-white hover:bg-[#34363c] disabled:opacity-50" : "bg-primary text-primary-foreground disabled:opacity-30"}`}>
+                {running ? (stopPending ? <LoaderCircle className="size-4 animate-spin" /> : <span className="size-[13.5px] rounded-[2px] bg-white/85" />) : <ArrowUp className="size-4" />}
+              </button>}
             </div>
-            <input ref={fileInputRef} type="file" multiple accept=".csv,.xls,.xlsx,.parquet,.png,.jpg,.jpeg,.pdf,.txt,.md,.json" className="sr-only" aria-label="Add files to chat" onChange={(event) => { addFiles(event.target.files); event.currentTarget.value = ""; }} />
-            <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 px-1 pt-2">
+            <input
+              key={queueEdit?.runId ?? "draft"}
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept={chatFileExtensions}
+              disabled={queueEdit?.saving}
+              className="sr-only"
+              aria-label={queueEdit ? "Select files for queued question" : "Add files to chat"}
+              onChange={(event) => {
+                addFiles(event.target.files);
+                event.currentTarget.value = "";
+              }}
+            />
+            {queueEdit ? (
+              <div className="mt-1.5 flex justify-end gap-2 border-t border-border/60 px-1 pt-2 text-xs">
+                <button type="button" disabled={queueEdit.saving} onClick={() => setQueueEdit(null)} className="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-50">Cancel</button>
+                <button type="submit" disabled={queueEdit.saving || !queueEdit.content.trim()} className="rounded-md bg-primary px-3 py-1.5 font-medium text-primary-foreground disabled:opacity-50">{queueEdit.saving ? "Saving…" : "Save question"}</button>
+              </div>
+            ) : <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 px-1 pt-2">
               <div className="flex items-center gap-1.5">
                 {!chatQuery.data?.workspace_id && (
                   <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
@@ -1154,7 +1552,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
                   {supportedEfforts.map((option) => <option key={option} value={option}>{option}</option>)}
                 </select>
               </div>
-            </div>
+            </div>}
           </div>
           <div className="mx-auto mt-1.5 min-h-4 max-w-3xl text-[11px] text-muted-foreground" aria-live="polite">
             {error ? <p role="alert" className="text-red-300">{error}</p> : null}
@@ -1169,10 +1567,33 @@ export function ChatPage({ chatId }: { chatId: string }) {
         />
       </div>
 
+      {chatQuery.data?.workspace_id ? (
+        <ShareWorkspaceDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          workspaceId={chatQuery.data.workspace_id}
+          workspaceName={workspaceName ?? "this workspace"}
+          subject="chat"
+        />
+      ) : null}
+      {quickAssistant ? (
+        <QuickAssistantPopup
+          key={`${chatId}:${quickAssistant.session}`}
+          autoAsk={quickAssistant.autoAsk}
+          chatId={chatId}
+          snapshotMessageId={quickAssistant.snapshotMessageId}
+          resources={[...(datasetsQuery.data?.items ?? []), ...(artifactsQuery.data?.items ?? [])]}
+          onFileSelect={selectFile}
+          minimized={quickAssistant.minimized}
+          onMinimize={minimizeQuickAssistant}
+          onRestore={restoreQuickAssistant}
+          onClose={closeQuickAssistant}
+          contextOpen={panelOpen}
+        />
+      ) : null}
       {panelOpen ? (
         <div className="absolute inset-y-0 right-0 z-40 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:static xl:z-auto xl:w-[340px] xl:max-w-none xl:shrink-0 xl:shadow-none">
           <ContextSidebar
-            chatId={chatId}
             workspaceId={chatQuery.data?.workspace_id ?? null}
             datasets={datasetsQuery.data?.items ?? []}
             artifacts={artifactsQuery.data?.items ?? []}

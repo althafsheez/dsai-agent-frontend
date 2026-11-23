@@ -2,6 +2,8 @@
 
 DSAI is an enterprise-grade agentic data analytics application designed for fast, conversational analysis of structured datasets (CSV, Excel, Parquet), interactive visualizations, and automated workflows.
 
+## Current scope
+The main chat uses the ReAct agent in `agentic/agent/react_loop.py`. The existing FastAPI endpoint supplies conversation history and authorized tools, persists run events and streams responses to Next.js. Edit the shared loop in `agentic/` to change how chat chooses tools and synthesizes answers. Run the API and frontend together as shown below.
 This repository hosts the redesigned Next.js 15 frontend MVP, rebuilt with an understated dark charcoal design system, responsive application navigation, structured chat execution trace, and rich context inspection.
 
 ---

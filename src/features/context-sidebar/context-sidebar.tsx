@@ -5,11 +5,9 @@ import { useMemo, useState } from "react";
 import { ArtifactsPanel } from "./artifacts-panel";
 import { ContextTabs, type ContextTab } from "./context-tabs";
 import { DatasetsPanel } from "./datasets-panel";
-import { QuickAssistant } from "./quick-assistant";
 import type { ContextSidebarProps } from "./types";
 
 export function ContextSidebar({
-  chatId,
   workspaceId,
   datasets,
   artifacts,
@@ -87,7 +85,6 @@ export function ContextSidebar({
           />
         )}
       </div>
-      <QuickAssistant key={`${chatId}:${workspaceId ?? "standalone"}`} chatId={chatId} workspaceId={workspaceId} resources={[...datasets, ...artifacts]} onFileSelect={onFileSelect} />
     </aside>
   );
 }

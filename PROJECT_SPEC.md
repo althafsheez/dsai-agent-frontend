@@ -43,11 +43,16 @@ backend/
   app/
     main.py, config.py, db.py, models.py, schemas.py
     routes/
-    services/               # storage, resource classification, access
-    agent/                  # Gemini runner, run coordinator, E2B tools
+    services/               # run coordination, agent adapter, resource classification, access
   tests/
   storage/                  # ignored, durable local files
   requirements.txt
+agentic/
+  agent/                    # shared ReAct loop and prompts
+  runtime/                  # runner, execution contracts and events
+  providers/                # Gemini integration
+  tools/                    # registry and tools
+  execution/                # E2B sandbox
 public/
 ```
 Create directories when needed. Keep route composition separate from business rules, API operations and run state. TanStack Query caches backend data; do not mirror it in Zustand. Avoid giant components, unnecessary effects/client boundaries and rerendering completed messages for every streamed token.

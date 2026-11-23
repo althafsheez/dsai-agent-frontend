@@ -19,6 +19,17 @@ describe("filterHistory", () => {
     expect(filterHistory(records, { ...defaults, ownership: "all", authorId: "user-anita", workspaceId: "standalone" }, now).map((record) => record.id)).toEqual(["2"]);
   });
 
+  it("places pinned chats above newer updates and sorts each group by recency", () => {
+    const base = records[0];
+    const chats = [
+      { ...base, id: "old" },
+      { ...base, id: "pin", pinned_at: base.updated_at },
+      { ...base, id: "new", updated_at: "2026-11-10T10:00:00Z" },
+      { ...base, id: "older-pin", pinned_at: base.updated_at, updated_at: "2026-11-06T10:00:00Z" },
+    ];
+    expect(filterHistory(chats, defaults).map(chat => chat.id)).toEqual(["pin", "older-pin", "new", "old"]);
+  });
+
   it("filters by time and sorts", () => {
     expect(filterHistory(records, { ...defaults, ownership: "all", time: "day" }, now).map((record) => record.id)).toEqual(["1"]);
     expect(filterHistory(records, { ...defaults, ownership: "all", sort: "name_asc" }, now).map((record) => record.name)).toEqual(["Revenue Analysis", "Sales Report"]);

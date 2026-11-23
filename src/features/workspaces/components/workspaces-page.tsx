@@ -4,11 +4,13 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, Copy, ExternalLink, Folder, MoreHorizontal, Search, Trash2, X } from "lucide-react";
+import { ChevronDown, Folder, Pin, PinOff, Search, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { deleteWorkspace, getWorkspaces, uploadResource, type WorkspaceDto } from "@/lib/api";
 import { useAuth } from "@/features/auth";
+import { useTogglePin } from "@/features/pinning";
 import { CreateWorkspaceDialog } from "./create-workspace-dialog";
+import { WorkspaceRowMenu } from "./workspace-row-menu";
 
 export type Ownership = "all" | "owned" | "shared" | "contributed";
 type Sort = "updated_desc" | "updated_asc" | "name_asc";
@@ -59,6 +61,8 @@ export function WorkspacesPage() {
   const [sort, setSort] = useState<Sort>("updated_desc");
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const { togglePin } = useTogglePin();
 
   const workspacesQuery = useQuery({ queryKey: ["workspaces"], queryFn: getWorkspaces });
 
@@ -97,9 +101,10 @@ export function WorkspacesPage() {
   });
 
   const deleteWorkspaceMutation = useMutation({
-    mutationFn: (workspaceId: string) => deleteWorkspace(workspaceId),
-    onSuccess: async () => {
+    mutationFn: async (workspaceIds: string[]) => { await Promise.all(workspaceIds.map((id) => deleteWorkspace(id))); },
+    onSuccess: async (_result, workspaceIds) => {
       setActiveMenuId(null);
+      setSelectedIds((current) => new Set([...current].filter((id) => !workspaceIds.includes(id))));
       await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
     },
   });
@@ -108,6 +113,22 @@ export function WorkspacesPage() {
     await uploadInitialFiles.mutateAsync({ workspace, files });
     await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
     router.push(`/workspaces/${workspace.id}`);
+  }
+
+  const selectedWorkspaces = workspaces.filter((workspace) => selectedIds.has(workspace.id));
+  const allSelected = workspaces.length > 0 && selectedWorkspaces.length === workspaces.length;
+
+  function toggleSelected(workspaceId: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(workspaceId)) next.delete(workspaceId);
+      else next.add(workspaceId);
+      return next;
+    });
+  }
+
+  function pinSelected(pinned: boolean) {
+    selectedWorkspaces.filter((workspace) => Boolean(workspace.pinned_at) !== pinned).forEach((workspace) => togglePin("workspace", workspace.id, pinned));
   }
 
   async function handleCopyLink(workspaceId: string) {
@@ -207,11 +228,26 @@ export function WorkspacesPage() {
           </button>
         </div>
       ) : workspaces.length > 0 ? (
-        <div className="mt-6 overflow-x-auto rounded-md border">
+        <>
+        {selectedWorkspaces.length > 0 && (
+          <div role="toolbar" aria-label="Selected workspace actions" className="mt-6 flex min-h-10 items-center justify-between gap-3 rounded-md border bg-surface px-3 py-1.5">
+            <span className="text-xs font-medium">{selectedWorkspaces.length} selected</span>
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={() => pinSelected(true)} className="flex h-7 items-center gap-1.5 rounded px-2 text-xs text-muted-foreground hover:bg-raised hover:text-foreground"><Pin className="size-3.5" />Pin</button>
+              <button type="button" onClick={() => pinSelected(false)} className="flex h-7 items-center gap-1.5 rounded px-2 text-xs text-muted-foreground hover:bg-raised hover:text-foreground"><PinOff className="size-3.5" />Unpin</button>
+              <button type="button" disabled={deleteWorkspaceMutation.isPending} onClick={() => deleteWorkspaceMutation.mutate(selectedWorkspaces.map((workspace) => workspace.id))} className="flex h-7 items-center gap-1.5 rounded px-2 text-xs text-red-300 hover:bg-red-400/10"><Trash2 className="size-3.5" />Delete</button>
+              <button type="button" aria-label="Clear selection" onClick={() => setSelectedIds(new Set())} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-raised hover:text-foreground"><X className="size-3.5" /></button>
+            </div>
+          </div>
+        )}
+        <div className={cn("overflow-x-auto rounded-md border", selectedWorkspaces.length > 0 ? "mt-2" : "mt-6")}>
           <table className="w-full min-w-[640px] table-fixed border-collapse text-left">
             <thead className="bg-surface text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
               <tr>
-                <th className="w-[42%] px-3.5 py-2.5 font-medium">Workspace</th>
+                <th className="w-10 px-3 py-2.5">
+                  <input type="checkbox" aria-label="Select all workspaces" checked={allSelected} onChange={() => setSelectedIds(allSelected ? new Set() : new Set(workspaces.map((workspace) => workspace.id)))} className="size-3.5 accent-[var(--primary)]" />
+                </th>
+                <th className="w-[40%] px-1 py-2.5 font-medium">Workspace</th>
                 <th className="w-[16%] px-3.5 py-2.5 font-medium">Author</th>
                 <th className="w-[18%] px-3.5 py-2.5 font-medium">Created</th>
                 <th className="w-[18%] px-3.5 py-2.5 font-medium">Last updated</th>
@@ -222,17 +258,20 @@ export function WorkspacesPage() {
               {workspaces.map((workspace) => (
                 <tr
                   key={workspace.id}
-                  className="group relative border-t text-xs transition-colors hover:bg-surface/60"
+                  className={cn("group relative border-t text-xs transition-colors hover:bg-surface/60", selectedIds.has(workspace.id) && "bg-surface/60")}
                 >
+                  <td className="px-3 py-1">
+                    <input type="checkbox" aria-label={`Select ${workspace.name}`} checked={selectedIds.has(workspace.id)} onChange={() => toggleSelected(workspace.id)} className="size-3.5 accent-[var(--primary)]" />
+                  </td>
                   <td className="p-0 font-medium text-foreground">
                     <Link
                       href={`/workspaces/${workspace.id}`}
-                      className="flex min-w-0 items-center gap-2.5 px-3.5 py-3 outline-none focus-visible:bg-raised"
+                      className="flex min-w-0 items-center gap-2.5 px-1 py-3 outline-none focus-visible:bg-raised"
                     >
-                      <Folder className="size-4 shrink-0 text-slate" />
                       <div className="min-w-0">
-                        <span className="block truncate font-medium group-hover:text-foreground">
-                          {workspace.name}
+                        <span className="flex min-w-0 items-center gap-1.5 font-medium group-hover:text-foreground">
+                          <span className="truncate">{workspace.name}</span>
+                          {workspace.pinned_at && <Pin aria-label="Pinned" className="size-3 shrink-0 fill-current text-muted-foreground" />}
                         </span>
                         {workspace.description && (
                           <span className="block truncate text-[11px] font-normal text-muted-foreground">
@@ -275,58 +314,24 @@ export function WorkspacesPage() {
                       new Date(workspace.updated_at)
                     )}
                   </td>
-                  <td className="relative px-2 py-1 text-right">
-                    <button
-                      type="button"
-                      aria-label={`Actions for ${workspace.name}`}
-                      onClick={() => setActiveMenuId(activeMenuId === workspace.id ? null : workspace.id)}
-                      className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-raised hover:text-foreground"
-                    >
-                      <MoreHorizontal className="size-4" />
-                    </button>
-
-                    {activeMenuId === workspace.id && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-40"
-                          onClick={() => setActiveMenuId(null)}
-                        />
-                        <div className="absolute right-2 top-10 z-50 min-w-36 rounded-md border bg-popover p-1 shadow-lg text-left text-xs">
-                          <Link
-                            href={`/workspaces/${workspace.id}`}
-                            onClick={() => setActiveMenuId(null)}
-                            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-muted-foreground hover:bg-surface hover:text-foreground"
-                          >
-                            <ExternalLink className="size-3.5" />
-                            Open
-                          </Link>
-                          <button
-                            type="button"
-                            onClick={() => handleCopyLink(workspace.id)}
-                            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-muted-foreground hover:bg-surface hover:text-foreground"
-                          >
-                            {copiedId === workspace.id ? <Check className="size-3.5 text-green-400" /> : <Copy className="size-3.5" />}
-                            {copiedId === workspace.id ? "Copied!" : "Copy link"}
-                          </button>
-                          <div className="my-1 border-t" />
-                          <button
-                            type="button"
-                            disabled={deleteWorkspaceMutation.isPending}
-                            onClick={() => deleteWorkspaceMutation.mutate(workspace.id)}
-                            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-destructive hover:bg-destructive/10"
-                          >
-                            <Trash2 className="size-3.5" />
-                            Delete
-                          </button>
-                        </div>
-                      </>
-                    )}
+                  <td className="px-2 py-1 text-right">
+                    <WorkspaceRowMenu
+                      workspace={workspace}
+                      open={activeMenuId === workspace.id}
+                      onOpenChange={(open) => setActiveMenuId(open ? workspace.id : null)}
+                      copied={copiedId === workspace.id}
+                      onCopyLink={() => void handleCopyLink(workspace.id)}
+                      onPinChange={(pinned) => togglePin("workspace", workspace.id, pinned)}
+                      onDelete={() => deleteWorkspaceMutation.mutate([workspace.id])}
+                      deleting={deleteWorkspaceMutation.isPending}
+                    />
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        </>
       ) : (
         <div className="mt-6 rounded-md border border-dashed px-6 py-14 text-center">
           <Folder className="mx-auto size-8 text-muted-foreground" strokeWidth={1.5} />

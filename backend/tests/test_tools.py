@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
+
 import pytest
 
-from app.agent.default_tools import build_tool_registry
-from app.agent.sandbox import E2BSandboxPool
-from app.agent.tools import ToolContext
+from agentic.execution.e2b import E2BSandboxPool
+from agentic.runtime.contracts import InputSource, ToolContext
+from agentic.tools.defaults import build_tool_registry
 from app.config import Settings
 from app.db import Base, make_engine, make_session_factory
 from app.models import User
+from app.services.agent_adapter import AgentToolAdapter
 from app.storage import LocalFileStorage
 
 
@@ -27,7 +33,9 @@ def tool_setup(tmp_path):
         session.add(User(id="user-tools", name="Tool User", initials="TU"))
         session.commit()
     pool = E2BSandboxPool(None)
-    return build_tool_registry(settings, factory, pool, LocalFileStorage(settings.storage_root)), ToolContext("run-1", "chat-1", "user-tools")
+    adapter = AgentToolAdapter(factory, LocalFileStorage(settings.storage_root))
+    registry = build_tool_registry(pool, adapter, tavily_api_key=settings.tavily_api_key)
+    return registry, ToolContext("run-1", "chat-1", "user-tools")
 
 
 async def test_memory_is_user_scoped_and_persistent(tool_setup) -> None:
@@ -61,3 +69,86 @@ def test_sandbox_paths_are_strictly_scoped() -> None:
         E2BSandboxPool._safe_path("/etc/passwd")
     with pytest.raises(ValueError):
         E2BSandboxPool._safe_path("/home/user/inputs/secret.txt", writable=True)
+
+
+async def test_concurrent_selection_reuses_upload_and_revalidates_on_subsequent_tools(monkeypatch) -> None:
+    pool = E2BSandboxPool(None)
+    resource_id, filename = "allowed", "allowed-iris.csv"
+    path = pool.input_path(filename)
+    source = InputSource(filename, lambda: b"value\n4\n")
+    available = {resource_id: source}
+    context = ToolContext("one-run", "chat", "user", input_resources=(
+        {"resource_id": resource_id, "path": path},
+    ))
+
+    class Host:
+        def resolve_inputs(self, context, resource_ids):
+            return {key: available[key] for key in resource_ids if key in available}
+
+    upload_entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def upload(run_id, filename, content):
+        upload_entered.set()
+        await release.wait()
+        return path
+
+    upload = AsyncMock(side_effect=upload)
+    monkeypatch.setattr(pool, "upload_input", upload)
+    read = AsyncMock(return_value={"content": "value\n4\n"})
+    monkeypatch.setattr(pool, "read_text", read)
+    close = AsyncMock()
+    monkeypatch.setattr(pool, "close", close)
+    missing_file = AsyncMock(return_value={"success": False, "error": "FileNotFoundError: missing"})
+    monkeypatch.setattr(pool, "execute", missing_file)
+    registry = build_tool_registry(pool, Host(), tavily_api_key=None)
+
+    first = asyncio.create_task(registry.execute("read_file", {"resource_id": resource_id}, context))
+    await upload_entered.wait()
+    second = asyncio.create_task(registry.execute("read_file", {"path": path}, context))
+    release.set()
+    assert await asyncio.gather(first, second) == [{"content": "value\n4\n"}] * 2
+    upload.assert_awaited_once_with(context.run_id, filename, b"value\n4\n")
+
+    failure = await registry.execute("execute_python", {"code": "open('missing')"}, context)
+    assert "retry with its ID in resource_ids" in failure["error"]
+    assert upload.await_count == 1
+
+    available.clear()
+    denied = await registry.execute("execute_python", {"code": "open('previously staged')"}, context)
+    assert "unavailable in this chat" in denied["error"]
+    assert missing_file.await_count == 1
+    close.assert_awaited_once_with(context.run_id)
+
+    await registry.cleanup(context)
+    available[resource_id] = source
+    await registry.execute("read_file", {"resource_id": resource_id}, context)
+    assert upload.await_count == 2
+    await registry.cleanup(context)
+
+
+async def test_python_without_files_initializes_one_sandbox_and_uploads_nothing(monkeypatch, caplog) -> None:
+    from e2b_code_interpreter import Sandbox
+
+    files = SimpleNamespace(make_dir=Mock(), write=Mock(), list=Mock(return_value=[]))
+    sandbox = SimpleNamespace(
+        files=files,
+        commands=SimpleNamespace(run=Mock()),
+        run_code=Mock(return_value=SimpleNamespace(error=None, logs=None)),
+        kill=Mock(),
+    )
+    create = Mock(return_value=sandbox)
+    monkeypatch.setattr(Sandbox, "create", create)
+    monkeypatch.setattr(logging.getLogger("agentic.performance"), "disabled", False)
+    pool = E2BSandboxPool("test-key")
+    with caplog.at_level(logging.INFO, "agentic.performance"):
+        try:
+            assert (await pool.execute("private-run-id", "print(42)", 10))["success"]
+            assert (await pool.execute("private-run-id", "print(43)", 10))["success"]
+        finally:
+            await pool.close("private-run-id")
+    create.assert_called_once()
+    files.write.assert_not_called()
+    sandbox.kill.assert_called_once()
+    assert "e2b_sandbox_init" in caplog.text and "e2b_dependency_prep" in caplog.text
+    assert "private-run-id" not in caplog.text and "test-key" not in caplog.text
