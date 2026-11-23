@@ -169,6 +169,10 @@ class MessageResponse(APIModel):
     attachment_refs: list[MessageAttachment] = Field(default_factory=list)
 
 
+class MessageEdit(BaseModel):
+    content: str = Field(min_length=1, max_length=100_000)
+
+
 class MessageCreate(BaseModel):
     content: str = Field(min_length=1, max_length=100_000)
     client_request_id: str = Field(min_length=1, max_length=100)

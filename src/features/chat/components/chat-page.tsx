@@ -40,6 +40,7 @@ import { ContextSidebar, FilePreviewSidebar, type ContextFile } from "@/features
 import {
   addResourceToLibrary,
   branchChat,
+  editChatMessage,
   createMessage,
   downloadResource,
   cancelQueuedRun,
@@ -215,6 +216,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
   // Holds the main-chat snapshot taken when Quick Assistant opened; null means closed.
   const [quickAssistant, setQuickAssistant] = useState<{ snapshotMessageId: string | null; minimized: boolean; autoAsk?: string; session: number; quote?: { text: string; nonce: number } } | null>(null);
   const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string } | null>(null);
+  // Small "Ask AI" pill that follows a text selection inside the conversation.
+  const [askPill, setAskPill] = useState<{ x: number; y: number; text: string } | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
   // The draft the user pressed Escape on; the picker stays closed until the draft changes.
   const [slashDismissedFor, setSlashDismissedFor] = useState<string | null>(null);
@@ -226,9 +229,15 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const contextPanelRef = useRef<HTMLDivElement>(null);
   const previewPanelRef = useRef<HTMLDivElement>(null);
   const [rightInset, setRightInset] = useState(0);
+  // Below the xl breakpoint the panels float over the chat instead of sitting beside it; the split view must stay clear of them.
+  const [overlayInset, setOverlayInset] = useState(0);
   useEffect(() => {
     const panels = [previewPanelRef.current, contextPanelRef.current];
-    const measure = () => setRightInset((panels[0] ?? panels[1])?.getBoundingClientRect().width ?? 0);
+    const measure = () => {
+      const panel = panels[0] ?? panels[1];
+      setRightInset(panel?.getBoundingClientRect().width ?? 0);
+      setOverlayInset(panel && getComputedStyle(panel).position === "absolute" ? panel.getBoundingClientRect().width : 0);
+    };
     measure();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     panels.forEach((panel) => panel && observer?.observe(panel));
@@ -732,6 +741,51 @@ export function ChatPage({ chatId }: { chatId: string }) {
     event.preventDefault();
     setSelectionMenu({ x: event.clientX, y: event.clientY, text: text.slice(0, 2000) });
   }
+  function showAskPill() {
+    window.setTimeout(() => {
+      const selection = window.getSelection();
+      const text = selection?.toString().trim() ?? "";
+      const viewport = conversationScroll.viewportRef.current;
+      if (!selection || !text || selection.rangeCount === 0 || !viewport?.contains(selection.anchorNode) || !viewport.contains(selection.focusNode)) {
+        setAskPill(null);
+        return;
+      }
+      const rect = selection.getRangeAt(0).getBoundingClientRect();
+      if (!rect.width && !rect.height) return;
+      const above = rect.top > 56;
+      setAskPill({
+        x: Math.max(8, Math.min(rect.left + rect.width / 2 - 40, window.innerWidth - 96)),
+        y: above ? rect.top - 40 : rect.bottom + 8,
+        text: text.slice(0, 2000),
+      });
+    }, 0);
+  }
+  // Quote the selection into the composer so the user can add their own words before sending.
+  function askAboutSelection() {
+    if (!askPill) return;
+    const quote = `${askPill.text.split("\n").map((line) => `> ${line}`).join("\n")}\n\n`;
+    setDraft((current) => (current.trim() ? `${current.replace(/\s*$/, "")}\n\n${quote}` : quote));
+    setAskPill(null);
+    window.getSelection()?.removeAllRanges();
+    window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      resizeComposer(textarea);
+      textarea.focus();
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+      textarea.scrollTop = textarea.scrollHeight;
+    });
+  }
+  useEffect(() => {
+    if (!askPill) return;
+    const hide = () => setAskPill(null);
+    const onSelectionChange = () => { if (!window.getSelection()?.toString().trim()) setAskPill(null); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") hide(); };
+    document.addEventListener("selectionchange", onSelectionChange);
+    window.addEventListener("keydown", escape);
+    window.addEventListener("scroll", hide, true);
+    return () => { document.removeEventListener("selectionchange", onSelectionChange); window.removeEventListener("keydown", escape); window.removeEventListener("scroll", hide, true); };
+  }, [askPill]);
   function sendSelectionToQuickAssistant() {
     if (!selectionMenu) return;
     const quote = { text: selectionMenu.text, nonce: Date.now() };
@@ -1253,6 +1307,25 @@ export function ChatPage({ chatId }: { chatId: string }) {
     }
   }
 
+  // Rewrite a question, drop everything after it, then answer it again from the context above.
+  const editQuestion = useCallback(async (messageId: string, content: string) => {
+    if (running) return;
+    setError(null);
+    try {
+      const saved = await editChatMessage(chatId, messageId, content);
+      setMessages((current) => {
+        const index = current.findIndex((message) => message.id === messageId);
+        return current.slice(0, index + 1).map((message) => message.id === messageId && message.role === "user" ? { ...message, content: saved.content } : message);
+      });
+      void queryClient.invalidateQueries({ queryKey: ["chat", chatId] });
+      void queryClient.invalidateQueries({ queryKey: ["history"] });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not edit this question.");
+      throw caught;
+    }
+    void runMessage({ type: "message", userMessageId: messageId, modelId, effort: effort || null, clientRequestId: crypto.randomUUID() });
+  }, [chatId, effort, modelId, queryClient, running, runMessage]);
+
   const handleRetry = useCallback((failedMessage: AssistantMessage) => {
     if (running) return;
     const assistantIndex = messages.findIndex((m) => m.id === failedMessage.id);
@@ -1316,6 +1389,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
           className="col-start-2 row-start-2 min-h-0 overflow-y-auto"
           onScroll={conversationScroll.onScroll}
           onContextMenu={openSelectionMenu}
+          onMouseUp={showAskPill}
+          onKeyUp={(event) => { if (event.shiftKey || event.key.startsWith("Arrow")) showAskPill(); }}
         >
           {messagesQuery.isError ? (
             <div role="alert" className="mx-auto max-w-3xl px-5 py-10 text-sm text-red-300">
@@ -1327,6 +1402,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
               runs={runsQuery.data?.items}
               onRetry={handleRetry}
               onBranch={running ? undefined : (messageId) => void branchFrom(messageId)}
+              onEdit={running || !modelId ? undefined : editQuestion}
               availableResources={availableResources}
               onFileSelect={selectFileById}
               onFileDownload={downloadFileById}
@@ -1639,6 +1715,18 @@ export function ChatPage({ chatId }: { chatId: string }) {
           subject="chat"
         />
       ) : null}
+      {askPill ? (
+        <button
+          type="button"
+          style={{ left: askPill.x, top: askPill.y }}
+          // Keep the selection alive while the button is pressed.
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={askAboutSelection}
+          className="fixed z-[70] inline-flex h-8 animate-pop-in items-center gap-1.5 rounded-full border border-border-strong bg-raised px-3 text-xs font-medium text-foreground shadow-xl hover:bg-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <Sparkles className="size-3.5 text-sage" />Ask AI
+        </button>
+      ) : null}
       {selectionMenu ? (
         <div
           role="menu"
@@ -1660,11 +1748,12 @@ export function ChatPage({ chatId }: { chatId: string }) {
           snapshotMessageId={quickAssistant.snapshotMessageId}
           resources={[...(datasetsQuery.data?.items ?? []), ...(artifactsQuery.data?.items ?? [])]}
           onFileSelect={selectFile}
-          minimized={quickAssistant.minimized}
+          minimized={quickAssistant.minimized || Boolean(selectedFile)}
           onMinimize={minimizeQuickAssistant}
           onRestore={restoreQuickAssistant}
           onClose={closeQuickAssistant}
           rightInset={rightInset}
+          overlayInset={overlayInset}
         />
       ) : null}
       {panelOpen ? (

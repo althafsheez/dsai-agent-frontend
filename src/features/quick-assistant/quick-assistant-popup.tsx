@@ -19,6 +19,8 @@ interface QuickAssistantPopupProps {
   onClose: () => void;
   /** Width in px of the context/file panel open on the right; the popup stays clear of it. */
   rightInset?: number;
+  /** Width of a panel that floats over the chat (below xl); the split view leaves that space free. */
+  overlayInset?: number;
   /** Asked once as soon as the assistant is ready, e.g. from the `/btw` slash command. */
   autoAsk?: string;
   /** Selected chat text sent here from the right-click menu; it is quoted into the draft, not sent. */
@@ -35,7 +37,7 @@ function compactText(content: string) {
     : part.startsWith("`") && part.endsWith("`") ? <code key={index} className="rounded bg-raised px-1 font-mono text-[11px]">{part.slice(1, -1)}</code> : part);
 }
 
-export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFileSelect, minimized, onMinimize, onRestore, onClose, autoAsk, quote, rightInset = 0 }: QuickAssistantPopupProps) {
+export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFileSelect, minimized, onMinimize, onRestore, onClose, autoAsk, quote, rightInset = 0, overlayInset = 0 }: QuickAssistantPopupProps) {
   const inputId = useId();
   const titleId = useId();
   const [draft, setDraft] = useState("");
@@ -176,6 +178,8 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
 
   const expanded = expandedOverride ?? (sentThisSession || draft.length > LONG_DRAFT_CHARS || draft.includes("\n"));
   const frame = useFloatingFrame({ ref: popupRef, rightInset, expanded });
+  // Full screen splits the chat area in two: the main chat keeps one half and this window takes the other.
+  const split = frame.fullscreen && frame.canSplit && !minimized;
 
   return (
     <>
@@ -188,14 +192,21 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
       data-fullscreen={frame.fullscreen}
       aria-hidden={minimized || undefined}
       inert={minimized || undefined}
-      style={frame.style}
-      className={`absolute z-[70] flex origin-top-left animate-pop-in flex-col overflow-hidden rounded-xl border border-border-strong bg-sidebar shadow-2xl ${frame.interacting ? "" : "transition-[left,top,width,height,opacity,transform,visibility] duration-300 ease-spring"} ${minimized ? "invisible translate-y-2 scale-95 opacity-0" : "visible opacity-100"}`}
+      style={split ? { marginRight: overlayInset } : frame.style}
+      className={`${split ? "relative flex h-full min-w-[400px] flex-1 basis-0 flex-col overflow-hidden border-l border-border-strong bg-sidebar " : "absolute z-[70] flex origin-top-left animate-pop-in flex-col overflow-hidden rounded-xl border border-border-strong bg-sidebar shadow-2xl "}${frame.interacting ? "" : "transition-[left,top,width,height,opacity,transform,visibility] duration-300 ease-spring"} ${minimized ? "invisible translate-y-2 scale-95 opacity-0" : "visible opacity-100"}`}
     >
-      <header {...frame.dragProps} className={`flex shrink-0 touch-none select-none items-start gap-2 border-b px-4 py-3 ${frame.fullscreen ? "" : "cursor-grab active:cursor-grabbing"}`}>
-        <Sparkles className="mt-0.5 size-4 shrink-0 text-sage" />
-        <div className="min-w-0 flex-1">
-          <h2 id={titleId} className="text-sm font-medium text-foreground">Quick Assistant</h2>
-          <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">Side questions about this chat so far. Not added to the main chat.</p>
+      <header {...frame.dragProps} className={`flex shrink-0 touch-none select-none items-center gap-2 border-b px-3 py-1.5 ${frame.fullscreen ? "" : "cursor-grab active:cursor-grabbing"}`}>
+        <Sparkles className="size-4 shrink-0 text-sage" />
+        <h2 id={titleId} title="Side questions about this chat so far. Not added to the main chat." className="sr-only">Quick Assistant</h2>
+        <div role="tablist" aria-label="Quick Assistant conversations" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]">
+          {tabs.map((threadId, index) => (
+            <button key={threadId} type="button" role="tab" aria-selected={threadId === activeTab} disabled={running && threadId !== activeTab} onClick={() => void switchTab(threadId)} className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50 ${threadId === activeTab ? "bg-raised text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+              Chat {index + 1}
+            </button>
+          ))}
+          <button type="button" onClick={addTab} disabled={running} aria-label="New Quick Assistant conversation" title="New conversation" className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40">
+            <Plus className="size-3.5" />
+          </button>
         </div>
         <button
           type="button"
@@ -210,7 +221,7 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
           type="button"
           onClick={frame.toggleFullscreen}
           aria-label={frame.fullscreen ? "Exit full screen" : "Open Quick Assistant full screen"}
-          title={frame.fullscreen ? "Exit full screen" : "Full screen"}
+          title={frame.fullscreen ? "Close split view" : "Split screen"}
           aria-pressed={frame.fullscreen}
           className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground"
         >
@@ -223,16 +234,6 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
           <X className="size-4" />
         </button>
       </header>
-      <div role="tablist" aria-label="Quick Assistant conversations" className="flex shrink-0 items-center gap-1 overflow-x-auto border-b px-3 py-1.5 [scrollbar-width:none]">
-        {tabs.map((threadId, index) => (
-          <button key={threadId} type="button" role="tab" aria-selected={threadId === activeTab} disabled={running && threadId !== activeTab} onClick={() => void switchTab(threadId)} className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50 ${threadId === activeTab ? "bg-raised text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-            Chat {index + 1}
-          </button>
-        ))}
-        <button type="button" onClick={addTab} disabled={running} aria-label="New Quick Assistant conversation" title="New conversation" className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40">
-          <Plus className="size-3.5" />
-        </button>
-      </div>
       {resources.length ? (
         <div className="flex shrink-0 gap-1.5 overflow-x-auto px-4 pt-2 [scrollbar-width:none]" aria-label="Available context files">
           {resources.slice(0, 4).map((resource) => (

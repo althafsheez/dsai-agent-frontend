@@ -4,10 +4,15 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 
 const MARGIN = 16;
 const DEFAULT_TOP = 72;
+// The conversation rail (w-12, shown from the sm breakpoint) sits at the left edge; open clear of it.
+const RAIL_CLEARANCE = 64;
 const MIN_WIDTH = 320;
 const MIN_HEIGHT = 280;
-// Resizing past this share of the free area snaps the window into full screen.
-const FULLSCREEN_SNAP = 0.85;
+// Two side-by-side panes need this much free width; narrower areas keep the enlarged window as a single overlay.
+const MIN_SPLIT_WIDTH = 960;
+// Dragging the window past half the free width (and most of its height) snaps it into the split view.
+const SPLIT_SNAP_WIDTH = 0.5;
+const SPLIT_SNAP_HEIGHT = 0.7;
 
 interface Box { left: number; top: number; width: number; height: number; }
 interface FrameOptions {
@@ -25,14 +30,17 @@ export function useFloatingFrame({ ref, rightInset, expanded }: FrameOptions) {
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [interacting, setInteracting] = useState(false);
-  const [area, setArea] = useState({ width: 0, height: 0 });
+  const [area, setArea] = useState({ width: 0, height: 0, top: 0 });
   const gesture = useRef<{ kind: "drag" | "resize"; pointerX: number; pointerY: number; box: Box } | null>(null);
 
   // The popup is absolutely positioned inside the chat area, so that area (not the window) bounds it.
   useLayoutEffect(() => {
     const measure = () => {
       const parent = ref.current?.offsetParent;
-      setArea({ width: parent?.clientWidth || window.innerWidth, height: parent?.clientHeight || window.innerHeight });
+      // The chat's top bar is part of the same positioned area; the popup must never cover it.
+      const topBar = parent ? [...parent.querySelectorAll("header")].find((node) => !ref.current?.contains(node)) : undefined;
+      const top = parent && topBar ? Math.max(0, topBar.getBoundingClientRect().bottom - parent.getBoundingClientRect().top) : 0;
+      setArea({ width: parent?.clientWidth || window.innerWidth, height: parent?.clientHeight || window.innerHeight, top });
     };
     measure();
     window.addEventListener("resize", measure);
@@ -43,20 +51,22 @@ export function useFloatingFrame({ ref, rightInset, expanded }: FrameOptions) {
   }, [ref]);
 
   const freeWidth = Math.max(0, area.width - rightInset);
-  const maxWidth = freeWidth - MARGIN * 2;
-  const maxHeight = area.height - MARGIN * 2;
+  const minLeft = area.width >= 640 ? RAIL_CLEARANCE : MARGIN;
+  const maxWidth = freeWidth - minLeft - MARGIN;
+  const minTop = area.top + MARGIN;
+  const maxHeight = area.height - minTop - MARGIN;
 
   let box: Box;
   if (fullscreen) {
-    box = { left: MARGIN, top: MARGIN, width: Math.max(MIN_WIDTH / 2, maxWidth), height: Math.max(MIN_HEIGHT / 2, maxHeight) };
+    box = { left: minLeft, top: minTop, width: Math.max(MIN_WIDTH / 2, maxWidth), height: Math.max(MIN_HEIGHT / 2, maxHeight) };
   } else {
     const width = clamp(size?.width ?? (expanded ? 560 : 360), Math.min(MIN_WIDTH, maxWidth), maxWidth);
     const height = clamp(size?.height ?? (expanded ? 640 : 440), Math.min(MIN_HEIGHT, maxHeight), maxHeight);
     box = {
       width,
       height,
-      left: clamp(position?.left ?? MARGIN, 0, freeWidth - width),
-      top: clamp(position?.top ?? DEFAULT_TOP, 0, area.height - height),
+      left: clamp(position?.left ?? minLeft, 0, freeWidth - width),
+      top: clamp(position?.top ?? Math.max(DEFAULT_TOP, minTop), minTop, area.height - height - MARGIN),
     };
   }
   const boxRef = useRef(box);
@@ -82,9 +92,9 @@ export function useFloatingFrame({ ref, rightInset, expanded }: FrameOptions) {
     window.removeEventListener("pointercancel", end);
     if (finished?.kind === "resize") {
       const { width, height } = boxRef.current;
-      if (width >= (area.width - rightInset - MARGIN * 2) * FULLSCREEN_SNAP && height >= (area.height - MARGIN * 2) * FULLSCREEN_SNAP) setFullscreen(true);
+      if (area.width - rightInset >= MIN_SPLIT_WIDTH && width >= (area.width - rightInset - MARGIN * 2) * SPLIT_SNAP_WIDTH && height >= (area.height - minTop - MARGIN) * SPLIT_SNAP_HEIGHT) setFullscreen(true);
     }
-  }, [move, area, rightInset]);
+  }, [move, area, rightInset, minTop]);
   useEffect(() => () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); window.removeEventListener("pointercancel", end); }, [move, end]);
 
   function begin(kind: "drag" | "resize", event: ReactPointerEvent) {
@@ -103,6 +113,7 @@ export function useFloatingFrame({ ref, rightInset, expanded }: FrameOptions) {
     style,
     box,
     fullscreen,
+    canSplit: freeWidth >= MIN_SPLIT_WIDTH,
     interacting,
     dragProps: { onPointerDown: (event: ReactPointerEvent) => begin("drag", event) },
     resizeProps: { onPointerDown: (event: ReactPointerEvent) => begin("resize", event) },

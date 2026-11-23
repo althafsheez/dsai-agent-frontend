@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { usageMeters, usagePercent } from "./usage-data";
 
-/** Compact usage summary pinned above the account row. Sample figures until a usage API exists. */
-export function SidebarUsage({ onNavigate }: { onNavigate?: () => void }) {
+/** Compact usage summary shown as a popover above the account row. Sample figures until a usage API exists. */
+export function SidebarUsage({ onNavigate, className = "" }: { onNavigate?: () => void; className?: string }) {
   return (
     <Link
       href="/settings?view=usage"
       onClick={onNavigate}
       aria-label="Usage analytics (sample data)"
-      className="mx-3 mb-3 block rounded-lg border border-sidebar-border/60 bg-surface/40 p-2.5 transition-colors hover:border-border-strong"
+      className={`block rounded-lg border border-border-strong bg-sidebar p-2.5 shadow-xl transition-colors hover:border-foreground/30 ${className}`}
     >
       <p className="mb-2 flex items-center justify-between text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/80">
         Usage <span className="normal-case tracking-normal">Sample</span>
