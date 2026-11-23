@@ -250,7 +250,7 @@ describe("live chat page", () => {
 
     expect(await screen.findByText("Streamed answer")).toBeInTheDocument();
     expect(screen.getByText("Execute Python")).toBeVisible();
-    expect(screen.getByText("Completed")).toBeVisible();
+    expect(screen.getByText("Reasoning Trace")).toBeVisible();
     expect(screen.getByRole("button", { name: "Preview sales.csv" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Preview sales.csv" }));
     expect(await screen.findByRole("dialog", { name: "Preview sales.csv" })).toBeVisible();
