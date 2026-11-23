@@ -706,18 +706,25 @@ export async function deleteDashboardRecord(id: string): Promise<void> {
   if (!response.ok) throw await apiError(response);
 }
 
+export type WorkflowStepKind = "data" | "script" | "ai" | "condition" | "notify";
+export interface WorkflowStepDto { id: string; kind: WorkflowStepKind | string; title: string; detail: string; config?: Record<string, unknown> }
+export interface WorkflowTriggerDto { kind: "manual" | "schedule"; config?: { frequency?: string; time?: string; day?: string; day_of_month?: string | number } }
 export interface WorkflowRecordDto {
-  id: string; name: string; description: string; state: "active" | "inactive" | "draft";
-  trigger: { kind: "manual" | "schedule" | "event"; label: string; config?: Record<string, string> };
-  steps: Array<{ id: string; kind: string; title: string; detail: string; config?: Record<string, string> }>;
-  created_at: string; updated_at: string;
+  id: string; name: string; description: string; prompt: string; state: "active" | "inactive" | "draft";
+  trigger: WorkflowTriggerDto; steps: WorkflowStepDto[]; schedule: string;
+  next_run_at: string | null; last_run_at: string | null; created_at: string; updated_at: string;
 }
-export type WorkflowSaveBody = Pick<WorkflowRecordDto, "name" | "description" | "state" | "trigger" | "steps"> & { id?: string };
+export type WorkflowSaveBody = Pick<WorkflowRecordDto, "name" | "description" | "prompt" | "state" | "trigger" | "steps"> & { id?: string };
+export type WorkflowStepStatus = "pending" | "running" | "success" | "failed" | "skipped" | "cancelled";
+export interface WorkflowStepResultDto {
+  step_id: string; title: string; kind: string; status: WorkflowStepStatus; input: unknown; output: unknown;
+  logs: string[]; error: string; started_at: string | null; finished_at: string | null;
+}
 export interface WorkflowRunRecordDto {
-  id: string; workflow_id: string; workflow_name: string; trigger: "manual" | "schedule" | "event";
-  plan: unknown[]; started_at: string; cancelled_at: string | null;
+  id: string; workflow_id: string; workflow_name: string; trigger: "manual" | "schedule";
+  status: "running" | "success" | "failed" | "cancelled"; results: WorkflowStepResultDto[]; error: string;
+  started_at: string; finished_at: string | null; cancelled_at: string | null;
 }
-export type WorkflowRunBody = Pick<WorkflowRunRecordDto, "workflow_id" | "trigger" | "plan"> & { id?: string; started_at?: string };
 
 export async function listWorkflowRecords(): Promise<WorkflowRecordDto[]> {
   return (await requestJson<{ items: WorkflowRecordDto[] }>("/workflow-store")).items;
@@ -742,9 +749,20 @@ export async function listWorkflowRunRecords(workflowId?: string): Promise<Workf
 export function getWorkflowRunRecord(id: string): Promise<WorkflowRunRecordDto> {
   return requestJson(`/workflow-store/runs/${encodeURIComponent(id)}`);
 }
-export function startWorkflowRunRecord(body: WorkflowRunBody): Promise<WorkflowRunRecordDto> {
-  return requestJson("/workflow-store/runs", { method: "POST", body: JSON.stringify(body) });
+export function runWorkflowNow(id: string): Promise<WorkflowRunRecordDto> {
+  return requestJson(`/workflow-store/${encodeURIComponent(id)}/run`, { method: "POST" });
 }
 export function cancelWorkflowRunRecord(id: string): Promise<WorkflowRunRecordDto> {
   return requestJson(`/workflow-store/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+}
+export interface WorkflowAiBody { prompt?: string; datasetIds: string[]; steps?: WorkflowStepDto[]; modelId: string }
+const aiBody = (body: WorkflowAiBody) => JSON.stringify({ prompt: body.prompt ?? "", dataset_ids: body.datasetIds, steps: body.steps ?? [], model_id: body.modelId });
+export async function rephraseWorkflowPrompt(body: WorkflowAiBody): Promise<string> {
+  return (await requestJson<{ prompt: string }>("/workflow-store/ai/rephrase", { method: "POST", body: aiBody(body) })).prompt;
+}
+export function planWorkflowWithAi(body: WorkflowAiBody): Promise<{ name: string; description: string; prompt: string; steps: WorkflowStepDto[] }> {
+  return requestJson("/workflow-store/ai/plan", { method: "POST", body: aiBody(body) });
+}
+export function buildWorkflowScripts(body: WorkflowAiBody): Promise<{ steps: WorkflowStepDto[]; notes: string[] }> {
+  return requestJson("/workflow-store/ai/build", { method: "POST", body: aiBody(body) });
 }

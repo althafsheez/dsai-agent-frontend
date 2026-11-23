@@ -25,6 +25,11 @@ def test_script_runs_and_returns_a_drawable_result() -> None:
     assert run_script(GOOD, DS) == {"kind": "bar", "title": "Revenue per region", "labels": ["N", "S"], "series": [15.0, 30.0]}
 
 
+def test_allowed_modules_are_already_imported() -> None:
+    script = "result = {'kind': 'kpi', 'title': 'Median', 'value': statistics.median([num(v) for v in col(datasets[0], 'rev')])}"
+    assert run_script(script, DS)["value"] == 10
+
+
 @pytest.mark.parametrize("script", [
     "import os\nresult = 1", "import socket", "result = ().__class__", "open('/etc/passwd')", "x = getattr(1, 'real')",
     "result = '{0.__class__}'.format(1)", "result = {'kind': 'bar'}", "result = {'kind': 'bubble', 'labels': [1, 2], 'series': [1, 2]}", "x = [1] * 10**11", "while True:\n    pass",

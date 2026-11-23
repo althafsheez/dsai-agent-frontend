@@ -43172,7 +43172,7 @@
        "5"
       ]
      ],
-     "refreshed_at": "2026-11-23T21:03:15.810796+00:00",
+     "refreshed_at": "2026-11-23T21:21:36.114152+00:00",
      "row_count": 12,
      "size_bytes": 571,
      "source_connector": "google-drive"
@@ -44020,8 +44020,407 @@
    }
   ],
   "workflow_chats": [],
-  "workflow_definitions": [],
-  "workflow_run_records": [],
+  "workflow_definitions": [
+   {
+    "created_at": "2026-11-23T21:14:50.411577",
+    "description": "Joins the finance ledger and CRM export datasets to calculate total revenue discrepancies and identify the region with the largest gap.",
+    "id": "82089478-8e03-4c68-82bf-f756eaedbcc3",
+    "last_run_at": "2026-11-23T21:16:36.994924",
+    "name": "Revenue gap watch",
+    "next_run_at": null,
+    "owner_id": "user-you",
+    "prompt": "Join sales_finance_ledger.csv and sales_crm_export.csv on order_id, calculate the absolute revenue difference between the respective revenue columns for each order, and determine the cumulative total revenue gap and the region with the largest discrepancy.",
+    "state": "inactive",
+    "steps": [
+     {
+      "config": {
+       "dataset_ids": [
+        "6a23d32a-b83c-4ea6-a4e9-86820f8b77fc",
+        "c4927f34-706e-4266-8c0f-9c90557c9966"
+       ]
+      },
+      "detail": "Load the sales finance ledger and CRM export datasets for comparison.",
+      "id": "s-ffbd1001",
+      "kind": "data",
+      "title": "Load Sales Datasets"
+     },
+     {
+      "config": {
+       "script": "import collections\n\nds1 = data[\"6a23d32a-b83c-4ea6-a4e9-86820f8b77fc\"]\nds2 = data[\"c4927f34-706e-4266-8c0f-9c90557c9966\"]\n\n# Build lookup from order_id to (region, revenue) for ds2\nds2_map = {}\nfor row in ds2[\"rows\"]:\n    order_id = row[0]\n    region = row[1]\n    rev = num(row[3])\n    if rev is not None:\n        ds2_map[order_id] = (region, rev)\n\nregion_diffs = collections.defaultdict(float)\ntotal_gap = 0.0\n\nfor row in ds1[\"rows\"]:\n    order_id = row[0]\n    region = row[1]\n    rev1 = num(row[3])\n    if order_id in ds2_map and rev1 is not None:\n        reg2, rev2 = ds2_map[order_id]\n        diff = abs(rev1 - rev2)\n        total_gap += diff\n        region_diffs[region] += diff\n\n# If regions differ, let's use region from ds1\nsorted_regions = sorted(region_diffs.items(), key=lambda x: x[1], reverse=True)[:30]\n\nlabels = [r[0] for r in sorted_regions]\nseries = [r[1] for r in sorted_regions]\n\nresult = {\n    \"kind\": \"bar\",\n    \"title\": \"Revenue Discrepancies by Region\",\n    \"labels\": labels,\n    \"series\": series\n}",
+       "script_for": "Join the datasets on order_id, compute absolute revenue differences, sum the total gap, and find the region with the largest discrepancy."
+      },
+      "detail": "Join the datasets on order_id, compute absolute revenue differences, sum the total gap, and find the region with the largest discrepancy.",
+      "id": "s-a9b2532b",
+      "kind": "script",
+      "title": "Calculate Revenue Discrepancies"
+     },
+     {
+      "config": {},
+      "detail": "Write a plain-language summary of the cumulative revenue gap and the most discrepant region.",
+      "id": "s-f7bc6998",
+      "kind": "ai",
+      "title": "Summarize Revenue Discrepancy"
+     },
+     {
+      "config": {
+       "recipient": "me"
+      },
+      "detail": "Send the revenue discrepancy summary to the owner.",
+      "id": "s-151ee929",
+      "kind": "notify",
+      "title": "Deliver Discrepancy Report"
+     }
+    ],
+    "trigger": {
+     "config": {
+      "day": "Monday",
+      "day_of_month": "1",
+      "frequency": "daily",
+      "time": "09:00"
+     },
+     "kind": "schedule"
+    },
+    "updated_at": "2026-11-23T21:21:42.179524"
+   }
+  ],
+  "workflow_run_records": [
+   {
+    "cancelled_at": null,
+    "created_at": "2026-11-23T21:16:36.995681",
+    "error": "",
+    "finished_at": "2026-11-23T21:16:44.573070",
+    "id": "09464aed-80b0-4067-9949-76c1c892b04d",
+    "plan": [],
+    "results": [
+     {
+      "error": "",
+      "finished_at": "2026-11-23T21:16:37.008311+00:00",
+      "input": {
+       "dataset_ids": [
+        "6a23d32a-b83c-4ea6-a4e9-86820f8b77fc",
+        "c4927f34-706e-4266-8c0f-9c90557c9966"
+       ]
+      },
+      "kind": "data",
+      "logs": [
+       "Read 40 rows and 4 columns from sales_finance_ledger.csv",
+       "Read 40 rows and 4 columns from sales_crm_export.csv"
+      ],
+      "output": {
+       "datasets": [
+        {
+         "columns": [
+          "order_id",
+          "region",
+          "units",
+          "revenue"
+         ],
+         "name": "sales_finance_ledger.csv",
+         "rows": 40
+        },
+        {
+         "columns": [
+          "order_id",
+          "region",
+          "units",
+          "revenue"
+         ],
+         "name": "sales_crm_export.csv",
+         "rows": 40
+        }
+       ]
+      },
+      "started_at": "2026-11-23T21:16:37.004411+00:00",
+      "status": "success",
+      "step_id": "s-ffbd1001",
+      "title": "Load Sales Datasets"
+     },
+     {
+      "error": "",
+      "finished_at": "2026-11-23T21:16:37.030250+00:00",
+      "input": {
+       "datasets": [
+        {
+         "columns": [
+          "order_id",
+          "region",
+          "units",
+          "revenue"
+         ],
+         "name": "sales_finance_ledger.csv",
+         "rows": 40
+        },
+        {
+         "columns": [
+          "order_id",
+          "region",
+          "units",
+          "revenue"
+         ],
+         "name": "sales_crm_export.csv",
+         "rows": 40
+        }
+       ],
+       "request": "Join the datasets on order_id, compute absolute revenue differences, sum the total gap, and find the region with the largest discrepancy."
+      },
+      "kind": "script",
+      "logs": [
+       "Running the script on sales_finance_ledger.csv, sales_crm_export.csv",
+       "The script returned a bar result"
+      ],
+      "output": {
+       "kind": "bar",
+       "labels": [
+        "East",
+        "South",
+        "West",
+        "North"
+       ],
+       "series": [
+        246.33,
+        178.19,
+        72.38,
+        59.97
+       ],
+       "title": "Revenue Discrepancies by Region"
+      },
+      "started_at": "2026-11-23T21:16:37.011458+00:00",
+      "status": "success",
+      "step_id": "s-a9b2532b",
+      "title": "Calculate Revenue Discrepancies"
+     },
+     {
+      "error": "",
+      "finished_at": "2026-11-23T21:16:44.562166+00:00",
+      "input": {
+       "previous_output": {
+        "kind": "bar",
+        "labels": [
+         "East",
+         "South",
+         "West",
+         "North"
+        ],
+        "series": [
+         246.33,
+         178.19,
+         72.38,
+         59.97
+        ],
+        "title": "Revenue Discrepancies by Region"
+       },
+       "prompt": "Write a plain-language summary of the cumulative revenue gap and the most discrepant region."
+      },
+      "kind": "ai",
+      "logs": [
+       "Asking the model",
+       "Received 180 characters"
+      ],
+      "output": {
+       "text": "The cumulative revenue gap between the finance ledger and the CRM export is $556.87. The region with the largest discrepancy is the East region, with a total difference of $246.33."
+      },
+      "started_at": "2026-11-23T21:16:37.033455+00:00",
+      "status": "success",
+      "step_id": "s-f7bc6998",
+      "title": "Summarize Revenue Discrepancy"
+     },
+     {
+      "error": "",
+      "finished_at": "2026-11-23T21:16:44.570700+00:00",
+      "input": {
+       "channel": "in-app",
+       "to": "me"
+      },
+      "kind": "notify",
+      "logs": [
+       "Delivered in the app for me (no email or chat provider is configured)"
+      ],
+      "output": {
+       "delivered": "in-app",
+       "message": "The cumulative revenue gap between the finance ledger and the CRM export is $556.87. The region with the largest discrepancy is the East region, with a total difference of $246.33."
+      },
+      "started_at": "2026-11-23T21:16:44.568332+00:00",
+      "status": "success",
+      "step_id": "s-151ee929",
+      "title": "Deliver Discrepancy Report"
+     }
+    ],
+    "started_at": "2026-11-23T21:16:36.994924",
+    "status": "success",
+    "trigger": "schedule",
+    "updated_at": "2026-11-23T21:16:44.573183",
+    "workflow_id": "82089478-8e03-4c68-82bf-f756eaedbcc3",
+    "workflow_name": "Revenue gap watch"
+   },
+   {
+    "cancelled_at": null,
+    "created_at": "2026-11-23T21:14:59.105380",
+    "error": "",
+    "finished_at": "2026-11-23T21:15:05.673571",
+    "id": "ed36e9dd-3249-4335-ab66-48c6bff5a36a",
+    "plan": [],
+    "results": [
+     {
+      "error": "",
+      "finished_at": "2026-11-23T21:14:59.130826+00:00",
+      "input": {
+       "dataset_ids": [
+        "6a23d32a-b83c-4ea6-a4e9-86820f8b77fc",
+        "c4927f34-706e-4266-8c0f-9c90557c9966"
+       ]
+      },
+      "kind": "data",
+      "logs": [
+       "Read 40 rows and 4 columns from sales_finance_ledger.csv",
+       "Read 40 rows and 4 columns from sales_crm_export.csv"
+      ],
+      "output": {
+       "datasets": [
+        {
+         "columns": [
+          "order_id",
+          "region",
+          "units",
+          "revenue"
+         ],
+         "name": "sales_finance_ledger.csv",
+         "rows": 40
+        },
+        {
+         "columns": [
+          "order_id",
+          "region",
+          "units",
+          "revenue"
+         ],
+         "name": "sales_crm_export.csv",
+         "rows": 40
+        }
+       ]
+      },
+      "started_at": "2026-11-23T21:14:59.124647+00:00",
+      "status": "success",
+      "step_id": "s-ffbd1001",
+      "title": "Load Sales Datasets"
+     },
+     {
+      "error": "",
+      "finished_at": "2026-11-23T21:14:59.157915+00:00",
+      "input": {
+       "datasets": [
+        {
+         "columns": [
+          "order_id",
+          "region",
+          "units",
+          "revenue"
+         ],
+         "name": "sales_finance_ledger.csv",
+         "rows": 40
+        },
+        {
+         "columns": [
+          "order_id",
+          "region",
+          "units",
+          "revenue"
+         ],
+         "name": "sales_crm_export.csv",
+         "rows": 40
+        }
+       ],
+       "request": "Join the datasets on order_id, compute absolute revenue differences, sum the total gap, and find the region with the largest discrepancy."
+      },
+      "kind": "script",
+      "logs": [
+       "Running the script on sales_finance_ledger.csv, sales_crm_export.csv",
+       "The script returned a bar result"
+      ],
+      "output": {
+       "kind": "bar",
+       "labels": [
+        "East",
+        "South",
+        "West",
+        "North"
+       ],
+       "series": [
+        246.33,
+        178.19,
+        72.38,
+        59.97
+       ],
+       "title": "Revenue Discrepancies by Region"
+      },
+      "started_at": "2026-11-23T21:14:59.133980+00:00",
+      "status": "success",
+      "step_id": "s-a9b2532b",
+      "title": "Calculate Revenue Discrepancies"
+     },
+     {
+      "error": "",
+      "finished_at": "2026-11-23T21:15:05.662483+00:00",
+      "input": {
+       "previous_output": {
+        "kind": "bar",
+        "labels": [
+         "East",
+         "South",
+         "West",
+         "North"
+        ],
+        "series": [
+         246.33,
+         178.19,
+         72.38,
+         59.97
+        ],
+        "title": "Revenue Discrepancies by Region"
+       },
+       "prompt": "Write a plain-language summary of the cumulative revenue gap and the most discrepant region."
+      },
+      "kind": "ai",
+      "logs": [
+       "Asking the model",
+       "Received 163 characters"
+      ],
+      "output": {
+       "text": "The cumulative revenue gap between the CRM export and the finance ledger totals $556.87. The most discrepant region is East, with a revenue discrepancy of $246.33."
+      },
+      "started_at": "2026-11-23T21:14:59.161567+00:00",
+      "status": "success",
+      "step_id": "s-f7bc6998",
+      "title": "Summarize Revenue Discrepancy"
+     },
+     {
+      "error": "",
+      "finished_at": "2026-11-23T21:15:05.670832+00:00",
+      "input": {
+       "channel": "in-app",
+       "to": "me"
+      },
+      "kind": "notify",
+      "logs": [
+       "Delivered in the app for me (no email or chat provider is configured)"
+      ],
+      "output": {
+       "delivered": "in-app",
+       "message": "The cumulative revenue gap between the CRM export and the finance ledger totals $556.87. The most discrepant region is East, with a revenue discrepancy of $246.33."
+      },
+      "started_at": "2026-11-23T21:15:05.668262+00:00",
+      "status": "success",
+      "step_id": "s-151ee929",
+      "title": "Deliver Discrepancy Report"
+     }
+    ],
+    "started_at": "2026-11-23T21:14:59.103919",
+    "status": "success",
+    "trigger": "manual",
+    "updated_at": "2026-11-23T21:15:05.674173",
+    "workflow_id": "82089478-8e03-4c68-82bf-f756eaedbcc3",
+    "workflow_name": "Revenue gap watch"
+   }
+  ],
   "workflows": [
    {
     "created_at": "2026-11-19T20:32:23.929770",

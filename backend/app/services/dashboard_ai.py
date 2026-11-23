@@ -323,7 +323,7 @@ async def review(provider: LLMProvider, widgets: list[dict[str, Any]], datasets:
 SCRIPT_CONTRACT = (
     "Write a short Python 3 script. Variables already defined: `datasets` (list of {id, name, columns: [names], rows: [[cells as strings]]}), "
     "`data` (the same, keyed by id), `num(value)` (string to float or None), `col(dataset, column_name)` (list of that column's cells). "
-    "Only these imports work: math, statistics, collections, datetime, itertools, re, json, functools, heapq, bisect, decimal, fractions, string, random. "
+    "These modules are already imported, use them directly or import them: math, statistics, collections, datetime, itertools, re, json, functools, heapq, bisect, decimal, fractions, string, random. Nothing else can be imported. "
     "No files, network, eval or dunder attributes. Compute what is asked, then set `result` to one dict: "
     '{"kind": bar|hbar|line|area|pie|radar|funnel|treemap|histogram, "title": str, "labels": [str], "series": [number]} for categories, '
     '{"kind": "scatter", "points": [[x, y], ...]}, {"kind": "table", "columns": [str], "rows": [[...]]}, '

@@ -54,17 +54,18 @@ async def test_snapshot_round_trip_into_fresh_database(client: AsyncClient, demo
 
 async def test_workflow_store_crud_and_runs(client: AsyncClient, demo_headers: dict[str, str]) -> None:
     body = {"id": "wf-test", "name": "  Weekly  ", "description": "d", "state": "draft",
-            "trigger": {"kind": "manual", "label": "Manual"}, "steps": [{"id": "s1", "kind": "query", "title": "Q", "detail": ""}]}
+            "trigger": {"kind": "manual", "label": "Manual"}, "steps": [{"id": "s1", "kind": "ai", "title": "Q", "detail": ""}]}
     saved = await client.put("/api/workflow-store", headers=demo_headers, json=body)
     assert saved.status_code == 200, saved.text
     assert saved.json()["name"] == "Weekly"
 
     assert (await client.put("/api/workflow-store/wf-test/state", headers=demo_headers, json={"state": "active"})).json()["state"] == "active"
 
-    started = await client.post("/api/workflow-store/runs", headers=demo_headers, json={"workflow_id": "wf-test", "trigger": "manual", "plan": []})
+    started = await client.post("/api/workflow-store/wf-test/run", headers=demo_headers)
     assert started.status_code == 201 and started.json()["workflow_name"] == "Weekly"
     run_id = started.json()["id"]
-    assert (await client.post(f"/api/workflow-store/runs/{run_id}/cancel", headers=demo_headers)).json()["cancelled_at"]
+    cancelled = (await client.post(f"/api/workflow-store/runs/{run_id}/cancel", headers=demo_headers)).json()
+    assert cancelled["cancelled_at"] or cancelled["status"] != "running"
     assert len((await client.get("/api/workflow-store/runs?workflow_id=wf-test", headers=demo_headers)).json()["items"]) == 1
 
     assert (await client.delete("/api/workflow-store/wf-test", headers=demo_headers)).status_code == 204

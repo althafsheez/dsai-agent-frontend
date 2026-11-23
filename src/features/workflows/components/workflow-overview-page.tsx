@@ -2,119 +2,60 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { ArrowLeft, Pencil, Play, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, Loader2, Pencil, Play, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { downloadJson, fileSafe } from "@/lib/download";
 import { cn } from "@/lib/utils";
-import { describeTrigger } from "../logic/generate-workflow";
-import { formatDuration, formatWhen } from "../logic/run-view";
-import { useDeleteWorkflow, useRunViews, useSetWorkflowState, useStartRun, useWorkflow, useWorkflowRuns } from "../use-workflows";
-import { RunsTable, StateBadge, StatusBadge, WorkflowDiagram } from "./workflow-parts";
-
-type Tab = "runs" | "logs";
+import { formatWhen } from "../logic/format";
+import { useDeleteWorkflow, useRunNow, useSetWorkflowState, useWorkflow, useWorkflowRuns } from "../use-workflows";
+import { Connector, StepCard, TriggerCard } from "./flow-parts";
+import { HistoryTable } from "./history-table";
 
 export function WorkflowOverviewPage({ workflowId }: { workflowId: string }) {
   const router = useRouter();
-  const workflowQuery = useWorkflow(workflowId);
-  const runsQuery = useWorkflowRuns(workflowId);
-  const views = useRunViews(runsQuery.data);
-  const startRun = useStartRun();
+  const query = useWorkflow(workflowId);
+  const runs = useWorkflowRuns(workflowId);
+  const runNow = useRunNow();
   const setState = useSetWorkflowState();
   const remove = useDeleteWorkflow();
-  const [tab, setTab] = useState<Tab>("runs");
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const workflow = workflowQuery.data;
-
-  if (workflowQuery.isLoading) return <p className="p-8 text-sm text-muted-foreground">Loading workflow…</p>;
-  if (!workflow) {
-    return (
-      <section className="mx-auto w-full max-w-3xl px-4 py-16 text-center">
-        <h1 className="text-lg font-semibold">Workflow not found</h1>
-        <p className="mt-2 text-xs text-muted-foreground">It may have been deleted, or it only exists in another browser.</p>
-        <Button asChild variant="outline" className="mt-5"><Link href="/workflows"><ArrowLeft />Back to workflows</Link></Button>
-      </section>
-    );
-  }
-
-  const latest = views[0];
-  const running = latest?.status === "running";
-  const succeeded = views.filter((view) => view.status === "success").length;
-  const finished = views.filter((view) => view.status !== "running").length;
+  const workflow = query.data;
+  if (query.isError) return <p className="p-8 text-sm text-muted-foreground">This workflow could not be found.</p>;
+  if (!workflow) return <p className="p-8 text-sm text-muted-foreground">Loading…</p>;
+  const active = workflow.state === "active";
+  const scheduled = workflow.trigger.kind === "schedule";
+  const history = runs.data ?? [];
+  const running = history.some((run) => run.status === "running");
+  const start = () => runNow.mutate(workflow.id, { onSuccess: (run) => router.push(`/workflows/${workflow.id}/runs/${run.id}`) });
 
   return (
-    <section className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
-      <nav aria-label="Breadcrumb" className="mb-4 text-xs text-muted-foreground">
-        <Link href="/workflows" className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="size-3.5" />Workflows</Link>
-      </nav>
-      <header className="flex flex-wrap items-start justify-between gap-4">
+    <section className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6">
+      <Link href="/workflows" className="mb-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="size-3.5" />All workflows</Link>
+      <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-xl font-semibold tracking-tight">{workflow.name}</h1>
-            <StateBadge state={workflow.state} />
-          </div>
-          <p className="mt-1 max-w-2xl text-xs text-muted-foreground">{workflow.description || "No description."}</p>
-          <p className="mt-2 text-[11px] text-muted-foreground">{describeTrigger(workflow.trigger)} · Updated {formatWhen(workflow.updated_at)}</p>
+          <h1 className="truncate text-xl font-semibold tracking-tight">{workflow.name}</h1>
+          {workflow.description ? <p className="mt-1 text-xs text-muted-foreground">{workflow.description}</p> : null}
+          <p className="mt-2 text-xs text-muted-foreground">{workflow.schedule}{active && workflow.next_run_at ? ` · next run ${formatWhen(workflow.next_run_at)}` : ""} · last run {formatWhen(workflow.last_run_at)}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" onClick={() => setState.mutate({ id: workflow.id, state: workflow.state === "active" ? "inactive" : "active" })} disabled={setState.isPending}>
-            {workflow.state === "active" ? "Deactivate" : "Activate"}
-          </Button>
-          <Button variant="outline" asChild><Link href={`/workflows/${workflow.id}/edit`}><Pencil />Edit</Link></Button>
-          <Button onClick={() => startRun.mutate(workflow.id)} disabled={running || startRun.isPending}><Play />{running ? "Running…" : "Run now"}</Button>
+          <button type="button" role="switch" aria-checked={active} aria-label={active ? "Turn off the schedule" : "Turn on the schedule"} disabled={!scheduled || setState.isPending} title={scheduled ? undefined : "Choose a schedule in Edit to turn this on"} onClick={() => setState.mutate({ id: workflow.id, state: active ? "inactive" : "active" })}
+            className="flex h-9 items-center gap-2 rounded-md border bg-surface px-3 text-xs disabled:opacity-40"><span className={cn("relative h-4 w-7 rounded-full border", active ? "border-sky-300 bg-sky-300/30" : "bg-raised")}><span className={cn("absolute top-0.5 size-2.5 rounded-full bg-foreground transition-all", active ? "left-[14px]" : "left-0.5")} /></span>{active ? "On" : "Off"}</button>
+          <Button type="button" size="sm" disabled={running || runNow.isPending} onClick={start}>{runNow.isPending ? <Loader2 className="animate-spin" /> : <Play />}Run now</Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => downloadJson(fileSafe(workflow.name), { name: workflow.name, description: workflow.description, prompt: workflow.prompt, trigger: workflow.trigger, steps: workflow.steps })}><Download />Export</Button>
+          <Button asChild type="button" variant="outline" size="sm"><Link href={`/workflows/${workflow.id}/edit`}><Pencil />Edit</Link></Button>
+          <Button type="button" variant="outline" size="sm" aria-label="Delete workflow" disabled={remove.isPending} onClick={() => { if (window.confirm(`Delete “${workflow.name}” and its run history?`)) remove.mutate(workflow.id, { onSuccess: () => router.push("/workflows") }); }}><Trash2 /></Button>
         </div>
       </header>
+      {runNow.isError ? <p role="alert" className="mt-3 text-xs text-rose-300">{runNow.error instanceof Error ? runNow.error.message : "Could not start the run."}</p> : null}
 
-      <div className="mt-6 grid gap-3 sm:grid-cols-3">
-        {[
-          ["Total runs", String(views.length)],
-          ["Success rate", finished ? `${Math.round((succeeded / finished) * 100)}%` : "—"],
-          ["Last run", latest ? formatWhen(latest.run.started_at) : "Never"],
-        ].map(([label, value]) => (
-          <div key={label} className="rounded-lg border bg-surface/50 p-3"><p className="text-[11px] text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold tracking-tight">{value}</p></div>
+      <div className="mx-auto mt-8 max-w-xl" aria-label="Workflow flow">
+        <TriggerCard trigger={workflow.trigger} />
+        {workflow.steps.map((step, index) => (
+          <div key={step.id}><Connector /><StepCard index={index} step={step} /></div>
         ))}
       </div>
 
-      <section className="mt-6 rounded-xl border bg-surface/40 p-4" aria-label="Workflow diagram">
-        <h2 className="mb-3 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Flow</h2>
-        <WorkflowDiagram workflow={workflow} statuses={latest ? Object.fromEntries(latest.steps.map((step) => [step.step_id, step.status])) : undefined} />
-        {latest ? <p className="mt-2 text-[11px] text-muted-foreground">Coloured by the latest run.</p> : null}
-      </section>
-
-      <div className="mt-8">
-        <div role="tablist" aria-label="Workflow history" className="flex w-fit rounded-lg border bg-surface p-1">
-          {([["runs", "Runs"], ["logs", "Logs"]] as const).map(([value, label]) => (
-            <button key={value} type="button" role="tab" aria-selected={tab === value} onClick={() => setTab(value)} className={cn("h-8 rounded-md px-3 text-xs font-medium text-muted-foreground hover:text-foreground", tab === value && "bg-raised text-foreground shadow-sm")}>{label}</button>
-          ))}
-        </div>
-        <div className="mt-4">
-          {tab === "runs" ? <RunsTable views={views} showWorkflow={false} empty="This workflow has not run yet." /> : (
-            views.length ? (
-              <div className="space-y-3">
-                {views.slice(0, 10).map((view) => (
-                  <details key={view.run.id} open={view === views[0]} className="rounded-lg border bg-surface/40">
-                    <summary className="flex cursor-pointer flex-wrap items-center gap-3 px-3 py-2.5 text-xs">
-                      <span className="font-medium">{new Date(view.run.started_at).toLocaleString()}</span><StatusBadge status={view.status} />
-                      <span className="text-muted-foreground">{formatDuration(view.elapsed_ms)}</span>
-                      <Link href={`/workflows/${workflow.id}/runs/${view.run.id}`} className="ml-auto text-slate hover:underline">Details</Link>
-                    </summary>
-                    <pre className="overflow-x-auto border-t px-3 py-2.5 font-mono text-[11px] leading-5 text-muted-foreground">{view.steps.filter((step) => step.status !== "pending" && step.status !== "skipped").flatMap((step) => step.log.map((line) => `[${step.title}] ${line}`)).join("\n") || "No log lines yet."}</pre>
-                  </details>
-                ))}
-              </div>
-            ) : <p className="rounded-lg border border-dashed px-4 py-10 text-center text-xs text-muted-foreground">No logs yet. Run the workflow to see them.</p>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-10 border-t pt-5">
-        {confirmDelete ? (
-          <div className="flex flex-wrap items-center gap-3 text-xs">
-            <span>Delete “{workflow.name}” and its {views.length} runs? This cannot be undone.</span>
-            <Button variant="outline" size="sm" onClick={() => setConfirmDelete(false)}>Keep</Button>
-            <Button size="sm" className="bg-red-500/90 text-white" onClick={() => remove.mutate(workflow.id, { onSuccess: () => router.push("/workflows") })}>Delete</Button>
-          </div>
-        ) : <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(true)}><Trash2 />Delete workflow</Button>}
-      </div>
+      <h2 className="mb-3 mt-10 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Run history</h2>
+      <HistoryTable runs={history} showName={false} empty="No runs yet. Press Run now, or wait for the schedule." />
     </section>
   );
 }

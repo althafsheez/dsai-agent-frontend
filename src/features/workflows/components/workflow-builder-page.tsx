@@ -1,189 +1,175 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowLeft, FlaskConical, GripVertical, Plus, Save, Sparkles, X } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, Loader2, Pencil, Sparkles, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ApiError } from "@/lib/api";
+import type { WorkflowStepDto, WorkflowStepKind, WorkflowTriggerDto } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { generateFromDescription, generateFromSketch, type SketchBox } from "../logic/generate-workflow";
-import { useSaveWorkflow, useWorkflow } from "../use-workflows";
-import { stepProblem, testRun } from "../logic/step-config";
-import type { GeneratedWorkflow, RunView, Workflow, WorkflowStep, WorkflowTrigger } from "../types";
-import { StatusBadge } from "./workflow-parts";
-import { ConfigPanel, insertStep, WorkflowCanvas, type Selection } from "./workflow-canvas";
+import { DatasetPicker } from "@/features/dashboards/components/dataset-picker";
+import { useDashboardDatasets } from "@/features/dashboards/use-dashboards";
+import { datasetIdsOf, makeTrigger, needsScript, newStep, problems, promptSteps } from "../logic/steps";
+import { TEMPLATES, templateToDraft } from "../logic/templates";
+import { useSaveWorkflow, useWorkflow, useWorkflowAi } from "../use-workflows";
+import { Connector, StepCard, TriggerCard } from "./flow-parts";
+import { SchedulePicker } from "./schedule-picker";
+import { StepActions, StepEditor } from "./step-editor";
 
-const field = "h-9 rounded-md border bg-surface px-2.5 text-xs outline-none placeholder:text-muted-foreground focus:border-border-strong";
+type Mode = "describe" | "build";
+const messageOf = (error: unknown) => (error instanceof ApiError || error instanceof Error ? error.message : error ? "Something went wrong." : "");
 
-function SketchCanvas({ boxes, onChange }: { boxes: SketchBox[]; onChange: (boxes: SketchBox[]) => void }) {
-  const canvas = useRef<HTMLDivElement>(null);
-  function startDrag(event: ReactPointerEvent<HTMLElement>, id: string) {
-    const area = canvas.current?.getBoundingClientRect();
-    const box = boxes.find((item) => item.id === id);
-    if (!area || !box) return;
-    event.preventDefault();
-    const offsetX = event.clientX - area.left - box.x;
-    const offsetY = event.clientY - area.top - box.y;
-    const move = (moveEvent: PointerEvent) => {
-      const x = Math.min(Math.max(0, moveEvent.clientX - area.left - offsetX), area.width - 150);
-      const y = Math.min(Math.max(0, moveEvent.clientY - area.top - offsetY), area.height - 56);
-      onChange(boxes.map((item) => (item.id === id ? { ...item, x, y } : item)));
-    };
-    const stop = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop); };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop);
-  }
+/**
+ * One page, two ways in. "Describe it": write what you want, let the AI sharpen it, pick data and a schedule; the same
+ * question runs every time. "Build it": lay the steps out vertically like n8n/Zapier, then let the AI write the Python.
+ */
+export function WorkflowBuilderPage({ workflowId }: { workflowId?: string }) {
+  const router = useRouter();
+  const templateId = useSearchParams().get("template");
+  const template = TEMPLATES.find((item) => item.id === templateId);
+  const existing = useWorkflow(workflowId ?? "new");
+  const datasetsQuery = useDashboardDatasets();
+  const datasets = datasetsQuery.data ?? [];
+  const ai = useWorkflowAi();
+  const save = useSaveWorkflow();
+
+  const [loaded, setLoaded] = useState(false);
+  const [mode, setMode] = useState<Mode>("describe");
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [trigger, setTrigger] = useState<WorkflowTriggerDto>(makeTrigger("daily"));
+  const [picked, setPicked] = useState<string[]>([]);
+  const [steps, setSteps] = useState<WorkflowStepDto[]>([]);
+  const [open, setOpen] = useState<string | null>(null);
+  const [notes, setNotes] = useState<string[]>([]);
+  const [state, setState] = useState<"draft" | "active" | "inactive">("draft");
+
+  useEffect(() => {
+    if (loaded) return;
+    if (workflowId && existing.data) {
+      const item = existing.data;
+      setName(item.name); setDescription(item.description); setPrompt(item.prompt); setTrigger(item.trigger); setSteps(item.steps); setState(item.state);
+      setPicked(datasetIdsOf(item.steps)); setMode("build"); setLoaded(true);
+    } else if (!workflowId) {
+      if (template) {
+        const draft = templateToDraft(template);
+        setName(draft.name); setDescription(draft.description); setPrompt(draft.prompt); setTrigger(draft.trigger); setSteps(draft.steps); setMode("build");
+        setNotes(["Imported from a template. Choose your data in the first step, then press “Build with AI” to write the scripts."]);
+      }
+      setLoaded(true);
+    }
+  }, [loaded, workflowId, existing.data, template]);
+
+  const described = useMemo(() => promptSteps(prompt.trim(), picked), [prompt, picked]);
+  const flowSteps = mode === "describe" ? described : steps;
+  const issues = useMemo(() => problems(name, mode === "describe" ? promptSteps(prompt.trim() || "…", picked) : steps), [name, mode, prompt, picked, steps]);
+  const busy = ai.plan.isPending || ai.build.isPending || ai.rephrase.isPending || save.isPending;
+  const error = messageOf(ai.plan.error ?? ai.build.error ?? ai.rephrase.error ?? save.error);
+
+  const togglePicked = (id: string) => setPicked(picked.includes(id) ? picked.filter((item) => item !== id) : [...picked, id]);
+  const updateStep = (next: WorkflowStepDto) => setSteps(steps.map((step) => (step.id === next.id ? next : step)));
+  const insertAt = (index: number, kind: WorkflowStepKind) => {
+    const step = newStep(kind, kind === "data" ? picked : []);
+    setSteps([...steps.slice(0, index), step, ...steps.slice(index)]); setOpen(step.id);
+  };
+  const move = (index: number, by: -1 | 1) => { const next = [...steps]; [next[index], next[index + by]] = [next[index + by], next[index]]; setSteps(next); };
+
+  const rephrase = async () => { const text = await ai.rephrase.mutateAsync({ prompt, datasetIds: picked }).catch(() => null); if (text) setPrompt(text); };
+  const plan = async () => {
+    const result = await ai.plan.mutateAsync({ prompt, datasetIds: picked }).catch(() => null);
+    if (!result) return;
+    setSteps(result.steps); setPrompt(result.prompt); setName((current) => current || result.name); setDescription((current) => current || result.description);
+    setMode("build"); setNotes(["The AI turned your request into these steps. Change anything, then Save."]);
+  };
+  const buildScripts = async (current: WorkflowStepDto[]) => {
+    const ids = datasetIdsOf(current);
+    if (!ids.length) { setNotes(["Choose a dataset in the “Get data” step first, so the script can be tested on real data."]); return current; }
+    const result = await ai.build.mutateAsync({ steps: current, datasetIds: ids }).catch(() => null);
+    if (!result) return current;
+    setSteps(result.steps); setNotes(result.notes.length ? result.notes : ["Every script is already up to date."]);
+    return result.steps;
+  };
+
+  const finish = async (turnOn: boolean) => {
+    let finalSteps = mode === "describe" ? promptSteps(prompt.trim(), picked) : steps;
+    if (finalSteps.some(needsScript) || finalSteps.some((step) => step.kind === "script" && step.config?.script_for !== step.detail)) finalSteps = await buildScripts(finalSteps);
+    const saved = await save.mutateAsync({ id: workflowId, name: name.trim(), description: description.trim(), prompt: prompt.trim(), state: turnOn ? "active" : state, trigger, steps: finalSteps }).catch(() => null);
+    if (saved) router.push(`/workflows/${saved.id}`);
+  };
+
+  if (workflowId && existing.isError) return <p className="p-8 text-sm text-muted-foreground">This workflow could not be found.</p>;
+  if (workflowId && !loaded) return <p className="p-8 text-sm text-muted-foreground">Loading…</p>;
+
   return (
-    <div>
-      <div ref={canvas} className="relative h-72 overflow-hidden rounded-lg border bg-[radial-gradient(var(--border)_1px,transparent_1px)] [background-size:16px_16px]" aria-label="Sketch canvas">
-        {boxes.length === 0 ? <p className="absolute inset-0 grid place-items-center px-6 text-center text-xs text-muted-foreground">Add boxes and name each step. Drag them into the order you imagine; the builder straightens them into a linear workflow.</p> : null}
-        {boxes.map((box) => (
-          <div key={box.id} style={{ left: box.x, top: box.y }} className="absolute flex w-[150px] items-center gap-1 rounded-md border bg-surface p-1 shadow-sm">
-            <span role="img" aria-label="Drag box" onPointerDown={(event) => startDrag(event, box.id)} className="grid size-6 shrink-0 cursor-grab touch-none place-items-center text-muted-foreground active:cursor-grabbing"><GripVertical className="size-3.5" /></span>
-            <input aria-label="Box text" value={box.text} onChange={(event) => onChange(boxes.map((item) => (item.id === box.id ? { ...item, text: event.target.value } : item)))} placeholder="Name this step" className="h-7 min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground" />
-            <button type="button" aria-label="Remove box" onClick={() => onChange(boxes.filter((item) => item.id !== box.id))} className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-raised hover:text-foreground"><X className="size-3" /></button>
-          </div>
+    <section className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6">
+      <Link href={workflowId ? `/workflows/${workflowId}` : "/workflows"} className="mb-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="size-3.5" />{workflowId ? "Back to the workflow" : "All workflows"}</Link>
+      <h1 className="text-xl font-semibold tracking-tight">{workflowId ? "Edit workflow" : "New workflow"}</h1>
+      <p className="mt-1 text-xs text-muted-foreground">A workflow runs by itself on a schedule. Tell the AI what you want, or lay the steps out yourself.</p>
+
+      <label className="mt-6 block"><span className="mb-1 block text-xs font-medium">Name</span>
+        <input aria-label="Workflow name" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Daily sales summary" className="h-10 w-full rounded-md border bg-surface px-3 text-sm outline-none focus:border-border-strong" /></label>
+
+      <div role="tablist" aria-label="How to create it" className="mt-6 grid w-full grid-cols-2 gap-1 rounded-lg border bg-surface p-1 sm:w-fit">
+        {([["describe", "Describe it", Sparkles], ["build", "Build it step by step", Wand2]] as const).map(([value, label, Icon]) => (
+          <button key={value} type="button" role="tab" aria-selected={mode === value} onClick={() => setMode(value)} className={cn("flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-xs font-medium text-muted-foreground hover:text-foreground", mode === value && "bg-raised text-foreground shadow-sm")}><Icon className="size-3.5" />{label}</button>
         ))}
       </div>
-      <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => onChange([...boxes, { id: `box-${Date.now().toString(36)}-${boxes.length}`, text: "", x: 16 + (boxes.length % 3) * 160, y: 16 + Math.floor(boxes.length / 3) * 80 }])}><Plus />Add box</Button>
-    </div>
-  );
-}
 
-interface BuilderFormProps { initial?: Workflow }
-
-function BuilderForm({ initial }: BuilderFormProps) {
-  const router = useRouter();
-  const save = useSaveWorkflow();
-  const [name, setName] = useState(initial?.name ?? "");
-  const [description, setDescription] = useState(initial?.description ?? "");
-  const [trigger, setTrigger] = useState<WorkflowTrigger>(initial?.trigger ?? { kind: "manual", label: "Run manually" });
-  const [steps, setSteps] = useState<WorkflowStep[]>(initial?.steps ?? []);
-  const [enabled, setEnabled] = useState(initial?.state === "active");
-  const [selected, setSelected] = useState<Selection>("trigger");
-  const [mode, setMode] = useState<"describe" | "sketch">("describe");
-  const [prompt, setPrompt] = useState("");
-  const [boxes, setBoxes] = useState<SketchBox[]>([]);
-  const [notes, setNotes] = useState<string[]>([]);
-  const [test, setTest] = useState<RunView | null>(null);
-
-  function apply(result: GeneratedWorkflow) {
-    setName((current) => current || result.name);
-    setDescription(result.description);
-    setTrigger(result.trigger);
-    setSteps(result.steps);
-    setNotes(result.notes);
-    setSelected("trigger");
-    setTest(null);
-  }
-  const edited = () => setTest(null);
-  const move = (id: string, delta: number) => { edited(); setSteps((current) => {
-    const index = current.findIndex((step) => step.id === id);
-    const target = index + delta;
-    if (index < 0 || target < 0 || target >= current.length) return current;
-    const next = [...current];
-    [next[index], next[target]] = [next[target], next[index]];
-    return next;
-  }); };
-  const update = (id: string, patch: Partial<WorkflowStep>) => { edited(); setSteps((current) => current.map((step) => (step.id === id ? { ...step, ...patch } : step))); };
-  const incomplete = steps.filter((step) => stepProblem(step));
-  const canSave = name.trim().length > 0 && steps.length > 0 && steps.every((step) => step.title.trim());
-  const canEnable = steps.length > 0 && incomplete.length === 0;
-
-  function submit() {
-    save.mutate({ id: initial?.id, name, description, trigger, steps, state: enabled && canEnable ? "active" : initial?.state === "inactive" && !enabled ? "inactive" : "draft" }, { onSuccess: (saved) => router.push(`/workflows/${saved.id}`) });
-  }
-
-  return (
-    <section className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
-      <nav aria-label="Breadcrumb" className="mb-4 text-xs text-muted-foreground">
-        <Link href={initial ? `/workflows/${initial.id}` : "/workflows"} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="size-3.5" />{initial ? "Back to workflow" : "Workflows"}</Link>
-      </nav>
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-xl font-semibold tracking-tight">{initial ? "Edit workflow" : "Create workflow"}</h1>
-          <p className="mt-1 text-xs text-muted-foreground">Pick a trigger, add steps with the + buttons, and click any card to set it up.</p>
+      {mode === "describe" ? (
+        <div className="mt-4 grid gap-5">
+          <div>
+            <label htmlFor="wf-prompt" className="mb-1 block text-xs font-medium">What should it do each time?</label>
+            <textarea id="wf-prompt" value={prompt} rows={4} onChange={(event) => setPrompt(event.target.value)} placeholder="e.g. Tell me which region sold the most and whether any order looks unusual." className="w-full resize-y rounded-md border bg-surface px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-border-strong" />
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" disabled={busy || !ai.ready || prompt.trim().length < 3} onClick={() => void rephrase()}>{ai.rephrase.isPending ? <Loader2 className="animate-spin" /> : <Sparkles />}Rephrase with AI</Button>
+              <Button type="button" variant="outline" size="sm" disabled={busy || !ai.ready || prompt.trim().length < 3} onClick={() => void plan()}>{ai.plan.isPending ? <Loader2 className="animate-spin" /> : <Wand2 />}Show it as steps</Button>
+            </div>
+          </div>
+          <div><span className="mb-1 block text-xs font-medium">Which data?</span><DatasetPicker datasets={datasets} loading={datasetsQuery.isLoading} selected={picked} onToggle={togglePicked} /></div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button type="button" role="switch" aria-checked={enabled} aria-label="Workflow enabled" disabled={!canEnable} title={canEnable ? undefined : "Finish every step to turn it on"} onClick={() => setEnabled(!enabled)} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-xs disabled:opacity-50">
-            <span className={cn("relative h-4 w-7 rounded-full transition-colors", enabled ? "bg-sage" : "bg-border-strong")}><span className={cn("absolute top-0.5 size-3 rounded-full bg-background transition-all", enabled ? "left-3.5" : "left-0.5")} /></span>
-            {enabled ? "On" : "Off"}
-          </button>
-          <Button type="button" variant="outline" disabled={!steps.length} onClick={() => setTest(testRun({ trigger, steps }))}><FlaskConical />Test workflow</Button>
-          <Button onClick={submit} disabled={!canSave || save.isPending} title={canSave ? undefined : "Add a name and at least one step"}><Save />{save.isPending ? "Saving…" : "Save workflow"}</Button>
-        </div>
-      </header>
+      ) : null}
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <label className="block min-w-0 text-xs font-medium">Name<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Weekly revenue report" className={cn(field, "mt-1.5 w-full")} /></label>
-        <label className="block min-w-0 text-xs font-medium">Description<input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What it is for" className={cn(field, "mt-1.5 w-full")} /></label>
+      <div className="mt-6"><span className="mb-1 block text-xs font-medium">When should it run?</span><SchedulePicker trigger={trigger} onChange={setTrigger} /></div>
+
+      <div className="mt-8">
+        <h2 className="mb-3 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">The flow</h2>
+        <div className="mx-auto max-w-xl" aria-label="Workflow flow">
+          <TriggerCard trigger={trigger} />
+          {flowSteps.map((step, index) => (
+            <div key={step.id}>
+              <Connector onAdd={mode === "build" ? (kind) => insertAt(index, kind) : undefined} label={`Add a step before step ${index + 1}`} />
+              <StepCard index={index} step={step} tone={open === step.id ? "active" : undefined}
+                actions={mode === "build" ? (
+                  <>
+                    <button type="button" aria-label={`Edit ${step.title}`} aria-expanded={open === step.id} onClick={() => setOpen(open === step.id ? null : step.id)} className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground"><Pencil className="size-3.5" /></button>
+                    <StepActions name={step.title} first={index === 0} last={index === flowSteps.length - 1} onMove={(by) => move(index, by)} onRemove={() => setSteps(steps.filter((item) => item.id !== step.id))} />
+                  </>
+                ) : null}>
+                {mode === "build" && open === step.id ? <StepEditor step={step} datasets={datasets} loading={datasetsQuery.isLoading} onChange={updateStep} /> : null}
+              </StepCard>
+            </div>
+          ))}
+          {mode === "build" ? (
+            <>
+              <Connector onAdd={(kind) => insertAt(steps.length, kind)} label="Add a step at the end" />
+              {!steps.length ? <p className="rounded-xl border border-dashed px-4 py-6 text-center text-xs text-muted-foreground">Press + to add the first step, usually “Get data”.</p> : null}
+            </>
+          ) : <p className="mt-4 text-center text-[11px] text-muted-foreground">These three steps run in order every time. Want more control? Use “Build it step by step”.</p>}
+        </div>
       </div>
 
-      <details className="mt-4 rounded-lg border bg-surface/40 p-3" open={steps.length === 0}>
-        <summary className="cursor-pointer text-xs font-medium"><Sparkles className="mr-1.5 inline size-3.5" />Start from a description or sketch</summary>
-        <div className="mt-3 space-y-3">
-          <div role="tablist" aria-label="How to start" className="flex w-fit rounded-lg border bg-surface p-1">
-            {([["describe", "Describe"], ["sketch", "Sketch"]] as const).map(([value, label]) => (
-              <button key={value} type="button" role="tab" aria-selected={mode === value} onClick={() => setMode(value)} className={cn("h-8 rounded-md px-3 text-xs font-medium text-muted-foreground hover:text-foreground", mode === value && "bg-raised text-foreground shadow-sm")}>{label}</button>
-            ))}
-          </div>
-          {mode === "describe" ? (
-            <div>
-              <label htmlFor="workflow-prompt" className="text-xs font-medium">What should this workflow do?</label>
-              <textarea id="workflow-prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={4} placeholder="Every Monday at 9am, pull last week's revenue, analyze trends, build a chart and email the team." className="mt-2 w-full resize-y rounded-lg border bg-surface p-3 text-xs leading-5 outline-none placeholder:text-muted-foreground focus:border-border-strong" />
-              <Button type="button" className="mt-2" disabled={!prompt.trim()} onClick={() => apply(generateFromDescription(prompt))}><Sparkles />Generate workflow</Button>
-            </div>
-          ) : (
-            <div>
-              <SketchCanvas boxes={boxes} onChange={setBoxes} />
-              <Button type="button" className="mt-2" disabled={!boxes.some((box) => box.text.trim())} onClick={() => apply(generateFromSketch(boxes))}><Sparkles />Build workflow from sketch</Button>
-            </div>
-          )}
-          {notes.length ? (
-            <aside aria-label="What the builder did" className="rounded-lg border bg-surface/50 p-3 text-xs">
-              <p className="font-medium">What the builder did</p>
-              <ul className="mt-1.5 list-disc space-y-1 pl-4 text-muted-foreground">{notes.map((note) => <li key={note}>{note}</li>)}</ul>
-            </aside>
-          ) : null}
-          <p className="text-[11px] text-muted-foreground">A rule-based reader turns your text or sketch into steps; it does not call a model yet.</p>
-        </div>
-      </details>
+      {notes.length ? <ul aria-label="AI notes" className="mt-5 grid gap-1 rounded-lg border border-sky-300/30 bg-sky-300/5 p-3 text-xs">{notes.map((note) => <li key={note}>{note}</li>)}</ul> : null}
+      {error ? <p role="alert" className="mt-5 rounded-lg border border-rose-400/40 bg-rose-400/5 p-3 text-xs text-rose-300">{error}</p> : null}
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="min-w-0">
-          <WorkflowCanvas trigger={trigger} steps={steps} selected={selected} statuses={test ? Object.fromEntries(test.steps.map((item) => [item.step_id, item.status])) : undefined}
-            onSelect={setSelected} onInsert={(index, kind) => { edited(); const result = insertStep(steps, index, kind); setSteps(result.steps); setSelected(result.added.id); }} />
-          {incomplete.length ? <p className="mt-3 text-center text-[11px] text-amber-200">{incomplete.length} step{incomplete.length > 1 ? "s need" : " needs"} setup before the workflow can be turned on.</p> : null}
-        </div>
-        <div className="min-w-0 space-y-4">
-          <div className="rounded-xl border bg-surface/40 p-4">
-            <ConfigPanel trigger={trigger} steps={steps} selected={selected} onTrigger={(next) => { edited(); setTrigger(next); }} onStep={update} onMove={move}
-              onDelete={(id) => { edited(); setSteps((current) => current.filter((step) => step.id !== id)); setSelected("trigger"); }} />
-          </div>
-          {test ? (
-            <section aria-label="Test results" className="rounded-xl border bg-surface/40 p-4">
-              <h2 className="flex items-center gap-2 text-sm font-semibold">Test result <StatusBadge status={test.status} /></h2>
-              <pre className="mt-2 max-h-56 overflow-auto font-mono text-[11px] leading-5 text-muted-foreground">{test.steps.flatMap((item) => item.log.map((line) => `[${item.title}] ${line}`)).join("\n")}</pre>
-              <p className="mt-2 text-[11px] text-muted-foreground">Simulated test: no data is read and nothing is sent.</p>
-            </section>
-          ) : null}
-        </div>
+      <div className="mt-8 flex flex-wrap items-center gap-2 border-t pt-5">
+        {mode === "build" ? <Button type="button" variant="outline" disabled={busy || !ai.ready || !steps.some((step) => step.kind === "script")} onClick={() => void buildScripts(steps)}>{ai.build.isPending ? <Loader2 className="animate-spin" /> : <Wand2 />}Build with AI</Button> : null}
+        <Button type="button" variant="outline" disabled={busy || issues.length > 0} onClick={() => void finish(false)}>{save.isPending ? <Loader2 className="animate-spin" /> : null}Save</Button>
+        <Button type="button" disabled={busy || issues.length > 0} onClick={() => void finish(true)}>Save and turn on</Button>
+        <Link href={workflowId ? `/workflows/${workflowId}` : "/workflows"} className="ml-auto text-xs text-muted-foreground hover:text-foreground">Cancel</Link>
       </div>
+      {issues.length ? <ul aria-label="To finish" className="mt-3 grid gap-0.5 text-[11px] text-muted-foreground">{issues.map((issue) => <li key={issue}>• {issue}</li>)}</ul> : null}
     </section>
   );
-}
-
-export function WorkflowBuilderPage({ workflowId }: { workflowId?: string }) {
-  const query = useWorkflow(workflowId ?? "");
-  if (!workflowId) return <BuilderForm />;
-  if (query.isLoading) return <p className="p-8 text-sm text-muted-foreground">Loading workflow…</p>;
-  if (!query.data) {
-    return (
-      <section className="mx-auto w-full max-w-3xl px-4 py-16 text-center">
-        <h1 className="text-lg font-semibold">Workflow not found</h1>
-        <Button asChild variant="outline" className="mt-5"><Link href="/workflows"><ArrowLeft />Back to workflows</Link></Button>
-      </section>
-    );
-  }
-  return <BuilderForm key={query.data.id} initial={query.data} />;
 }

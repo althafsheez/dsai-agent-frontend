@@ -322,6 +322,9 @@ class WorkflowDefinition(TimestampMixin, Base):
     state: Mapped[str] = mapped_column(String(16), default="draft")
     trigger: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     steps: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    prompt: Mapped[str] = mapped_column(Text, default="")
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class WorkflowRunRecord(TimestampMixin, Base):
@@ -334,3 +337,7 @@ class WorkflowRunRecord(TimestampMixin, Base):
     plan: Mapped[list[Any]] = mapped_column(JSON, default=list)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), default="running")
+    results: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str] = mapped_column(Text, default="")

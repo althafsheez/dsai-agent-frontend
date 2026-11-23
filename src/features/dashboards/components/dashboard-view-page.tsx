@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Eye, LayoutDashboard, LoaderCircle, Merge, Pencil, PencilRuler, Save, Share2, Trash2, Undo2, Wand2 } from "lucide-react";
+import { ArrowLeft, Download, Eye, LayoutDashboard, LoaderCircle, Merge, Pencil, PencilRuler, Save, Share2, Trash2, Undo2, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useDashboard, useDashboardAi, useDatasetRelations, useDeleteDashboard, useHydratedDatasets, useSaveDashboard } from "../use-dashboards";
@@ -22,6 +22,7 @@ import { DatasetRelationsPanel } from "./dataset-relations";
 import { HandEdits } from "./hand-edits";
 import { ManualComposer } from "./manual-composer";
 import { Section } from "./section";
+import { downloadJson, fileSafe } from "@/lib/download";
 import { ShareDialog } from "./share-dialog";
 
 const WidgetCard = dynamic(() => import("./widget-card").then((m) => m.WidgetCard), { ssr: false });
@@ -154,6 +155,7 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
             </>
           ) : (
             <>
+              <Button type="button" variant="outline" onClick={() => downloadJson(fileSafe(dashboard.name), { name: dashboard.name, description: dashboard.description, slicers: dashboard.slicers, widgets: dashboard.widgets })}><Download />Export</Button>
               {isOwner ? <Button type="button" variant="outline" onClick={() => setShareOpen(true)}><Share2 />Share</Button> : null}
               {canEdit ? <Button type="button" onClick={() => setMode("edit")}><Pencil />Edit</Button> : null}
             </>

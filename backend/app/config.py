@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     shared_data_dir: Path = BACKEND_ROOT.parent / "shared-data"
     # How often the server checks for dashboards whose Google Drive files are due a re-sync (0 turns the background check off).
     dashboard_sync_seconds: int = 60
+    workflow_tick_seconds: int = 30
     gemini_api_key: str | None = None
     gemini_models: str = ""
     default_model_id: str | None = None

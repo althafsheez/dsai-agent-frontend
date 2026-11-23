@@ -86,6 +86,9 @@ def col(dataset, name):
     index = dataset["columns"].index(name)
     return [row[index] if index < len(row) else None for row in dataset["rows"]]
 scope = {"__builtins__": safe, "data": {item["id"]: item for item in datasets}, "datasets": datasets, "num": num, "col": col, "result": None}
+import importlib
+for module_name in sorted(allowed):
+    scope[module_name] = importlib.import_module(module_name)
 exec(compile(payload["script"], "<dashboard script>", "exec"), scope)
 sys.stdout.write(json.dumps(scope.get("result"), default=str))
 '''

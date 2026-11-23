@@ -23,7 +23,7 @@ from .errors import APIError, api_error_handler
 from .routes import chats, connectors, dashboards, meta, quick_assistant, resources, runs, workflow_store, workspaces
 from .services.agent_adapter import AgentToolAdapter
 from .services.identity import seed_demo_users
-from .services import dashboard_sync
+from .services import dashboard_sync, workflow_engine
 from .services.runs import RunCoordinator, reconcile_stale_runs
 from .storage import LocalFileStorage
 
@@ -63,10 +63,14 @@ def create_app(
             snapshot.import_snapshot(engine, settings.storage_root, settings.shared_data_dir)
         with session_factory() as session:
             reconcile_stale_runs(session)
+        with session_factory() as session:
+            workflow_engine.reconcile_stale_workflow_runs(session)
         sync_task = asyncio.create_task(dashboard_sync.sync_loop(app, settings.dashboard_sync_seconds)) if settings.dashboard_sync_seconds > 0 else None
+        workflow_task = asyncio.create_task(workflow_engine.scheduler_loop(app, settings.workflow_tick_seconds)) if settings.workflow_tick_seconds > 0 else None
         yield
-        if sync_task is not None:
-            sync_task.cancel()
+        for task in (sync_task, workflow_task):
+            if task is not None:
+                task.cancel()
         await connector_client.aclose()
         engine.dispose()
 
@@ -87,6 +91,7 @@ def create_app(
     app.state.sandbox_pool = sandbox_pool
     app.state.run_coordinator = RunCoordinator()
     app.state.storage = storage
+    app.state.workflow_tasks = set()
     app.state.connector_http = connector_client
     app.include_router(meta.router)
     app.include_router(workspaces.router)
