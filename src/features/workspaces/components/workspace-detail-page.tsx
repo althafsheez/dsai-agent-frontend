@@ -18,11 +18,11 @@ import {
   uploadResource,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import type { DatasetResource } from "@/features/context-sidebar/types";
 import { HistoryToolbar } from "@/features/history/components/history-toolbar";
 import { filterHistory } from "@/features/history/logic/filter-history";
 import type { HistoryFilterOptions, HistoryFilters, HistoryRecord } from "@/features/history/types";
 import { currentDemoUser } from "@/features/history/types";
-import { WorkspaceDatasets } from "./workspace-datasets";
 import { WorkspaceAccessDialogs } from "./workspace-access-dialogs";
 
 type Tab = "chats" | "datasets" | "workflows" | "context";
@@ -33,6 +33,12 @@ const tabs: Array<{ id: Tab; label: string; icon: typeof MessageSquare }> = [
   { id: "workflows", label: "Workflows", icon: Workflow },
   { id: "context", label: "Context", icon: FileText },
 ];
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
@@ -50,6 +56,8 @@ export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
     authorId: "all",
     workspaceId: workspaceId,
   });
+  const [datasetSearch, setDatasetSearch] = useState("");
+  const [selectedDataset, setSelectedDataset] = useState<DatasetResource | null>(null);
   const [selectedContextId, setSelectedContextId] = useState<string | null>(null);
   const [contextDraft, setContextDraft] = useState("");
   const [workflowName, setWorkflowName] = useState("");
@@ -107,6 +115,7 @@ export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
     [workspaceId, workspace.data?.name]
   );
 
+  const visibleDatasets = useMemo(() => (datasets.data?.items ?? []).filter((dataset) => dataset.name.toLowerCase().includes(datasetSearch.toLowerCase())), [datasetSearch, datasets.data?.items]);
   const selectedContext = contextFiles.data?.items.find((file) => file.id === selectedContextId) ?? null;
 
   if (workspace.isLoading) return <section className="p-8 text-sm text-muted-foreground">Loading workspace…</section>;
