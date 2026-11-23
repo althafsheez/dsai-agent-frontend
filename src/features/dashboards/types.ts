@@ -25,8 +25,11 @@ export interface Dashboard {
   ownership: "owned" | "shared";
   /** Published dashboards can be viewed by the whole team; drafts only by the owner and the people it is shared with. */
   status: "draft" | "published";
+  /** Pins are personal: this is whether the signed-in user pinned it. */
   pinned: boolean;
-  /** What the signed-in user may do. Built-in demos have none: the owner is "owned", anything else is view-only. */
+  /** The first KPI and a small version of the first chart, for the listing card. */
+  preview?: { kpi: { label: string; value: string }; chart: { kind: "bar" | "line" | "area" | "donut"; series: number[]; labels: string[] } | null };
+  /** What the signed-in user may do. Falls back to the ownership when missing. */
   role?: "owner" | "editor" | "viewer";
   /** Minutes between automatic data refreshes while the dashboard is open; 0 = manual. */
   refresh_minutes?: number;

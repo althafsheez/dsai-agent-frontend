@@ -5,8 +5,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DashboardViewPage } from "./dashboard-view-page";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
-const { offline } = vi.hoisted(() => ({ offline: async () => { throw new Error("offline"); } }));
-vi.mock("@/lib/api", () => ({ ApiError: class extends Error { status = 0 }, listDashboardRecords: offline, getDashboardRecord: offline, saveDashboardRecord: offline, deleteDashboardRecord: offline, getLibrary: async () => ({ items: [] }), getModels: async () => ({ default_model_id: "m", models: [], configuration_status: "ok" }), generateDashboardWithAi: vi.fn(), reviewDashboardWithAi: vi.fn(), tuneDashboardWithAi: vi.fn(), listDashboardPeople: async () => [{ id: "user-shared", name: "Shared Demo", initials: "SD" }], syncDatasetFromDrive: vi.fn(), getDatasetRows: vi.fn() }));
+const { offline, rows } = vi.hoisted(() => {
+  const rec = (id: string, name: string, extra: Record<string, unknown>) => ({
+    id, name, description: "", status: "published", pinned: false, slicers: [], dataset_ids: [], widgets: [], owner: "You", ownership: "owned", role: "owner",
+    refresh_minutes: 0, shares: [], created_at: "2026-11-01T00:00:00Z", updated_at: "2026-11-02T00:00:00Z", ...extra,
+  });
+  return {
+    offline: async () => { throw new Error("offline"); },
+    rows: [rec("customer-health", "Customer Health", { status: "draft" }), rec("sales-performance", "Sales Performance", { owner: "Alex", ownership: "shared", role: "viewer", shares: undefined })],
+  };
+});
+vi.mock("@/lib/api", () => ({ ApiError: class extends Error { status = 404 }, listDashboardRecords: async () => rows, getDashboardRecord: async (id: string) => { const found = rows.find((row) => row.id === id); if (!found) throw Object.assign(new Error("missing"), { status: 404 }); return found; }, saveDashboardRecord: offline, deleteDashboardRecord: offline, getLibrary: async () => ({ items: [] }), getModels: async () => ({ default_model_id: "m", models: [], configuration_status: "ok" }), generateDashboardWithAi: vi.fn(), reviewDashboardWithAi: vi.fn(), tuneDashboardWithAi: vi.fn(), listDashboardPeople: async () => [{ id: "user-shared", name: "Shared Demo", initials: "SD" }], syncDatasetFromDrive: vi.fn(), getDatasetRows: vi.fn() }));
 
 function renderPage(id: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

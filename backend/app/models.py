@@ -307,6 +307,9 @@ class Dashboard(TimestampMixin, Base):
     shares: Mapped[list[Any]] = mapped_column(JSON, default=list)
     # 0 = manual refresh only; otherwise the minutes between automatic data refreshes while the dashboard is open.
     refresh_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    # Users who pinned it (pins are personal), and the small KPI + chart shown on the listing card, computed when it is saved.
+    pinned_by: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    preview: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
 class WorkflowDefinition(TimestampMixin, Base):

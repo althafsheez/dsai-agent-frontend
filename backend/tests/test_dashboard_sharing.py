@@ -200,3 +200,25 @@ async def test_old_snapshot_without_sharing_columns_still_imports(client: AsyncC
             row = connection.execute(text("select shares, refresh_minutes from dashboards where id='db-old'")).one()
         assert json.loads(row[0]) == [] and row[1] == 0
     engine.dispose()
+
+
+async def test_listing_preview_is_built_from_the_data_and_pins_are_personal(client: AsyncClient) -> None:
+    dataset_id = await upload_dataset(client, b"region,revenue\nN,10\nN,5\nS,20\nE,1\n")
+    widgets = [
+        {"id": "k", "type": "kpi", "title": "Revenue", "dataset_id": dataset_id, "y": "revenue", "agg": "sum", "span": 1},
+        {"id": "b", "type": "bar", "title": "By region", "dataset_id": dataset_id, "x": "region", "y": "revenue", "agg": "sum", "span": 2},
+    ]
+    saved = (await put(client, OWNER, widgets=widgets, dataset_ids=[dataset_id], status="published")).json()
+    assert saved["preview"]["kpi"] == {"label": "Revenue", "value": "36"}
+    assert saved["preview"]["chart"] == {"kind": "bar", "series": [20.0, 15.0, 1.0], "labels": ["S", "N", "E"]}
+
+    empty = (await client.put("/api/dashboards", headers=OWNER, json={"id": "db-empty", "name": "Empty"})).json()
+    assert empty["preview"] == {"kpi": {"label": "Widgets", "value": "0"}, "chart": None}
+
+    pinned = await client.put("/api/dashboards/db-share/pin", headers=OTHER, json={"pinned": True})
+    assert pinned.status_code == 200 and pinned.json()["pinned"] is True
+    assert (await client.get("/api/dashboards/db-share", headers=OWNER)).json()["pinned"] is False
+    assert pinned.json()["updated_at"] == saved["updated_at"]
+    assert (await client.get("/api/dashboards/db-share", headers=OTHER)).json()["pinned"] is True
+    assert (await client.put("/api/dashboards/db-share/pin", headers=OTHER, json={"pinned": False})).json()["pinned"] is False
+    assert (await client.put("/api/dashboards/db-empty/pin", headers=OTHER, json={"pinned": True})).status_code == 404

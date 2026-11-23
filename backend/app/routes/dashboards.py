@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from datetime import timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
@@ -11,8 +12,10 @@ from agentic.runtime.contracts import ProviderError
 
 from ..dependencies import get_current_user, get_db
 from ..errors import APIError
-from ..models import Dashboard, User
+from ..models import Dashboard, FileObject, Resource, User
 from ..services import dashboard_ai
+from ..services.dashboard_preview import build_preview
+from ..services.dataset_preview import read_csv_rows
 
 router = APIRouter(prefix="/api/dashboards/ai", tags=["dashboards"])
 store_router = APIRouter(prefix="/api/dashboards", tags=["dashboards"])
@@ -103,7 +106,7 @@ class DashboardInput(BaseModel):
     name: str = Field(max_length=160)
     description: str = Field(default="", max_length=2000)
     status: str = Field(default="draft", pattern="^(draft|published)$")
-    pinned: bool = False
+    pinned: bool | None = None
     slicers: list[str] = Field(default_factory=list, max_length=12)
     dataset_ids: list[str] = Field(default_factory=list, max_length=20)
     widgets: list[dict[str, Any]] = Field(default_factory=list, max_length=40)
@@ -131,15 +134,20 @@ def _require(item: Dashboard | None, user: User) -> tuple[Dashboard, str]:
     return item, role
 
 
+def _utc(moment) -> str:
+    """SQLite returns naive datetimes; they are UTC, so say so, or browsers read them as local time."""
+    return (moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)).isoformat()
+
+
 def _view(item: Dashboard, user: User, db: Session, role: str) -> dict:
     owner = db.get(User, item.owner_id)
     mine = item.owner_id == user.id
     view = {
-        "id": item.id, "name": item.name, "description": item.description, "status": item.status, "pinned": item.pinned,
-        "slicers": item.slicers, "dataset_ids": item.dataset_ids, "widgets": item.widgets,
+        "id": item.id, "name": item.name, "description": item.description, "status": item.status, "pinned": user.id in (item.pinned_by or []),
+        "slicers": item.slicers, "dataset_ids": item.dataset_ids, "widgets": item.widgets, "preview": item.preview or {},
         "owner": "You" if mine else (owner.name if owner else "Unknown"), "ownership": "owned" if mine else "shared",
         "role": role, "refresh_minutes": item.refresh_minutes or 0,
-        "created_at": item.created_at.isoformat(), "updated_at": item.updated_at.isoformat(),
+        "created_at": _utc(item.created_at), "updated_at": _utc(item.updated_at),
     }
     if role == "owner":
         names = {person.id: person.name for person in db.scalars(select(User))}
@@ -175,7 +183,7 @@ def get_dashboard(dashboard_id: str, user: User = Depends(get_current_user), db:
 
 
 @store_router.put("")
-def save_dashboard(data: DashboardInput, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+def save_dashboard(data: DashboardInput, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
     """Create, or update when the id already exists. Owners and editors change content; only the owner changes sharing."""
     existing = db.get(Dashboard, data.id) if data.id else None
     if existing is None:
@@ -198,7 +206,6 @@ def save_dashboard(data: DashboardInput, user: User = Depends(get_current_user),
         item.refresh_minutes = data.refresh_minutes
     if role == "owner":
         item.status = data.status
-        item.pinned = data.pinned
         if data.shares is not None:
             known = set(db.scalars(select(User.id)))
             item.shares = [
@@ -206,7 +213,47 @@ def save_dashboard(data: DashboardInput, user: User = Depends(get_current_user),
                 for share in {share.user_id: share for share in data.shares}.values()
                 if share.user_id in known and share.user_id != user.id
             ]
+    if data.pinned is not None:
+        item.pinned_by = _with_pin(item, user, data.pinned)
+    item.preview = _preview(request, db, data.widgets)
     db.commit()
+    return _view(item, user, db, role)
+
+
+def _with_pin(item: Dashboard, user: User, pinned: bool) -> list[str]:
+    others = [uid for uid in (item.pinned_by or []) if uid != user.id]
+    return [*others, user.id] if pinned else others
+
+
+def _preview(request: Request, db: Session, widgets: list[dict[str, Any]]) -> dict[str, Any]:
+    """Reads the datasets the widgets use (the dashboard grants that access) and summarises them for the listing card."""
+    data: dict[str, dict[str, Any]] = {}
+    storage = request.app.state.storage
+    for dataset_id in {widget.get("dataset_id") for widget in widgets if isinstance(widget.get("dataset_id"), str)}:
+        row = db.execute(select(Resource, FileObject).join(FileObject, FileObject.id == Resource.file_object_id).where(Resource.id == dataset_id)).one_or_none()
+        if row is None:
+            continue
+        try:
+            rows = read_csv_rows(row[0].name, storage.read_bytes(row[1].relative_storage_path))
+        except OSError:
+            continue
+        if rows is not None:
+            data[dataset_id] = {"columns": [column["name"] for column in rows["columns"]], "rows": rows["rows"], "total_rows": rows["total_rows"]}
+    return build_preview(widgets, data)
+
+
+class PinInput(BaseModel):
+    pinned: bool
+
+
+@store_router.put("/{dashboard_id}/pin")
+def pin_dashboard(dashboard_id: str, data: PinInput, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    """Pins are personal: anyone who can see a dashboard can pin it for themselves."""
+    item, role = _require(db.get(Dashboard, dashboard_id), user)
+    # A personal pin is not an edit, so "last updated" is set explicitly to what it was.
+    db.execute(update(Dashboard).where(Dashboard.id == item.id).values(pinned_by=_with_pin(item, user, data.pinned), updated_at=Dashboard.updated_at))
+    db.commit()
+    db.refresh(item)
     return _view(item, user, db, role)
 
 

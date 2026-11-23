@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { generateDashboardWithAi, getDatasetRows, getLibrary, getModels, listDashboardPeople, reviewDashboardWithAi, syncDatasetFromDrive, tuneDashboardWithAi } from "@/lib/api";
 import type { DashboardAiResult } from "@/lib/api";
-import { deleteDashboard, getDashboard, listDashboards, saveDashboard } from "./data/dashboard-store";
+import { deleteDashboard, duplicateDashboard, getDashboard, listDashboards, pinDashboard, saveDashboard } from "./data/dashboard-store";
 import type { DashboardWidget, DatasetLite } from "./types";
 
 export const dashboardKeys = { all: ["dashboards"] as const, one: (id: string) => ["dashboards", id] as const, datasets: ["dashboard-datasets"] as const };
@@ -32,6 +32,14 @@ function useInvalidate() {
 export function useSaveDashboard() {
   const invalidate = useInvalidate();
   return useMutation({ mutationFn: saveDashboard, onSuccess: invalidate });
+}
+export function usePinDashboard() {
+  const invalidate = useInvalidate();
+  return useMutation({ mutationFn: (input: { id: string; pinned: boolean }) => pinDashboard(input.id, input.pinned), onSuccess: invalidate });
+}
+export function useDuplicateDashboard() {
+  const invalidate = useInvalidate();
+  return useMutation({ mutationFn: duplicateDashboard, onSuccess: invalidate });
 }
 export function useDeleteDashboard() {
   const invalidate = useInvalidate();

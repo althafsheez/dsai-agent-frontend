@@ -1,43 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, LayoutDashboard, MoreHorizontal, Pin, Plus, Search, Users, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, Copy, ExternalLink, LayoutDashboard, MoreHorizontal, Pencil, Pin, Plus, Search, Share2, Trash2, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { listDashboards } from "../data/dashboard-store";
+import { useDashboards, useDeleteDashboard, useDuplicateDashboard, usePinDashboard, useSaveDashboard } from "../use-dashboards";
+import { roleOf } from "../types";
 import type { Dashboard } from "../types";
+import { ago } from "./data-status";
+import { ShareDialog } from "./share-dialog";
 
 type Ownership = "all" | "owned" | "shared" | "pinned";
 type Sort = "updated_desc" | "updated_asc" | "name_asc";
-type PreviewKind = "line" | "bar" | "area" | "donut";
-
-interface DashboardPreview {
-  id: string;
-  name: string;
-  description: string;
-  owner: string;
-  ownership: "owned" | "shared";
-  updated: string;
-  updatedRank: number;
-  widgets: number;
-  pinned: boolean;
-  preview: PreviewKind;
-  series: number[];
-  kpi: { label: string; value: string; delta: string; positive: boolean };
-}
-
-const dashboardPreviews: DashboardPreview[] = [
-  { id: "revenue-overview", name: "Revenue Overview", description: "Monthly recurring revenue, expansion and churn by segment.", owner: "You", ownership: "owned", updated: "2h ago", updatedRank: 1, widgets: 8, pinned: true, preview: "area", series: [32, 38, 35, 44, 48, 46, 55, 61, 58, 66, 72, 78], kpi: { label: "MRR", value: "$1.24M", delta: "+8.2%", positive: true } },
-  { id: "customer-health", name: "Customer Health", description: "Account health scores, NPS trends and at-risk customers.", owner: "You", ownership: "owned", updated: "1d ago", updatedRank: 2, widgets: 6, pinned: false, preview: "line", series: [62, 64, 61, 66, 63, 68, 70, 67, 71, 73, 72, 75], kpi: { label: "Avg. health", value: "72", delta: "+3 pts", positive: true } },
-  { id: "sales-performance", name: "Sales Performance", description: "Pipeline coverage, win rate and rep quota attainment.", owner: "Alex Morgan", ownership: "shared", updated: "3d ago", updatedRank: 3, widgets: 10, pinned: true, preview: "bar", series: [40, 55, 48, 62, 58, 70, 66, 74], kpi: { label: "Win rate", value: "31.4%", delta: "+2.1%", positive: true } },
-  { id: "marketing-attribution", name: "Marketing Attribution", description: "Channel contribution to pipeline across the funnel.", owner: "Sarah Chen", ownership: "shared", updated: "5d ago", updatedRank: 4, widgets: 7, pinned: false, preview: "donut", series: [42, 26, 18, 14], kpi: { label: "Sourced pipeline", value: "$3.8M", delta: "-4.6%", positive: false } },
-  { id: "executive-summary", name: "Executive Summary", description: "Company-level KPIs for the weekly leadership review.", owner: "You", ownership: "owned", updated: "6d ago", updatedRank: 5, widgets: 12, pinned: false, preview: "line", series: [50, 52, 55, 53, 58, 60, 59, 64, 66, 65, 69, 71], kpi: { label: "ARR", value: "$14.9M", delta: "+12%", positive: true } },
-  { id: "product-adoption", name: "Product Adoption", description: "Feature activation, weekly active users and retention cohorts.", owner: "You", ownership: "owned", updated: "1w ago", updatedRank: 6, widgets: 9, pinned: false, preview: "bar", series: [22, 30, 34, 41, 39, 47, 52, 58], kpi: { label: "WAU", value: "18.2K", delta: "+5.4%", positive: true } },
-  { id: "support-operations", name: "Support Operations", description: "Ticket volume, first response time and resolution SLAs.", owner: "Priya Nair", ownership: "shared", updated: "1w ago", updatedRank: 7, widgets: 5, pinned: false, preview: "area", series: [70, 64, 68, 60, 57, 59, 52, 49, 51, 46, 44, 41], kpi: { label: "First response", value: "1.8h", delta: "-22%", positive: true } },
-  { id: "finance-forecast", name: "Finance Forecast", description: "Cash runway, burn multiple and quarterly plan versus actuals.", owner: "You", ownership: "owned", updated: "2w ago", updatedRank: 8, widgets: 6, pinned: false, preview: "line", series: [80, 77, 75, 74, 70, 68, 67, 63, 61, 60, 57, 55], kpi: { label: "Runway", value: "26 mo", delta: "-1 mo", positive: false } },
-  { id: "inventory-supply", name: "Inventory & Supply", description: "Stock levels, reorder alerts and supplier lead times.", owner: "Daniel Ortiz", ownership: "shared", updated: "3w ago", updatedRank: 9, widgets: 8, pinned: false, preview: "donut", series: [48, 30, 22], kpi: { label: "In stock", value: "94.1%", delta: "+0.8%", positive: true } },
-];
+type PreviewKind = NonNullable<NonNullable<Dashboard["preview"]>["chart"]>["kind"];
 
 const ownershipOptions: Array<{ value: Ownership; label: string }> = [
   { value: "all", label: "All" },
@@ -147,37 +125,59 @@ function PreviewChart({ kind, series }: { kind: PreviewKind; series: number[] })
   );
 }
 
-function DashboardCard({ dashboard, onTogglePin }: { dashboard: DashboardPreview; onTogglePin: (id: string) => void }) {
+function Menu({ dashboard, onRename, onShare, onDelete, onDuplicate }: { dashboard: Dashboard; onRename: () => void; onShare: () => void; onDelete: () => void; onDuplicate: () => void }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const role = roleOf(dashboard);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent ? event.key === "Escape" : !box.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", close); };
+  }, [open]);
+  const item = "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-raised focus-visible:bg-raised focus-visible:outline-none";
+  const run = (action: () => void) => () => { setOpen(false); action(); };
   return (
-    <article
-      aria-label={dashboard.name}
-      className="group flex flex-col overflow-hidden rounded-lg border bg-surface/40 transition-colors hover:border-border-strong hover:bg-surface/70"
-    >
-      <div className="relative border-b bg-background/60 px-4 pb-3 pt-3.5">
+    <div ref={box} className="relative -mr-1.5 -mt-0.5 shrink-0">
+      <button type="button" aria-label={`Actions for ${dashboard.name}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}
+        className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-raised hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+        <MoreHorizontal className="size-4" />
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 top-8 z-20 w-44 rounded-md border bg-popover p-1 shadow-lg">
+          <Link role="menuitem" href={`/dashboards/${dashboard.id}`} className={item}><ExternalLink className="size-3.5" /> Open</Link>
+          {role !== "viewer" && <button type="button" role="menuitem" onClick={run(onRename)} className={item}><Pencil className="size-3.5" /> Rename</button>}
+          <button type="button" role="menuitem" onClick={run(onDuplicate)} className={item}><Copy className="size-3.5" /> Duplicate</button>
+          {role === "owner" && <button type="button" role="menuitem" onClick={run(onShare)} className={item}><Share2 className="size-3.5" /> Share…</button>}
+          {role === "owner" && <button type="button" role="menuitem" onClick={run(onDelete)} className={cn(item, "text-destructive")}><Trash2 className="size-3.5" /> Delete</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DashboardCard({ dashboard, onTogglePin, onRename, onShare, onDelete, onDuplicate }: { dashboard: Dashboard; onTogglePin: (dashboard: Dashboard) => void; onRename: (dashboard: Dashboard) => void; onShare: (dashboard: Dashboard) => void; onDelete: (dashboard: Dashboard) => void; onDuplicate: (dashboard: Dashboard) => void }) {
+  const { kpi, chart } = dashboard.preview ?? { kpi: { label: "Widgets", value: String(dashboard.widgets.length) }, chart: null };
+  return (
+    <article aria-label={dashboard.name} className="group flex flex-col rounded-lg border bg-surface/40 transition-colors hover:border-border-strong hover:bg-surface/70">
+      <Link href={`/dashboards/${dashboard.id}`} aria-label={`Open ${dashboard.name}`} className="relative block overflow-hidden rounded-t-lg border-b bg-background/60 px-4 pb-3 pt-3.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{dashboard.kpi.label}</p>
-            <p className="mt-0.5 text-lg font-semibold tracking-tight text-foreground">{dashboard.kpi.value}</p>
+          <div className="min-w-0">
+            <p className="truncate text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{kpi.label}</p>
+            <p className="mt-0.5 text-lg font-semibold tracking-tight text-foreground">{kpi.value}</p>
           </div>
-          <span
-            className={cn(
-              "mt-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
-              dashboard.kpi.positive ? "text-sage" : "text-destructive"
-            )}
-            style={{
-              background: `color-mix(in srgb, ${dashboard.kpi.positive ? "var(--sage)" : "var(--destructive)"} 12%, transparent)`,
-            }}
-          >
-            {dashboard.kpi.delta}
-          </span>
+          <span className="mt-0.5 shrink-0 rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground">{dashboard.status === "published" ? "Published" : "Draft"}</span>
         </div>
         <div className="mt-3 h-[72px]">
-          <PreviewChart kind={dashboard.preview} series={dashboard.series} />
+          {chart ? <PreviewChart kind={chart.kind} series={chart.series} /> : <p className="grid h-full place-items-center rounded border border-dashed text-[11px] text-muted-foreground">No chart yet</p>}
         </div>
-      </div>
+      </Link>
 
       <div className="flex flex-1 flex-col px-4 pb-3.5 pt-3">
-        <div className="flex items-start gap-2">
+        <div className="flex items-start gap-1">
           <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground" title={dashboard.name}>
             <Link href={`/dashboards/${dashboard.id}`} className="hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">{dashboard.name}</Link>
           </h2>
@@ -186,86 +186,52 @@ function DashboardCard({ dashboard, onTogglePin }: { dashboard: DashboardPreview
             aria-pressed={dashboard.pinned}
             aria-label={dashboard.pinned ? `Unpin ${dashboard.name}` : `Pin ${dashboard.name}`}
             title={dashboard.pinned ? "Unpin" : "Pin"}
-            onClick={() => onTogglePin(dashboard.id)}
+            onClick={() => onTogglePin(dashboard)}
             className={cn(
-              "-mr-1 -mt-0.5 grid size-7 shrink-0 place-items-center rounded-md transition-colors hover:bg-raised focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              "-mt-0.5 grid size-7 shrink-0 place-items-center rounded-md transition-colors hover:bg-raised focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
               dashboard.pinned ? "text-foreground" : "text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
             )}
           >
             <Pin className={cn("size-3.5", dashboard.pinned && "fill-foreground")} />
           </button>
-          <button
-            type="button"
-            disabled
-            title="Dashboard actions are planned for a future release"
-            aria-label={`Actions for ${dashboard.name}`}
-            className="-mr-1.5 -mt-0.5 grid size-7 shrink-0 cursor-not-allowed place-items-center rounded-md text-muted-foreground opacity-60"
-          >
-            <MoreHorizontal className="size-4" />
-          </button>
+          <Menu dashboard={dashboard} onRename={() => onRename(dashboard)} onShare={() => onShare(dashboard)} onDelete={() => onDelete(dashboard)} onDuplicate={() => onDuplicate(dashboard)} />
         </div>
-        <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{dashboard.description}</p>
+        <p className="mt-1 line-clamp-2 min-h-10 text-xs leading-5 text-muted-foreground">{dashboard.description || "No description"}</p>
 
         <div className="mt-auto flex items-center gap-2 pt-3.5 text-[11px] text-muted-foreground">
-          <span
-            aria-hidden="true"
-            className="grid size-5 shrink-0 place-items-center rounded-full border bg-raised text-[9px] font-semibold text-foreground"
-          >
-            {initials(dashboard.owner)}
-          </span>
+          <span aria-hidden="true" className="grid size-5 shrink-0 place-items-center rounded-full border bg-raised text-[9px] font-semibold text-foreground">{initials(dashboard.owner)}</span>
           <span className="truncate">{dashboard.owner}</span>
           {dashboard.ownership === "shared" && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-px text-[10px]">
-              <Users className="size-2.5" />
-              Shared
-            </span>
+            <span className="inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-px text-[10px]"><Users className="size-2.5" /> Shared</span>
           )}
-          <span className="ml-auto shrink-0 tabular-nums">
-            {dashboard.widgets} widgets · {dashboard.updated}
-          </span>
+          <span className="ml-auto shrink-0 tabular-nums">{dashboard.widgets.length} widgets · {ago(new Date(dashboard.updated_at).getTime(), Date.now())}</span>
         </div>
       </div>
     </article>
   );
 }
 
-function fromStored(item: Dashboard): DashboardPreview {
-  const minutes = Math.max(1, Math.round((Date.now() - new Date(item.updated_at).getTime()) / 60_000));
-  const updated = minutes < 60 ? `${minutes}m ago` : minutes < 1440 ? `${Math.round(minutes / 60)}h ago` : `${Math.round(minutes / 1440)}d ago`;
-  return {
-    id: item.id, name: item.name, description: item.description || "Custom dashboard", owner: item.owner, ownership: item.ownership,
-    updated, updatedRank: 0, widgets: item.widgets.length, pinned: item.pinned, preview: "bar",
-    series: [22, 34, 28, 44, 38, 52, 47, 60],
-    kpi: { label: "Widgets", value: String(item.widgets.length), delta: item.status === "published" ? "Published" : "Draft", positive: item.status === "published" },
-  };
-}
-
 export function DashboardsPage() {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [ownership, setOwnership] = useState<Ownership>("all");
   const [sort, setSort] = useState<Sort>("updated_desc");
-  const [pinnedIds, setPinnedIds] = useState(() => new Set(dashboardPreviews.filter((item) => item.pinned).map((item) => item.id)));
+  const list = useDashboards();
+  const pin = usePinDashboard();
+  const save = useSaveDashboard();
+  const duplicate = useDuplicateDashboard();
+  const remove = useDeleteDashboard();
+  const [renaming, setRenaming] = useState<Dashboard | null>(null);
+  const [newName, setNewName] = useState("");
+  const [sharing, setSharing] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<Dashboard | null>(null);
+  const all = useMemo(() => list.data ?? [], [list.data]);
+  const shareTarget = all.find((item) => item.id === sharing) ?? null;
 
-  const togglePin = (id: string) =>
-    setPinnedIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-
-  const [created, setCreated] = useState<DashboardPreview[]>([]);
-  useEffect(() => {
-    let active = true;
-    void listDashboards().then((items) => {
-      if (!active) return;
-      const known = new Set(dashboardPreviews.map((item) => item.id));
-      setCreated(items.filter((item) => !known.has(item.id)).map(fromStored));
-    });
-    return () => { active = false; };
-  }, []);
-
-  const all = useMemo(() => [...created, ...dashboardPreviews].map((item) => ({ ...item, pinned: pinnedIds.has(item.id) || item.pinned })), [created, pinnedIds]);
+  const rename = () => {
+    if (!renaming || !newName.trim()) return;
+    save.mutate({ ...renaming, name: newName }, { onSuccess: () => setRenaming(null) });
+  };
 
   const counts = useMemo<Record<Ownership, number>>(
     () => ({
@@ -291,7 +257,7 @@ export function DashboardsPage() {
       .sort((left, right) => {
         if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
         if (sort === "name_asc") return left.name.localeCompare(right.name);
-        return sort === "updated_asc" ? right.updatedRank - left.updatedRank : left.updatedRank - right.updatedRank;
+        return sort === "updated_asc" ? left.updated_at.localeCompare(right.updated_at) : right.updated_at.localeCompare(left.updated_at);
       });
   }, [all, ownership, search, sort]);
 
@@ -303,7 +269,6 @@ export function DashboardsPage() {
         <div>
           <div className="flex items-center gap-2.5">
             <h1 className="text-xl font-semibold tracking-tight">Dashboards</h1>
-            <span className="rounded border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-muted-foreground">Preview</span>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">Monitor key metrics, custom charts and analytics views.</p>
         </div>
@@ -375,26 +340,75 @@ export function DashboardsPage() {
       {dashboards.length > 0 ? (
         <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {dashboards.map((dashboard) => (
-            <DashboardCard key={dashboard.id} dashboard={dashboard} onTogglePin={togglePin} />
+            <DashboardCard
+              key={dashboard.id}
+              dashboard={dashboard}
+              onTogglePin={(item) => pin.mutate({ id: item.id, pinned: !item.pinned })}
+              onRename={(item) => { setRenaming(item); setNewName(item.name); }}
+              onShare={(item) => setSharing(item.id)}
+              onDelete={setDeleting}
+              onDuplicate={(item) => duplicate.mutate(item, { onSuccess: (copy) => router.push(`/dashboards/${copy.id}`) })}
+            />
           ))}
         </div>
-      ) : (
+      ) : list.isLoading ? (
+        <p className="mt-6 text-sm text-muted-foreground">Loading dashboards…</p>
+      ) : list.isError ? (
+        <div className="mt-3 rounded-lg border border-dashed px-6 py-16 text-center">
+          <p className="text-sm font-medium">Dashboards could not be loaded</p>
+          <p className="mt-1 text-xs text-muted-foreground">Check that the backend is running, then try again.</p>
+          <Button type="button" variant="ghost" className="mt-4" onClick={() => void list.refetch()}>Try again</Button>
+        </div>
+      ) : isFiltered ? (
         <div className="mt-3 rounded-lg border border-dashed px-6 py-16 text-center">
           <LayoutDashboard className="mx-auto size-7 text-muted-foreground" strokeWidth={1.5} />
           <p className="mt-3 text-sm font-medium">No matching dashboards</p>
           <p className="mt-1 text-xs text-muted-foreground">Try adjusting your search or filters.</p>
-          <Button
-            type="button"
-            variant="ghost"
-            className="mt-4"
-            onClick={() => {
-              setSearch("");
-              setOwnership("all");
-            }}
-          >
-            Clear filters
-          </Button>
+          <Button type="button" variant="ghost" className="mt-4" onClick={() => { setSearch(""); setOwnership("all"); }}>Clear filters</Button>
         </div>
+      ) : (
+        <div className="mt-3 rounded-lg border border-dashed px-6 py-16 text-center">
+          <LayoutDashboard className="mx-auto size-7 text-muted-foreground" strokeWidth={1.5} />
+          <p className="mt-3 text-sm font-medium">No dashboards yet</p>
+          <p className="mt-1 text-xs text-muted-foreground">Pick a dataset and describe what you want to see, or build one chart by chart.</p>
+          <Button asChild className="mt-4"><Link href="/dashboards/new"><Plus /> New Dashboard</Link></Button>
+        </div>
+      )}
+
+      <Dialog open={Boolean(renaming)} onOpenChange={(open) => !open && setRenaming(null)}>
+        <DialogContent className="max-w-sm p-5">
+          <DialogTitle className="text-sm font-semibold">Rename dashboard</DialogTitle>
+          <DialogDescription className="sr-only">Give the dashboard a new name.</DialogDescription>
+          <form className="mt-3 space-y-3" onSubmit={(event) => { event.preventDefault(); rename(); }}>
+            <input aria-label="Dashboard name" autoFocus maxLength={160} value={newName} onChange={(event) => setNewName(event.target.value)} className="h-9 w-full rounded-md border bg-surface px-3 text-sm outline-none focus:border-border-strong" />
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setRenaming(null)}>Cancel</Button>
+              <Button type="submit" disabled={!newName.trim() || save.isPending}>Save</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(deleting)} onOpenChange={(open) => !open && setDeleting(null)}>
+        <DialogContent className="max-w-sm p-5">
+          <DialogTitle className="text-sm font-semibold">Delete this dashboard?</DialogTitle>
+          <DialogDescription className="mt-1 text-xs text-muted-foreground">“{deleting?.name}” will be removed for everyone it is shared with. The data files stay in your Library.</DialogDescription>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setDeleting(null)}>Cancel</Button>
+            <Button type="button" disabled={remove.isPending} onClick={() => deleting && remove.mutate(deleting.id, { onSuccess: () => setDeleting(null) })}>Delete</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {shareTarget && (
+        <ShareDialog
+          open
+          onOpenChange={(open) => !open && setSharing(null)}
+          status={shareTarget.status}
+          shares={shareTarget.shares ?? []}
+          saving={save.isPending}
+          onChange={(next) => save.mutate({ ...shareTarget, status: next.status, shares: next.shares })}
+        />
       )}
     </section>
   );

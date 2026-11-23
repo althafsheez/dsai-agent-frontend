@@ -642,10 +642,12 @@ export interface DashboardRecordDto {
   id: string; name: string; description: string; status: "draft" | "published"; pinned: boolean;
   slicers: string[]; dataset_ids: string[]; widgets: unknown[]; owner: string; ownership: "owned" | "shared"; created_at: string; updated_at: string;
   role: "owner" | "editor" | "viewer"; refresh_minutes: number;
+  /** The first KPI and a small version of the first chart, computed by the backend when the dashboard is saved. */
+  preview?: { kpi: { label: string; value: string }; chart: { kind: "bar" | "line" | "area" | "donut"; series: number[]; labels: string[] } | null };
   /** Only sent to the owner. */
   shares?: DashboardShareDto[];
 }
-export type DashboardSaveBody = Pick<DashboardRecordDto, "name" | "description" | "status" | "pinned" | "slicers" | "dataset_ids" | "widgets"> & { id?: string; refresh_minutes?: number; shares?: DashboardShareDto[] };
+export type DashboardSaveBody = Pick<DashboardRecordDto, "name" | "description" | "status" | "slicers" | "dataset_ids" | "widgets"> & { pinned?: boolean; id?: string; refresh_minutes?: number; shares?: DashboardShareDto[] };
 
 export interface DashboardPersonDto { id: string; name: string; initials: string }
 export async function listDashboardPeople(): Promise<DashboardPersonDto[]> {
@@ -664,6 +666,9 @@ export function getDashboardRecord(id: string): Promise<DashboardRecordDto> {
 }
 export function saveDashboardRecord(body: DashboardSaveBody): Promise<DashboardRecordDto> {
   return requestJson("/dashboards", { method: "PUT", body: JSON.stringify(body) });
+}
+export function pinDashboardRecord(id: string, pinned: boolean): Promise<DashboardRecordDto> {
+  return requestJson(`/dashboards/${encodeURIComponent(id)}/pin`, { method: "PUT", body: JSON.stringify({ pinned }) });
 }
 export async function deleteDashboardRecord(id: string): Promise<void> {
   const response = await fetch(`${API_ROOT}/dashboards/${encodeURIComponent(id)}`, { method: "DELETE", headers: requestHeaders() });
