@@ -637,13 +637,15 @@ export function getDatasetRows(resourceId: string, limit = 6000): Promise<Datase
   return requestJson(`/datasets/${encodeURIComponent(resourceId)}/rows?limit=${limit}`);
 }
 
+export interface PreviewChartDto { kind: "bar" | "line" | "area" | "donut"; title: string; series: number[]; labels: string[] }
+export interface DashboardPreviewDto { kpis: Array<{ label: string; value: string }>; charts: PreviewChartDto[] }
 export interface DashboardShareDto { user_id: string; role: "viewer" | "editor"; name?: string }
 export interface DashboardRecordDto {
   id: string; name: string; description: string; status: "draft" | "published"; pinned: boolean;
   slicers: string[]; dataset_ids: string[]; widgets: unknown[]; owner: string; ownership: "owned" | "shared"; created_at: string; updated_at: string;
   role: "owner" | "editor" | "viewer"; refresh_minutes: number;
   /** The first KPI and a small version of the first chart, computed by the backend when the dashboard is saved. */
-  preview?: { kpi: { label: string; value: string }; chart: { kind: "bar" | "line" | "area" | "donut"; series: number[]; labels: string[] } | null };
+  preview?: DashboardPreviewDto;
   /** Only sent to the owner. */
   shares?: DashboardShareDto[];
 }

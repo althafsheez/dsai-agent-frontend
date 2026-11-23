@@ -1,3 +1,4 @@
+import type { DashboardPreviewDto } from "@/lib/api";
 export type WidgetType = "kpi" | "bar" | "line" | "area" | "pie" | "table";
 /** Active filters: column name to the allowed values (slicers and chart clicks both write here). */
 export type Filters = Record<string, string[]>;
@@ -28,7 +29,7 @@ export interface Dashboard {
   /** Pins are personal: this is whether the signed-in user pinned it. */
   pinned: boolean;
   /** The first KPI and a small version of the first chart, for the listing card. */
-  preview?: { kpi: { label: string; value: string }; chart: { kind: "bar" | "line" | "area" | "donut"; series: number[]; labels: string[] } | null };
+  preview?: DashboardPreviewDto;
   /** What the signed-in user may do. Falls back to the ownership when missing. */
   role?: "owner" | "editor" | "viewer";
   /** Minutes between automatic data refreshes while the dashboard is open; 0 = manual. */

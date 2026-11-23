@@ -10,7 +10,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 const record = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
   id, name, description: `${name} description`, status: "published", pinned: false, slicers: [], dataset_ids: [], widgets: [{ id: "w" }],
   owner: "You", ownership: "owned", role: "owner", refresh_minutes: 0, shares: [], created_at: "2026-11-01T00:00:00Z", updated_at: "2026-11-02T00:00:00Z",
-  preview: { kpi: { label: "Revenue", value: "36" }, chart: { kind: "bar", series: [20, 15, 1], labels: ["S", "N", "E"] } }, ...extra,
+  preview: { kpis: [{ label: "Revenue", value: "36" }], charts: [{ kind: "bar", title: "By region", series: [20, 15, 1], labels: ["S", "N", "E"] }, { kind: "line", title: "Trend", series: [1, 3, 2], labels: ["a", "b", "c"] }] }, ...extra,
 });
 
 const api = vi.hoisted(() => ({
@@ -37,7 +37,7 @@ describe("dashboards page", () => {
     vi.clearAllMocks();
     api.rows = [
       record("a", "Revenue Overview", { pinned: true }),
-      record("b", "Sales Performance", { owner: "Alex", ownership: "shared", role: "viewer", updated_at: "2026-11-03T00:00:00Z", preview: { kpi: { label: "Widgets", value: "1" }, chart: null } }),
+      record("b", "Sales Performance", { owner: "Alex", ownership: "shared", role: "viewer", updated_at: "2026-11-03T00:00:00Z", preview: { kpis: [{ label: "Widgets", value: "1" }], charts: [] } }),
       record("c", "Customer Health", { status: "draft", updated_at: "2026-11-04T00:00:00Z" }),
     ];
     api.pin.mockImplementation(async (id: string, pinned: boolean) => ({ ...api.rows.find((row) => row.id === id), pinned }));
@@ -49,6 +49,9 @@ describe("dashboards page", () => {
     expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual(["Revenue Overview", "Customer Health", "Sales Performance"]);
     expect(within(cards[0]).getByText("Revenue")).toBeVisible();
     expect(within(cards[0]).getByText("36")).toBeVisible();
+    expect(within(cards[0]).getByRole("button", { name: "S: 20" })).toBeVisible();
+    await userEvent.click(within(cards[0]).getByRole("button", { name: "line" }));
+    expect(within(cards[0]).getByRole("button", { name: "b: 3" })).toBeVisible();
     expect(within(cards[2]).getByText("No chart yet")).toBeVisible();
     expect(screen.getByText("3 dashboards")).toBeVisible();
   });
@@ -68,13 +71,16 @@ describe("dashboards page", () => {
     expect(screen.getAllByRole("article")).toHaveLength(3);
   });
 
-  it("pins and unpins through the backend", async () => {
+  it("pins and unpins from the card menu, with no separate pin button", async () => {
     const user = userEvent.setup();
     renderPage();
-    await user.click(await screen.findByRole("button", { name: "Pin Customer Health" }));
+    await user.click(await screen.findByRole("button", { name: "Actions for Customer Health" }));
+    await user.click(screen.getByRole("menuitem", { name: "Pin" }));
     expect(api.pin).toHaveBeenCalledWith("c", true);
-    await user.click(screen.getByRole("button", { name: "Unpin Revenue Overview" }));
+    await user.click(screen.getByRole("button", { name: "Actions for Revenue Overview" }));
+    await user.click(screen.getByRole("menuitem", { name: "Unpin" }));
     expect(api.pin).toHaveBeenCalledWith("a", false);
+    expect(screen.queryByRole("button", { name: /^(Pin|Unpin) / })).not.toBeInTheDocument();
   });
 
   it("renames, duplicates and deletes from the menu, and hides owner actions from viewers", async () => {

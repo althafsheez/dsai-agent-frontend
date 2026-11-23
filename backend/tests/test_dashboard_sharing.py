@@ -209,11 +209,11 @@ async def test_listing_preview_is_built_from_the_data_and_pins_are_personal(clie
         {"id": "b", "type": "bar", "title": "By region", "dataset_id": dataset_id, "x": "region", "y": "revenue", "agg": "sum", "span": 2},
     ]
     saved = (await put(client, OWNER, widgets=widgets, dataset_ids=[dataset_id], status="published")).json()
-    assert saved["preview"]["kpi"] == {"label": "Revenue", "value": "36"}
-    assert saved["preview"]["chart"] == {"kind": "bar", "series": [20.0, 15.0, 1.0], "labels": ["S", "N", "E"]}
+    assert saved["preview"]["kpis"] == [{"label": "Revenue", "value": "36"}]
+    assert saved["preview"]["charts"] == [{"kind": "bar", "title": "By region", "series": [20.0, 15.0, 1.0], "labels": ["S", "N", "E"]}]
 
     empty = (await client.put("/api/dashboards", headers=OWNER, json={"id": "db-empty", "name": "Empty"})).json()
-    assert empty["preview"] == {"kpi": {"label": "Widgets", "value": "0"}, "chart": None}
+    assert empty["preview"] == {"kpis": [{"label": "Widgets", "value": "0"}], "charts": []}
 
     pinned = await client.put("/api/dashboards/db-share/pin", headers=OTHER, json={"pinned": True})
     assert pinned.status_code == 200 and pinned.json()["pinned"] is True
