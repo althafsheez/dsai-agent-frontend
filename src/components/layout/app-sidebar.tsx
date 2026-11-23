@@ -11,6 +11,7 @@ import { SearchDialog } from "./search-dialog";
 import { SidebarSection } from "./sidebar-section";
 import { SidebarNavItem } from "./sidebar-nav-item";
 import { SidebarUsageStats } from "./sidebar-usage-stats";
+import { SidebarPinnedList } from "@/features/pinning";
 import { navigation } from "./navigation";
 import { useAuth } from "@/features/auth";
 
