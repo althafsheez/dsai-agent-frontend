@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+
+os.environ.setdefault("DSAI_IMPORT_SHARED_DATA", "false")
 
 from app.config import Settings
 from app.main import create_app

@@ -7,7 +7,10 @@ import { useState } from "react";
 import { ArrowLeft, HardDrive, LoaderCircle, Save, Sparkles, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { suggestWidgets } from "../logic/aggregate";
-import { useDashboardAi, useDashboardDatasets, useSaveDashboard } from "../use-dashboards";
+import { useDashboardAi, useHydratedDatasets, useSaveDashboard } from "../use-dashboards";
+import { packedSpans } from "../logic/layout";
+import type { Filters } from "../types";
+import { FilterBar, toggleFilter } from "./filter-bar";
 import { AiNotes } from "./ai-notes";
 import type { DashboardWidget } from "../types";
 import { AddWidget } from "./add-widget";
@@ -20,12 +23,14 @@ const field = "h-9 w-full rounded-md border bg-surface px-2.5 text-xs outline-no
 
 export function DashboardBuilderPage() {
   const router = useRouter();
-  const datasetsQuery = useDashboardDatasets();
   const save = useSaveDashboard();
-  const datasets = datasetsQuery.data ?? [];
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
+  const hydrated = useHydratedDatasets(selected);
+  const datasets = hydrated.datasets;
+  const [slicers, setSlicers] = useState<string[]>([]);
+  const [filters, setFilters] = useState<Filters>({});
   const [widgets, setWidgets] = useState<DashboardWidget[]>([]);
   const [driveOpen, setDriveOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
@@ -45,6 +50,7 @@ export function DashboardBuilderPage() {
   }
 
   const chosen = datasets.filter((dataset) => selected.includes(dataset.id));
+  const spans = packedSpans(widgets);
   const canSave = name.trim().length > 0 && widgets.length > 0 && !save.isPending;
 
   async function generate() {
@@ -65,7 +71,7 @@ export function DashboardBuilderPage() {
   }
 
   async function submit() {
-    const saved = await save.mutateAsync({ name, description, dataset_ids: selected, widgets });
+    const saved = await save.mutateAsync({ name, description, dataset_ids: selected, widgets, slicers });
     router.push(`/dashboards/${saved.id}`);
   }
 
@@ -101,19 +107,21 @@ export function DashboardBuilderPage() {
         <h2 className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Datasets</h2>
         <Button type="button" variant="outline" size="sm" onClick={() => setDriveOpen(true)}><HardDrive />Import from Google Drive</Button>
       </div>
-      <DriveBrowserDialog open={driveOpen} onOpenChange={setDriveOpen} onReauth={() => router.push("/connectors")} onImported={() => void datasetsQuery.refetch()} />
-      <DatasetPicker datasets={datasets} selected={selected} onToggle={toggle} loading={datasetsQuery.isLoading} />
+      <DriveBrowserDialog open={driveOpen} onOpenChange={setDriveOpen} onReauth={() => router.push("/connectors")} onImported={() => void hydrated.refetch()} />
+      <DatasetPicker datasets={datasets} selected={selected} onToggle={toggle} loading={hydrated.loading} />
 
       <div className="mb-2 mt-6 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Preview {widgets.length ? <span className="inline-flex items-center gap-1 normal-case tracking-normal"><Sparkles className="size-3" />Charts use the dataset’s first preview rows; row counts are the full file</span> : null}</h2>
+        <h2 className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Preview {widgets.length ? <span className="inline-flex items-center gap-1 normal-case tracking-normal"><Sparkles className="size-3" />Charts use up to 6,000 rows per dataset</span> : null}</h2>
         {widgets.length ? <Button type="button" variant="outline" size="sm" onClick={() => void checkAndFix().catch(() => undefined)} disabled={!ai.ready || ai.review.isPending}>{ai.review.isPending ? <LoaderCircle className="animate-spin" /> : <Wand2 />}{ai.review.isPending ? "Checking…" : "AI check & fix"}</Button> : null}
       </div>
       <AiNotes notes={notes} title="AI notes" />
+      {widgets.length ? <div className="mt-3"><FilterBar datasets={chosen} slicers={slicers} onSlicersChange={setSlicers} filters={filters} onFiltersChange={setFilters} /></div> : null}
+      {hydrated.loadingRows ? <p className="mt-2 text-[11px] text-muted-foreground">Loading full dataset rows…</p> : hydrated.truncated ? <p className="mt-2 text-[11px] text-muted-foreground">Charts use the first 6,000 rows of large datasets.</p> : null}
       {ai.review.isError ? <p role="alert" className="mt-2 text-xs text-red-300">The AI check failed. Try again.</p> : null}
       {widgets.length ? (
         <div className="grid grid-flow-dense gap-3 md:grid-cols-3">
           {widgets.map((widget) => (
-            <WidgetCard key={widget.id} widget={widget} dataset={chosen.find((dataset) => dataset.id === widget.dataset_id)} editable onChange={(next) => setWidgets(widgets.map((item) => (item.id === next.id ? next : item)))} onRemove={() => setWidgets(widgets.filter((item) => item.id !== widget.id))} />
+            <WidgetCard key={widget.id} widget={widget} span={spans[widget.id]} filters={filters} onSelect={(column, value) => setFilters(toggleFilter(filters, column, value))} dataset={chosen.find((dataset) => dataset.id === widget.dataset_id)} editable onChange={(next) => setWidgets(widgets.map((item) => (item.id === next.id ? next : item)))} onRemove={() => setWidgets(widgets.filter((item) => item.id !== widget.id))} />
           ))}
         </div>
       ) : <p className="rounded-lg border border-dashed px-6 py-10 text-center text-xs text-muted-foreground">Select a dataset above to see charts here.</p>}

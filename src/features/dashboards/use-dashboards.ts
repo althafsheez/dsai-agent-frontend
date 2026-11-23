@@ -1,7 +1,7 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { generateDashboardWithAi, getLibrary, getModels, reviewDashboardWithAi } from "@/lib/api";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { generateDashboardWithAi, getDatasetRows, getLibrary, getModels, reviewDashboardWithAi } from "@/lib/api";
 import type { DashboardAiResult } from "@/lib/api";
 import { deleteDashboard, getDashboard, listDashboards, saveDashboard } from "./data/dashboard-store";
 import type { DashboardWidget, DatasetLite } from "./types";
@@ -58,4 +58,23 @@ export function useDashboardAi() {
     },
   });
   return { ready: Boolean(modelId), generate, review };
+}
+
+/** Library datasets, with up to 6,000 real rows loaded for the datasets a dashboard actually uses. */
+export function useHydratedDatasets(usedIds: string[]) {
+  const base = useDashboardDatasets();
+  const rowQueries = useQueries({
+    queries: usedIds.map((id) => ({ queryKey: ["dashboard-rows", id], queryFn: () => getDatasetRows(id), staleTime: 5 * 60_000, retry: false })),
+  });
+  const datasets = (base.data ?? []).map((dataset): DatasetLite => {
+    const loaded = rowQueries[usedIds.indexOf(dataset.id)]?.data;
+    return loaded ? { ...dataset, rows: loaded.rows, row_count: loaded.total_rows } : dataset;
+  });
+  return {
+    datasets,
+    loading: base.isLoading,
+    loadingRows: rowQueries.some((query) => query.isFetching),
+    truncated: rowQueries.some((query) => query.data?.truncated),
+    refetch: base.refetch,
+  };
 }

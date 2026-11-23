@@ -1,7 +1,9 @@
-import { readMockEnvelope, updateMockEnvelope } from "@/lib/mock/mock-store";
+import { ApiError, deleteDashboardRecord, getDashboardRecord, listDashboardRecords, saveDashboardRecord } from "@/lib/api";
+import type { DashboardRecordDto } from "@/lib/api";
 import type { Dashboard } from "../types";
 
-// Demo store: dashboards live in the shared mock envelope until a dashboards API exists.
+// Dashboards are stored by the backend (shared by everyone on the team and part of the shared-data snapshot).
+// The built-in demo dashboards below are fallbacks that appear until someone saves over them.
 const ago = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
 
 function seed(): Dashboard[] {
@@ -21,49 +23,41 @@ function seed(): Dashboard[] {
   ];
 }
 
-function read(): Dashboard[] {
-  const stored = readMockEnvelope().dashboardDemo as Dashboard[] | undefined;
-  if (Array.isArray(stored)) return stored;
-  const seeded = seed();
-  write(seeded);
-  return seeded;
-}
-
-function write(value: Dashboard[]) {
-  try { updateMockEnvelope((current) => ({ ...current, dashboardDemo: value })); } catch { /* storage unavailable: demo works per session */ }
-}
+const fromRecord = (record: DashboardRecordDto): Dashboard => record as unknown as Dashboard;
 
 export async function listDashboards(): Promise<Dashboard[]> {
-  return [...read()].sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+  let stored: Dashboard[] = [];
+  try { stored = (await listDashboardRecords()).map(fromRecord); } catch { /* API unreachable: show the built-in demos only */ }
+  const known = new Set(stored.map((item) => item.id));
+  return [...stored, ...seed().filter((item) => !known.has(item.id))].sort((left, right) => right.updated_at.localeCompare(left.updated_at));
 }
 
 export async function getDashboard(id: string): Promise<Dashboard | null> {
-  return read().find((item) => item.id === id) ?? seed().find((item) => item.id === id) ?? null;
+  try {
+    return fromRecord(await getDashboardRecord(id));
+  } catch (error) {
+    if (error instanceof ApiError && error.status !== 404) throw error;
+    return seed().find((item) => item.id === id) ?? null;
+  }
 }
 
-export type DashboardInput = Pick<Dashboard, "name" | "description" | "dataset_ids" | "widgets"> & { id?: string; status?: Dashboard["status"]; pinned?: boolean };
+export type DashboardInput = Pick<Dashboard, "name" | "description" | "dataset_ids" | "widgets"> & { id?: string; slicers?: string[]; status?: Dashboard["status"]; pinned?: boolean };
 
 export async function saveDashboard(input: DashboardInput): Promise<Dashboard> {
-  const all = read();
-  const existing = input.id ? all.find((item) => item.id === input.id) ?? seed().find((item) => item.id === input.id) : undefined;
-  const now = new Date().toISOString();
-  const saved: Dashboard = {
-    id: existing?.id ?? `db-${Date.now().toString(36)}`,
+  const existing = input.id ? await getDashboard(input.id) : null;
+  const saved = await saveDashboardRecord({
+    id: existing?.id ?? input.id ?? `db-${Date.now().toString(36)}`,
     name: input.name.trim() || "Untitled dashboard",
     description: input.description.trim(),
-    owner: existing?.owner ?? "You",
-    ownership: existing?.ownership ?? "owned",
     status: input.status ?? existing?.status ?? "draft",
     pinned: input.pinned ?? existing?.pinned ?? false,
+    slicers: input.slicers ?? existing?.slicers ?? [],
     dataset_ids: input.dataset_ids,
     widgets: input.widgets,
-    created_at: existing?.created_at ?? now,
-    updated_at: now,
-  };
-  write(all.some((item) => item.id === saved.id) ? all.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...all]);
-  return saved;
+  });
+  return fromRecord(saved);
 }
 
 export async function deleteDashboard(id: string): Promise<void> {
-  write(read().filter((item) => item.id !== id));
+  await deleteDashboardRecord(id);
 }

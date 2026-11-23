@@ -1,0 +1,60 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Load dataset
+df = pd.read_csv('/home/user/inputs/ab717cbe-8289-4965-b36e-85439876624f-heart.csv')
+
+# 1. Summary Statistics
+print("--- OVERALL SUMMARY STATS ---")
+print(df.describe().T)
+
+df_over60 = df[df['age'] > 60]
+print(f"\n--- PATIENTS OVER 60 SUMMARY STATS (n={len(df_over60)}) ---")
+print(df_over60.describe().T)
+
+# 2. Correlations
+print("\n--- CORRELATIONS WITH TARGET (OVER 60) ---")
+print(df_over60.corr()['target'].sort_values(ascending=False))
+
+# 3. Visualizations setup
+sns.set_theme(style="whitegrid")
+df['age_group'] = np.where(df['age'] > 60, 'Over 60', '60 and Under')
+
+# Chart 1: Clinical Metrics Comparison
+fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+metrics = ['trestbps', 'chol', 'thalach', 'oldpeak']
+titles = ['Resting Blood Pressure', 'Serum Cholesterol', 'Max Heart Rate (thalach)', 'ST Depression (oldpeak)']
+for i, (metric, title) in enumerate(zip(metrics, titles)):
+    row, col = i // 2, i % 2
+    sns.boxplot(x='age_group', y=metric, hue='target', data=df, ax=axes[row, col], palette='Set2')
+    axes[row, col].set_title(title, fontsize=12, fontweight='bold')
+plt.suptitle('Clinical Metrics Comparison: Patients Over 60 vs 60 & Under', fontsize=16, fontweight='bold', y=1.02)
+plt.tight_layout()
+plt.savefig('/home/user/outputs/clinical_metrics_by_age.png', dpi=300, bbox_inches='tight')
+plt.close()
+
+# Chart 2: Correlation Heatmap for Over 60
+plt.figure(figsize=(10, 8))
+corr_over60 = df_over60.drop(columns=['age_group'], errors='ignore').corr()
+mask = np.triu(np.ones_like(corr_over60, dtype=bool))
+sns.heatmap(corr_over60, annot=True, fmt='.2f', cmap='coolwarm', vmin=-1, vmax=1, mask=mask, linewidths=0.5)
+plt.title('Correlation Matrix for Patients Over 60 (n=272)', fontsize=14, fontweight='bold', pad=15)
+plt.tight_layout()
+plt.savefig('/home/user/outputs/correlation_over_60.png', dpi=300, bbox_inches='tight')
+plt.close()
+
+# Chart 3: Thalach vs Age Scatter
+plt.figure(figsize=(10, 6))
+sns.scatterplot(x='age', y='thalach', hue='target', style='age_group', data=df, palette=['#1f77b4', '#d62728'], alpha=0.8, s=60)
+plt.axvline(x=60, color='gray', linestyle='--', linewidth=1.5, label='Age 60 Threshold')
+plt.title('Max Heart Rate (thalach) vs. Age by Heart Disease Status', fontsize=14, fontweight='bold', pad=15)
+plt.xlabel('Age', fontsize=12)
+plt.ylabel('Maximum Heart Rate Achieved (thalach)', fontsize=12)
+plt.legend(title='Legend', loc='lower left', bbox_to_anchor=(1, 0.3))
+plt.tight_layout()
+plt.savefig('/home/user/outputs/thalach_vs_age_target.png', dpi=300, fontweight='bold', bbox_inches='tight')
+plt.close()
+
+print("EDA script completed successfully.")

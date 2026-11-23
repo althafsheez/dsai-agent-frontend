@@ -159,7 +159,8 @@ const chatFileExtensions = ".csv,.xls,.xlsx,.parquet,.png,.jpg,.jpeg,.pdf,.txt,.
 
 type ConnectorCategory = "all" | "skills" | "data" | "apps";
 
-const connectorItems = [
+const connectorItems: Array<{ name: string; description: string; category: Exclude<ConnectorCategory, "all">; icon: typeof Database; action?: "drive" }> = [
+  { name: "Google Drive", description: "Import files from your Google Drive", category: "data", icon: HardDrive, action: "drive" },
   { name: "Data Cleaning", description: "Clean, validate, and prepare data for analysis", category: "skills" as const, icon: Sparkles },
   { name: "Data Visualization", description: "Create charts, plots, and interactive visuals", category: "skills" as const, icon: BarChart3 },
   { name: "PostgreSQL", description: "Connect to a PostgreSQL database", category: "data" as const, icon: Database },
@@ -1553,19 +1554,6 @@ export function ChatPage({ chatId }: { chatId: string }) {
                           <span className="min-w-0"><span className="block text-xs font-semibold leading-4">Import from Library</span><span className="hidden text-[10px] leading-4 text-muted-foreground sm:block">Browse saved assets</span></span>
                           <ChevronRight aria-hidden="true" className="ml-auto hidden size-3.5 shrink-0 sm:block" />
                         </button>
-                        <button
-                          type="button"
-                          data-attachment-action
-                          onClick={() => {
-                            setAttachmentMenuOpen(false);
-                            setDriveDialogOpen(true);
-                          }}
-                          className="flex min-w-0 items-center gap-2 rounded-lg border border-border-strong bg-gradient-to-br from-[#2e2a3a] to-[#20272f] p-2 text-left hover:border-slate/70 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ring"
-                        >
-                          <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#d4c8ee] text-[#231a3a] sm:size-9"><HardDrive aria-hidden="true" className="size-4" /></span>
-                          <span className="min-w-0"><span className="block text-xs font-semibold leading-4">Google Drive</span><span className="hidden text-[10px] leading-4 text-muted-foreground sm:block">Import from Drive</span></span>
-                          <ChevronRight aria-hidden="true" className="ml-auto hidden size-3.5 shrink-0 sm:block" />
-                        </button>
                       </div>
                       <div role="tablist" aria-label="Connector categories" className="flex flex-wrap gap-1 border-b pb-1.5">
                         {([["all", "All"], ["skills", "Skills"], ["data", "Data Sources"], ["apps", "Apps & Tools"]] as const).map(([value, label]) => (
@@ -1574,7 +1562,16 @@ export function ChatPage({ chatId }: { chatId: string }) {
                       </div>
                     </div>
                     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 sm:px-3">
-                      {visibleConnectors.map(({ name, description, icon: Icon }) => (
+                      {visibleConnectors.map(({ name, description, icon: Icon, action }) => action === "drive" ? (
+                        <button key={name} type="button" data-attachment-action onClick={() => { setAttachmentMenuOpen(false); setDriveDialogOpen(true); }} className="flex w-full items-center gap-3 border-b px-2 py-2 text-left last:border-b-0 hover:bg-raised sm:px-3">
+                          <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-xs font-medium">{name}</span>
+                            <span className="block truncate text-[11px] text-muted-foreground">{description}</span>
+                          </span>
+                          <span className="shrink-0 rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-0.5 text-[9px] uppercase tracking-wide text-emerald-300">Import</span>
+                        </button>
+                      ) : (
                         <div key={name} aria-disabled="true" className="flex items-center gap-3 border-b px-2 py-2 last:border-b-0 sm:px-3">
                           <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
                           <span className="min-w-0 flex-1">
@@ -1587,7 +1584,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
                       {!visibleConnectors.length ? <p className="px-3 py-4 text-xs text-muted-foreground">No matching connectors.</p> : null}
                     </div>
                     <div className="flex shrink-0 items-center justify-between gap-3 border-t px-2.5 py-2 text-[10px] text-muted-foreground sm:px-3">
-                      <span>Local files are available now. External connectors are coming soon.</span>
+                      <span>Local files and Google Drive are available now. Other connectors are coming soon.</span>
                       <span className="hidden shrink-0 gap-1 lg:flex">
                         <span className="rounded-md border px-1.5 py-0.5"><kbd>↑↓</kbd> to move</span>
                         <span className="rounded-md border px-1.5 py-0.5"><kbd>Enter</kbd> to select</span>
@@ -1735,7 +1732,12 @@ export function ChatPage({ chatId }: { chatId: string }) {
           onOpenChange={setDriveDialogOpen}
           onReauth={() => router.push("/connectors")}
           target={{ scopeType: "chat", scopeId: chatId, label: "this chat" }}
-          onImported={() => void queryClient.invalidateQueries({ queryKey: ["chat", chatId] })}
+          onImported={(result) => {
+            void queryClient.invalidateQueries({ queryKey: ["chat", chatId] });
+            setAttachments((current) => [...current, ...result.imported
+              .filter((item) => !current.some((attachment) => attachment.resourceId === item.resource.id))
+              .map<DraftAttachment>((item) => ({ id: `drive-${item.resource.id}-${crypto.randomUUID()}`, resourceId: item.resource.id, name: item.resource.name, size: 0, previewUrl: null }))]);
+          }}
         />
         <LibraryImportDialog
           open={libraryDialogOpen}

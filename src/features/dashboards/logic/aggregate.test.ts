@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { columnKind, groupedPoints, kpiValue, newWidget, suggestWidgets } from "./aggregate";
+import { applyFilters, columnKind, groupedPoints, kpiValue, newWidget, slicerCandidates, sliceValues, suggestWidgets } from "./aggregate";
 import type { DatasetLite } from "../types";
 
 const dataset: DatasetLite = {
@@ -29,5 +29,26 @@ describe("column kinds from string-typed CSV data", () => {
     expect(columnKind(csv, 1)).toBe("category");
     expect(columnKind(csv, 2)).toBe("number");
     expect(columnKind(csv, 3)).toBe("category");
+  });
+});
+
+const filterData: DatasetLite = {
+  id: "d", name: "d.csv", row_count: 4,
+  columns: [{ name: "segment", data_type: "string" }, { name: "spend", data_type: "string" }],
+  rows: [["SMB", "10"], ["SMB", "20"], ["Ent", "300"], ["Startup", "5"]],
+};
+
+describe("filters and slicers", () => {
+  it("keeps rows matching all filters and updates the row count", () => {
+    const filtered = applyFilters(filterData, { segment: ["SMB", "Startup"] });
+    expect(filtered.rows).toHaveLength(3);
+    expect(filtered.row_count).toBe(3);
+  });
+  it("ignores filters on missing columns and empty selections", () => {
+    expect(applyFilters(filterData, { nope: ["x"], segment: [] })).toBe(filterData);
+  });
+  it("lists slice values by frequency and offers low-cardinality category columns", () => {
+    expect(sliceValues([filterData], "segment")).toEqual(["SMB", "Ent", "Startup"]);
+    expect(slicerCandidates([filterData])).toEqual(["segment"]);
   });
 });

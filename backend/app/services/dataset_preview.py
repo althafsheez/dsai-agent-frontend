@@ -39,3 +39,25 @@ def inspect_dataset(name: str, content: bytes) -> dict[str, Any]:
         "columns": [{"name": name, "data_type": "string"} for name in columns],
         "preview_rows": rows,
     }
+
+
+MAX_DASHBOARD_ROWS = 6_000
+
+
+def read_csv_rows(name: str, content: bytes, limit: int = MAX_DASHBOARD_ROWS) -> dict[str, Any] | None:
+    """Rows for dashboard charts, bounded to `limit`. CSV only; returns None for other formats."""
+    if Path(name).suffix.lower() != ".csv":
+        return None
+    try:
+        reader = csv.reader(io.StringIO(content.decode("utf-8-sig", errors="replace")))
+        header = next(reader, [])
+        columns = [str(column).strip() or f"column_{index + 1}" for index, column in enumerate(header)]
+        rows: list[list[str]] = []
+        total = 0
+        for row in reader:
+            total += 1
+            if len(rows) < limit:
+                rows.append([(cell[:MAX_CELL_CHARS] + "…") if len(cell) > MAX_CELL_CHARS else cell for cell in row[:len(columns)]])
+    except (csv.Error, UnicodeError):
+        return None
+    return {"columns": [{"name": column, "data_type": "string"} for column in columns], "rows": rows, "total_rows": total, "truncated": total > len(rows)}

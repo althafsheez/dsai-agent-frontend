@@ -120,8 +120,12 @@ export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
         )}
       </div>
 
-      <div className="mt-auto border-t border-sidebar-border/40 pt-2.5">
-        <SidebarUsageStats compact={compact} />
+      <div className="group/user relative mt-auto border-t border-sidebar-border/40 pt-2.5">
+        {compact ? <SidebarUsageStats compact /> : (
+          <div className="absolute inset-x-2 bottom-full z-30 hidden pb-1 group-hover/user:block group-focus-within/user:block">
+            <div className="rounded-lg border border-border-strong bg-raised pt-3 shadow-2xl"><SidebarUsageStats /></div>
+          </div>
+        )}
         <div className={compact ? "flex flex-col items-center gap-2 py-2" : "flex items-center gap-2.5 px-3.5 py-2.5"}>
           <Link
             href="/login"

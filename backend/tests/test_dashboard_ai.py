@@ -84,3 +84,22 @@ async def test_generate_retries_once_after_a_provider_failure(client: AsyncClien
     response = await client.post("/api/dashboards/ai/generate", headers=demo_headers, json=body(prompt="Anything at all"))
     assert response.status_code == 200, response.text
     assert attempts["n"] == 2  # failed once, then succeeded
+
+
+async def test_dataset_rows_returns_up_to_the_limit(client: AsyncClient, demo_headers: dict[str, str]) -> None:
+    from conftest import create_chat
+
+    created = await create_chat(client, demo_headers)
+    chat_id = created["chat"]["id"]
+    csv_bytes = ("a,b\n" + "".join(f"{i},{i * 2}\n" for i in range(150))).encode()
+    upload = await client.post(
+        "/api/resources/upload", headers=demo_headers,
+        data={"scope_type": "chat", "scope_id": chat_id, "client_upload_id": "rows-1"},
+        files={"file": ("rows.csv", csv_bytes, "text/csv")})
+    assert upload.status_code in (200, 201), upload.text
+    resource_id = upload.json()["resource"]["id"]
+    full = (await client.get(f"/api/datasets/{resource_id}/rows", headers=demo_headers)).json()
+    assert len(full["rows"]) == 150 and full["total_rows"] == 150 and full["truncated"] is False
+    capped = (await client.get(f"/api/datasets/{resource_id}/rows?limit=100", headers=demo_headers)).json()
+    assert len(capped["rows"]) == 100 and capped["truncated"] is True
+    assert (await client.get(f"/api/datasets/{resource_id}/rows?limit=6001", headers=demo_headers)).status_code == 422

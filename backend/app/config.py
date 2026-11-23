@@ -27,6 +27,9 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
     )
     auto_create_schema: bool = True
+    # A fresh database loads the committed snapshot in shared-data/ so every clone starts with the same history and files.
+    import_shared_data: bool = True
+    shared_data_dir: Path = BACKEND_ROOT.parent / "shared-data"
     gemini_api_key: str | None = None
     gemini_models: str = ""
     default_model_id: str | None = None

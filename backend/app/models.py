@@ -289,3 +289,17 @@ class ConnectorConnection(TimestampMixin, Base):
     access_token_enc: Mapped[str] = mapped_column(Text)
     refresh_token_enc: Mapped[str | None] = mapped_column(Text)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Dashboard(TimestampMixin, Base):
+    __tablename__ = "dashboards"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    slicers: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    dataset_ids: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    widgets: Mapped[list[Any]] = mapped_column(JSON, default=list)

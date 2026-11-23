@@ -603,3 +603,36 @@ export function reviewDashboardWithAi(input: { widgets: DashboardAiWidget[]; dat
     body: JSON.stringify({ widgets: input.widgets, datasets: input.datasets, model_id: input.modelId }),
   });
 }
+
+export interface DatasetRowsDto {
+  name: string;
+  columns: Array<{ name: string; data_type: string }>;
+  rows: Array<Array<string | number | boolean | null>>;
+  total_rows: number;
+  truncated: boolean;
+}
+
+/** Up to 6,000 rows of a CSV dataset, for dashboards. */
+export function getDatasetRows(resourceId: string, limit = 6000): Promise<DatasetRowsDto> {
+  return requestJson(`/datasets/${encodeURIComponent(resourceId)}/rows?limit=${limit}`);
+}
+
+export interface DashboardRecordDto {
+  id: string; name: string; description: string; status: "draft" | "published"; pinned: boolean;
+  slicers: string[]; dataset_ids: string[]; widgets: unknown[]; owner: string; ownership: "owned" | "shared"; created_at: string; updated_at: string;
+}
+export type DashboardSaveBody = Pick<DashboardRecordDto, "name" | "description" | "status" | "pinned" | "slicers" | "dataset_ids" | "widgets"> & { id?: string };
+
+export async function listDashboardRecords(): Promise<DashboardRecordDto[]> {
+  return (await requestJson<{ items: DashboardRecordDto[] }>("/dashboards")).items;
+}
+export function getDashboardRecord(id: string): Promise<DashboardRecordDto> {
+  return requestJson(`/dashboards/${encodeURIComponent(id)}`);
+}
+export function saveDashboardRecord(body: DashboardSaveBody): Promise<DashboardRecordDto> {
+  return requestJson("/dashboards", { method: "PUT", body: JSON.stringify(body) });
+}
+export async function deleteDashboardRecord(id: string): Promise<void> {
+  const response = await fetch(`${API_ROOT}/dashboards/${encodeURIComponent(id)}`, { method: "DELETE", headers: requestHeaders() });
+  if (!response.ok) throw await apiError(response);
+}

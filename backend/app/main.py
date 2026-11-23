@@ -16,6 +16,7 @@ from agentic.tools.defaults import build_tool_registry
 
 from .config import Settings, get_settings
 from .db import make_engine, make_session_factory
+from . import snapshot
 from .migrations import upgrade_schema
 from .errors import APIError, api_error_handler
 from .routes import chats, connectors, dashboards, meta, quick_assistant, resources, runs, workspaces
@@ -56,6 +57,9 @@ def create_app(
         settings.storage_root.mkdir(parents=True, exist_ok=True)
         with session_factory() as session:
             seed_demo_users(session)
+        if settings.import_shared_data and snapshot.is_fresh(engine):
+            snapshot.import_snapshot(engine, settings.storage_root, settings.shared_data_dir)
+        with session_factory() as session:
             reconcile_stale_runs(session)
         yield
         await connector_client.aclose()
@@ -88,6 +92,7 @@ def create_app(
     app.include_router(quick_assistant.router)
     app.include_router(connectors.router)
     app.include_router(dashboards.router)
+    app.include_router(dashboards.store_router)
     return app
 
 

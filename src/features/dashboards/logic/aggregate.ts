@@ -1,4 +1,4 @@
-import type { DashboardWidget, DatasetLite, WidgetType } from "../types";
+import type { DashboardWidget, DatasetLite, Filters, WidgetType } from "../types";
 
 export interface Point { name: string; value: number }
 
@@ -50,7 +50,7 @@ export function groupedPoints(widget: DashboardWidget, dataset: DatasetLite): Po
     groups.set(key, list);
   }
   const points = [...groups].map(([name, values]) => ({ name, value: Math.round(reduce(values.filter(Number.isFinite), widget.agg) * 100) / 100 }));
-  return widget.type === "line" ? points.slice(0, 12) : points.sort((left, right) => right.value - left.value).slice(0, 12);
+  return widget.type === "line" || widget.type === "area" ? points.slice(0, 12) : points.sort((left, right) => right.value - left.value).slice(0, 12);
 }
 
 let counter = 0;
@@ -59,7 +59,7 @@ const widgetId = () => `w-${Date.now().toString(36)}-${(counter++).toString(36)}
 export function newWidget(type: WidgetType, dataset: DatasetLite): DashboardWidget {
   const y = numericColumns(dataset)[0];
   const x = categoryColumns(dataset)[0] ?? dataset.columns[0]?.name;
-  const label = { kpi: "Total", bar: "By", line: "Trend of", pie: "Share of", table: "Rows from" }[type];
+  const label = { kpi: "Total", bar: "By", line: "Trend of", area: "Area of", pie: "Share of", table: "Rows from" }[type];
   const subject = type === "kpi" || !x ? (y ?? dataset.name) : x;
   return { id: widgetId(), type, title: `${label} ${subject}`, dataset_id: dataset.id, x: type === "kpi" || type === "table" ? undefined : x, y, agg: y ? "sum" : "count", span: type === "kpi" ? 1 : type === "table" ? 3 : 2 };
 }
@@ -78,6 +78,47 @@ export function suggestWidgets(datasets: DatasetLite[]): DashboardWidget[] {
     widgets.push(newWidget("table", dataset));
   }
   return widgets;
+}
+
+/** Rows that match every active filter. Filters on columns the dataset lacks are ignored. */
+export function applyFilters(dataset: DatasetLite, filters: Filters): DatasetLite {
+  const active = Object.entries(filters)
+    .map(([column, values]) => ({ index: columnIndex(dataset, column), values: new Set(values) }))
+    .filter((item) => item.index >= 0 && item.values.size > 0);
+  if (!active.length) return dataset;
+  const rows = dataset.rows.filter((row) => active.every((item) => item.values.has(String(row[item.index] ?? "—"))));
+  return { ...dataset, rows, row_count: rows.length };
+}
+
+/** Distinct values of a column across datasets, most frequent first. Null when there are too many to slice on. */
+export function sliceValues(datasets: DatasetLite[], column: string, max = 40): string[] | null {
+  const counts = new Map<string, number>();
+  for (const dataset of datasets) {
+    const index = columnIndex(dataset, column);
+    if (index < 0) continue;
+    for (const row of dataset.rows) {
+      const key = String(row[index] ?? "—");
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+      if (counts.size > max * 4) return null;
+    }
+  }
+  if (counts.size > max) return null;
+  return [...counts].sort((left, right) => right[1] - left[1]).map(([value]) => value);
+}
+
+/** Columns that make sensible slicers: low-cardinality categories present in any dataset. */
+export function slicerCandidates(datasets: DatasetLite[]): string[] {
+  const names = new Set<string>();
+  for (const dataset of datasets) {
+    dataset.columns.forEach((column, index) => {
+      if (columnKind(dataset, index) !== "category") return;
+      const cells = dataset.rows.map((row) => row[index]).filter((cell) => cell !== null && cell !== "");
+      if (cells.length && cells.every((cell) => Number.isFinite(Number(cell)))) return;
+      const values = sliceValues([dataset], column.name);
+      if (values && values.length > 1) names.add(column.name);
+    });
+  }
+  return [...names];
 }
 
 export function formatNumber(value: number): string {

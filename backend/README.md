@@ -40,3 +40,18 @@ The single Gemini agent now has an allowlisted tool loop with persisted public `
 Configure `DSAI_TAVILY_API_KEY` and `DSAI_E2B_API_KEY` in `backend/.env` to enable the external tools. E2B uses one sandbox per active run, restricts writes to `/home/user/outputs/`, rejects hidden/escaping paths, bounds output, closes the sandbox after the run, and registers supported generated files as chat-scoped resources in local storage. Gemini remains the only agent/model coordinator; the tools do not create a second agent framework.
 
 The API stages authorized chat and workspace inputs under `/home/user/inputs/`. To check the main-chat path against real services with a temporary database, run `DSAI_LIVE_E2B=1 backend/.venv/bin/pytest -q backend/tests/test_live_gemini.py -k react_python`. This exercises a Gemini tool call, E2B execution, generated dataset registration, and download.
+
+## Shared data (history, files, dashboards)
+
+`shared-data/` holds a snapshot of the database rows (`snapshot.json`) and stored files (`files/`), so everyone who
+clones the repo starts with the same workspaces, chats, datasets, Library and dashboards. A fresh database loads it
+automatically on first start (disable with `DSAI_IMPORT_SHARED_DATA=false`). Connector tokens are never exported.
+
+Run from the repo root:
+
+```bash
+backend/.venv/bin/python -m app.snapshot export   # refresh shared-data/ from your local data, then commit it
+backend/.venv/bin/python -m app.snapshot import   # add missing rows/files from shared-data/ to your local data
+```
+
+Run these with `PYTHONPATH=backend` from the repo root so the relative `.env` paths resolve to the same database the server uses.

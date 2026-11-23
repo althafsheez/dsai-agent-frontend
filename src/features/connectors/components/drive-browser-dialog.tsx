@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bookmark, ChevronRight, FileText, Folder, LoaderCircle, Search } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { addResourceToLibrary, ApiError, getWorkspaces, importDriveFiles, listDriveFiles } from "@/lib/api";
-import type { DriveFileDto } from "@/lib/api";
+import type { DriveFileDto, DriveImportResult } from "@/lib/api";
 import { formatBytes } from "@/features/context-sidebar/resource-utils";
 
 interface Crumb { id: string | null; name: string }
@@ -18,7 +18,7 @@ function errorText(error: unknown): string {
 
 export interface DriveImportTarget { scopeType: "chat" | "workspace"; scopeId: string; label: string }
 
-export function DriveBrowserDialog({ open, onOpenChange, onReauth, target: fixedTarget, onImported }: { open: boolean; onOpenChange: (open: boolean) => void; onReauth: () => void; target?: DriveImportTarget; onImported?: () => void }) {
+export function DriveBrowserDialog({ open, onOpenChange, onReauth, target: fixedTarget, onImported, onPick }: { open: boolean; onOpenChange: (open: boolean) => void; onReauth: () => void; target?: DriveImportTarget; onImported?: (result: DriveImportResult) => void; onPick?: (files: DriveFileDto[]) => void }) {
   const queryClient = useQueryClient();
   const [trail, setTrail] = useState<Crumb[]>([ROOT]);
   const [search, setSearch] = useState("");
@@ -26,6 +26,7 @@ export function DriveBrowserDialog({ open, onOpenChange, onReauth, target: fixed
   const [selected, setSelected] = useState<string[]>([]);
   const [workspaceId, setWorkspaceId] = useState("");
   const folderId = trail[trail.length - 1].id;
+  const seen = useRef(new Map<string, DriveFileDto>());
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(search.trim()), 300);
@@ -66,11 +67,12 @@ export function DriveBrowserDialog({ open, onOpenChange, onReauth, target: fixed
     onSuccess: (result) => {
       setSelected(result.failed.map((item) => item.file_id));
       for (const key of ["datasets", "artifacts", "workspaces", "workspace", "library", "dashboards", "dashboard-datasets"]) queryClient.invalidateQueries({ queryKey: [key] });
-      onImported?.();
+      onImported?.(result);
     },
   });
 
   function toggle(file: DriveFileDto) {
+    seen.current.set(file.id, file);
     setSelected((current) => current.includes(file.id) ? current.filter((id) => id !== file.id) : current.length < 10 ? [...current, file.id] : current);
   }
   function openFolder(file: DriveFileDto) {
@@ -78,7 +80,8 @@ export function DriveBrowserDialog({ open, onOpenChange, onReauth, target: fixed
     setTrail((current) => [...current, { id: file.id, name: file.name }]);
   }
   const result = importFiles.data;
-  const canImport = selected.length > 0 && Boolean(scope.scopeId) && !importFiles.isPending;
+  const canImport = selected.length > 0 && (Boolean(onPick) || Boolean(scope.scopeId)) && !importFiles.isPending;
+  const picked = selected.flatMap((id) => seen.current.get(id) ?? []);
   const failedById = new Map((result?.failed ?? []).map((item) => [item.file_id, item.message]));
 
   return (
@@ -138,6 +141,12 @@ export function DriveBrowserDialog({ open, onOpenChange, onReauth, target: fixed
         ) : null}
         {importFiles.isError ? <p role="alert" className="text-xs text-red-300">{errorText(importFiles.error)}</p> : null}
 
+        {onPick ? (
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">Imported when you send the message.</p>
+            <button type="button" disabled={!canImport} onClick={() => { onPick(picked); onOpenChange(false); }} className="h-8 rounded-md bg-foreground px-3 text-xs text-background hover:opacity-90 disabled:opacity-40">Add{selected.length ? ` ${selected.length}` : ""}</button>
+          </div>
+        ) : (
         <div className="flex flex-wrap items-center justify-between gap-2">
           {fixedTarget ? (
             <p className="text-xs text-muted-foreground">Adds to {fixedTarget.label}</p>
@@ -158,7 +167,8 @@ export function DriveBrowserDialog({ open, onOpenChange, onReauth, target: fixed
             </button>
           </div>
         </div>
-        {!fixedTarget && workspaces.isSuccess && !targets.length ? <p className="text-[11px] text-muted-foreground">Create a workspace first; imported files are added to one.</p> : null}
+        )}
+        {!onPick && !fixedTarget && workspaces.isSuccess && !targets.length ? <p className="text-[11px] text-muted-foreground">Create a workspace first; imported files are added to one.</p> : null}
       </DialogContent>
     </Dialog>
   );

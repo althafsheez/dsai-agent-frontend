@@ -17,7 +17,7 @@ from ..dependencies import get_current_user, get_db
 from ..errors import APIError
 from ..models import Chat, FileObject, LibraryEntry, Message, Resource, ResourceLink, User, Workspace
 from ..services.records import require_chat, require_workspace
-from ..services.dataset_preview import MAX_PREVIEW_ROWS
+from ..services.dataset_preview import MAX_DASHBOARD_ROWS, MAX_PREVIEW_ROWS, read_csv_rows
 from ..services.resource_uploads import CODE_EXTENSIONS, read_upload, register_upload
 from ..storage import LocalFileStorage
 router = APIRouter(prefix="/api/resources", tags=["resources"])
@@ -388,6 +388,25 @@ async def preview_dataset(
         "rows": rows[:limit],
         "truncated": metadata.get("row_count") is None or len(rows) < (metadata.get("row_count") or 0),
     }
+
+
+@catalog_router.get("/datasets/{resource_id}/rows")
+async def dataset_rows(
+    resource_id: str,
+    request: Request,
+    limit: int = Query(default=MAX_DASHBOARD_ROWS, ge=1, le=MAX_DASHBOARD_ROWS),
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Up to 6,000 rows of a CSV dataset, for dashboard charts and filters."""
+    resource, file_object = _accessible_resource(session, user, resource_id)
+    if resource.resource_type != "dataset":
+        raise APIError(404, "dataset_not_found", "Dataset not found.")
+    storage: LocalFileStorage = request.app.state.storage
+    data = read_csv_rows(resource.name, storage.read_bytes(file_object.relative_storage_path), limit)
+    if data is None:
+        raise APIError(422, "rows_unavailable", "Rows can only be read from CSV datasets.")
+    return {"name": resource.name, **data}
 
 
 def _accessible_resource(session: Session, user: User, resource_id: str) -> tuple[Resource, FileObject]:

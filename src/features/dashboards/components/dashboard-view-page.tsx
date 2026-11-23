@@ -7,8 +7,10 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, Eye, Globe, LoaderCircle, Pencil, Save, Trash2, Undo2, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useDashboard, useDashboardAi, useDashboardDatasets, useDeleteDashboard, useSaveDashboard } from "../use-dashboards";
-import type { Dashboard, DashboardWidget } from "../types";
+import { useDashboard, useDashboardAi, useDeleteDashboard, useHydratedDatasets, useSaveDashboard } from "../use-dashboards";
+import { packedSpans } from "../logic/layout";
+import { FilterBar, toggleFilter } from "./filter-bar";
+import type { Dashboard, DashboardWidget, Filters } from "../types";
 import { AddWidget } from "./add-widget";
 import { AiNotes } from "./ai-notes";
 
@@ -19,19 +21,22 @@ type Mode = "view" | "edit";
 export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   const router = useRouter();
   const dashboardQuery = useDashboard(dashboardId);
-  const datasetsQuery = useDashboardDatasets();
   const save = useSaveDashboard();
   const remove = useDeleteDashboard();
   const dashboard = dashboardQuery.data;
-  const datasets = datasetsQuery.data ?? [];
   const [mode, setMode] = useState<Mode>("view");
   const [draft, setDraft] = useState<DashboardWidget[]>([]);
+  const usedIds = [...new Set([...(dashboard?.widgets ?? []), ...draft].map((widget) => widget.dataset_id))];
+  const hydrated = useHydratedDatasets(usedIds);
+  const datasets = hydrated.datasets;
   const [name, setName] = useState("");
   const [notes, setNotes] = useState<string[]>([]);
+  const [slicers, setSlicers] = useState<string[]>([]);
+  const [filters, setFilters] = useState<Filters>({});
   const ai = useDashboardAi();
 
   useEffect(() => {
-    if (dashboard && mode === "view") { setDraft(dashboard.widgets); setName(dashboard.name); }
+    if (dashboard && mode === "view") { setDraft(dashboard.widgets); setName(dashboard.name); setSlicers(dashboard.slicers ?? []); }
   }, [dashboard, mode]);
 
   if (dashboardQuery.isLoading) return <p className="p-8 text-sm text-muted-foreground">Loading dashboard…</p>;
@@ -46,12 +51,13 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
 
   const editing = mode === "edit";
   const widgets = editing ? draft : dashboard.widgets;
-  const dirty = editing && (name !== dashboard.name || JSON.stringify(draft) !== JSON.stringify(dashboard.widgets));
+  const dirty = editing && (name !== dashboard.name || JSON.stringify(draft) !== JSON.stringify(dashboard.widgets) || JSON.stringify(slicers) !== JSON.stringify(dashboard.slicers ?? []));
+  const spans = packedSpans(widgets);
   const datasetFor = (widget: DashboardWidget) => datasets.find((dataset) => dataset.id === widget.dataset_id);
-  const writeFields = (overrides: Partial<Pick<Dashboard, "status" | "pinned">> & { widgets?: DashboardWidget[]; name?: string }) => ({
+  const writeFields = (overrides: Partial<Pick<Dashboard, "status" | "pinned">> & { widgets?: DashboardWidget[]; name?: string; slicers?: string[] }) => ({
     id: dashboard.id, name: overrides.name ?? dashboard.name, description: dashboard.description,
     dataset_ids: [...new Set((overrides.widgets ?? dashboard.widgets).map((widget) => widget.dataset_id))],
-    widgets: overrides.widgets ?? dashboard.widgets, status: overrides.status, pinned: overrides.pinned,
+    widgets: overrides.widgets ?? dashboard.widgets, slicers: overrides.slicers ?? dashboard.slicers, status: overrides.status, pinned: overrides.pinned,
   });
 
   async function checkAndFix() {
@@ -62,7 +68,7 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   }
 
   async function saveEdits() {
-    await save.mutateAsync(writeFields({ widgets: draft, name }));
+    await save.mutateAsync(writeFields({ widgets: draft, name, slicers }));
     setMode("view");
   }
 
@@ -96,10 +102,12 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
 
       {editing ? <AiNotes notes={notes} title="AI notes" /> : null}
       {ai.review.isError ? <p role="alert" className="mb-3 text-xs text-red-300">The AI check failed. Try again.</p> : null}
+      {widgets.length ? <FilterBar datasets={datasets.filter((dataset) => widgets.some((widget) => widget.dataset_id === dataset.id))} slicers={slicers} onSlicersChange={setSlicers} filters={filters} onFiltersChange={setFilters} /> : null}
+      {hydrated.loadingRows ? <p className="mb-2 text-[11px] text-muted-foreground">Loading full dataset rows…</p> : hydrated.truncated ? <p className="mb-2 text-[11px] text-muted-foreground">Charts use the first 6,000 rows of large datasets.</p> : null}
       {widgets.length ? (
         <div className="mt-3 grid grid-flow-dense gap-3 md:grid-cols-3">
           {widgets.map((widget) => (
-            <WidgetCard key={widget.id} widget={widget} dataset={datasetFor(widget)} editable={editing} onChange={(next) => setDraft(draft.map((item) => (item.id === next.id ? next : item)))} onRemove={() => setDraft(draft.filter((item) => item.id !== widget.id))} />
+            <WidgetCard key={widget.id} widget={widget} span={spans[widget.id]} filters={filters} onSelect={(column, value) => setFilters(toggleFilter(filters, column, value))} dataset={datasetFor(widget)} editable={editing} onChange={(next) => setDraft(draft.map((item) => (item.id === next.id ? next : item)))} onRemove={() => setDraft(draft.filter((item) => item.id !== widget.id))} />
           ))}
         </div>
       ) : (

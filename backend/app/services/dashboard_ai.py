@@ -6,14 +6,14 @@ from typing import Any
 
 from agentic.runtime.contracts import ChatTurn, LLMProvider, ProviderError
 
-WIDGET_TYPES = {"kpi", "bar", "line", "pie", "table"}
+WIDGET_TYPES = {"kpi", "bar", "line", "area", "pie", "table"}
 AGGREGATES = {"sum", "avg", "count"}
 MAX_WIDGETS = 12
 
 SPEC = (
-    'Widget JSON: {"type":"kpi|bar|line|pie|table","title":str,"dataset_id":str,"x":column|null,'
+    'Widget JSON: {"type":"kpi|bar|line|area|pie|table","title":str,"dataset_id":str,"x":column|null,'
     '"y":column|null,"agg":"sum|avg|count","span":1|2|3}. '
-    "x is the category column (bar/line/pie); y is the numeric column to aggregate (omit for count); "
+    "x is the category column (bar/line/area/pie); y is the numeric column to aggregate (omit for count); "
     "kpi and table need no x. Use only dataset ids and column names that appear in the schema."
 )
 

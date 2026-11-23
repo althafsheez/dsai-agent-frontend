@@ -1,4 +1,6 @@
-export type WidgetType = "kpi" | "bar" | "line" | "pie" | "table";
+export type WidgetType = "kpi" | "bar" | "line" | "area" | "pie" | "table";
+/** Active filters: column name to the allowed values (slicers and chart clicks both write here). */
+export type Filters = Record<string, string[]>;
 export type Aggregate = "sum" | "avg" | "count";
 
 export interface DashboardWidget {
@@ -23,6 +25,8 @@ export interface Dashboard {
   ownership: "owned" | "shared";
   status: "draft" | "published";
   pinned: boolean;
+  /** Columns shown as slicers (filter dropdowns) */
+  slicers?: string[];
   dataset_ids: string[];
   widgets: DashboardWidget[];
   created_at: string;
