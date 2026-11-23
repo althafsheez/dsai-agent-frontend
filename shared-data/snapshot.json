@@ -1164,75 +1164,579 @@
   ],
   "dashboards": [
    {
-    "created_at": "2026-11-23T16:30:31.883220",
+    "created_at": "2026-11-23T20:04:20.033933",
     "dataset_ids": [
-     "f9dcfa8e-9085-4d28-98df-1bb9c289c04b"
+     "d0c7dc6b-c894-490e-8ef0-928d8004aae9"
     ],
-    "description": "",
-    "id": "db-mwthfb9d",
-    "name": "Orders 6000 overview",
+    "description": "Five-year net survival by country and year.",
+    "id": "db-cancer-survival",
+    "name": "Cancer Survival Rates",
     "owner_id": "user-you",
     "pinned": false,
+    "pinned_by": [],
+    "preview": {
+     "chart": {
+      "kind": "bar",
+      "labels": [
+       "Australia",
+       "Canada",
+       "New Zealand",
+       "Norway",
+       "Denmark",
+       "Ireland",
+       "United Kingdom"
+      ],
+      "series": [
+       64.67,
+       62.27,
+       60.8,
+       60.47,
+       55.38,
+       54.0,
+       52.77
+      ]
+     },
+     "kpi": {
+      "label": "Countries and years",
+      "value": "139"
+     }
+    },
     "refresh_minutes": 0,
     "shares": [],
     "slicers": [],
+    "status": "published",
+    "updated_at": "2026-11-23T20:04:20.033938",
+    "widgets": [
+     {
+      "agg": "count",
+      "dataset_id": "d0c7dc6b-c894-490e-8ef0-928d8004aae9",
+      "id": "w-1",
+      "span": 1,
+      "title": "Countries and years",
+      "type": "kpi"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "d0c7dc6b-c894-490e-8ef0-928d8004aae9",
+      "id": "w-2",
+      "span": 1,
+      "title": "Average colorectal survival %",
+      "type": "kpi",
+      "y": "Net survival rates of patients with colorectal cancer after five years"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "d0c7dc6b-c894-490e-8ef0-928d8004aae9",
+      "id": "w-3",
+      "span": 2,
+      "title": "Colorectal survival by country",
+      "type": "bar",
+      "x": "Entity",
+      "y": "Net survival rates of patients with colorectal cancer after five years"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "d0c7dc6b-c894-490e-8ef0-928d8004aae9",
+      "id": "w-4",
+      "span": 3,
+      "title": "Lung cancer survival by year",
+      "type": "line",
+      "x": "Year",
+      "y": "Net survival rates of patients with lung cancer after five years"
+     }
+    ]
+   },
+   {
+    "created_at": "2026-11-23T20:04:20.048924",
+    "dataset_ids": [
+     "2cdb89b5-bbb6-4a17-a02d-aad624a8ac61"
+    ],
+    "description": "Spend and order volume by customer segment.",
+    "id": "db-customer-spend",
+    "name": "Customer Spend",
+    "owner_id": "user-shared",
+    "pinned": false,
+    "pinned_by": [],
+    "preview": {
+     "chart": {
+      "kind": "bar",
+      "labels": [
+       "Delta",
+       "Acme",
+       "Gamma",
+       "Beta",
+       "Epsilon"
+      ],
+      "series": [
+       8800.0,
+       5400.0,
+       1300.0,
+       900.0,
+       450.0
+      ]
+     },
+     "kpi": {
+      "label": "Customers",
+      "value": "5"
+     }
+    },
+    "refresh_minutes": 0,
+    "shares": [
+     {
+      "role": "viewer",
+      "user_id": "user-you"
+     }
+    ],
+    "slicers": [
+     "segment"
+    ],
     "status": "draft",
-    "updated_at": "2026-11-23T16:30:31.883224",
+    "updated_at": "2026-11-23T20:04:20.048928",
+    "widgets": [
+     {
+      "agg": "count",
+      "dataset_id": "2cdb89b5-bbb6-4a17-a02d-aad624a8ac61",
+      "id": "w-1",
+      "span": 1,
+      "title": "Customers",
+      "type": "kpi"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "2cdb89b5-bbb6-4a17-a02d-aad624a8ac61",
+      "id": "w-2",
+      "span": 1,
+      "title": "Total spend",
+      "type": "kpi",
+      "y": "spend"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "2cdb89b5-bbb6-4a17-a02d-aad624a8ac61",
+      "id": "w-3",
+      "span": 2,
+      "title": "Spend by customer",
+      "type": "bar",
+      "x": "customer",
+      "y": "spend"
+     },
+     {
+      "agg": "count",
+      "dataset_id": "2cdb89b5-bbb6-4a17-a02d-aad624a8ac61",
+      "id": "w-4",
+      "span": 1,
+      "title": "Customers by segment",
+      "type": "pie",
+      "x": "segment"
+     }
+    ]
+   },
+   {
+    "created_at": "2026-11-23T20:04:20.024991",
+    "dataset_ids": [
+     "ab717cbe-8289-4965-b36e-85439876624f"
+    ],
+    "description": "Cholesterol, heart rate and chest pain type across 1,025 patients.",
+    "id": "db-heart-disease",
+    "name": "Heart Disease Analysis",
+    "owner_id": "user-you",
+    "pinned": false,
+    "pinned_by": [
+     "user-you"
+    ],
+    "preview": {
+     "chart": {
+      "kind": "bar",
+      "labels": [
+       "0",
+       "1",
+       "2",
+       "3"
+      ],
+      "series": [
+       249.99,
+       244.7,
+       242.2,
+       237.06
+      ]
+     },
+     "kpi": {
+      "label": "Patients",
+      "value": "1,025"
+     }
+    },
+    "refresh_minutes": 0,
+    "shares": [],
+    "slicers": [
+     "sex"
+    ],
+    "status": "draft",
+    "updated_at": "2026-11-23T20:04:51.203088",
+    "widgets": [
+     {
+      "agg": "count",
+      "dataset_id": "ab717cbe-8289-4965-b36e-85439876624f",
+      "id": "w-1",
+      "span": 1,
+      "title": "Patients",
+      "type": "kpi"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "ab717cbe-8289-4965-b36e-85439876624f",
+      "id": "w-2",
+      "span": 1,
+      "title": "Average cholesterol",
+      "type": "kpi",
+      "y": "chol"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "ab717cbe-8289-4965-b36e-85439876624f",
+      "id": "w-3",
+      "span": 1,
+      "title": "Average resting BP",
+      "type": "kpi",
+      "y": "trestbps"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "ab717cbe-8289-4965-b36e-85439876624f",
+      "id": "w-4",
+      "span": 2,
+      "title": "Cholesterol by chest pain type",
+      "type": "bar",
+      "x": "cp",
+      "y": "chol"
+     },
+     {
+      "agg": "count",
+      "dataset_id": "ab717cbe-8289-4965-b36e-85439876624f",
+      "id": "w-5",
+      "span": 1,
+      "title": "Patients by sex",
+      "type": "pie",
+      "x": "sex"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "ab717cbe-8289-4965-b36e-85439876624f",
+      "id": "w-6",
+      "span": 3,
+      "title": "Max heart rate by age",
+      "type": "line",
+      "x": "age",
+      "y": "thalach"
+     }
+    ]
+   },
+   {
+    "created_at": "2026-11-23T20:04:19.991254",
+    "dataset_ids": [
+     "f9dcfa8e-9085-4d28-98df-1bb9c289c04b"
+    ],
+    "description": "Revenue, units and order counts across regions and categories.",
+    "id": "db-orders-revenue",
+    "name": "Orders & Revenue",
+    "owner_id": "user-you",
+    "pinned": false,
+    "pinned_by": [
+     "user-you"
+    ],
+    "preview": {
+     "chart": {
+      "kind": "bar",
+      "labels": [
+       "North",
+       "South",
+       "East",
+       "West"
+      ],
+      "series": [
+       2752864.0,
+       2736948.0,
+       2603180.0,
+       2590474.0
+      ]
+     },
+     "kpi": {
+      "label": "Total orders",
+      "value": "6,000"
+     }
+    },
+    "refresh_minutes": 0,
+    "shares": [],
+    "slicers": [
+     "region",
+     "category"
+    ],
+    "status": "published",
+    "updated_at": "2026-11-23T20:04:30.278467",
     "widgets": [
      {
       "agg": "count",
       "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
-      "id": "w-mwthf9va-0",
+      "id": "w-1",
       "span": 1,
-      "title": "Rows in orders_6000.csv",
+      "title": "Total orders",
       "type": "kpi"
      },
      {
       "agg": "sum",
       "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
-      "id": "w-mwthf9va-1",
+      "id": "w-2",
       "span": 1,
-      "title": "Total units",
+      "title": "Revenue",
+      "type": "kpi",
+      "y": "revenue"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
+      "id": "w-3",
+      "span": 1,
+      "title": "Units sold",
       "type": "kpi",
       "y": "units"
      },
      {
       "agg": "sum",
       "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
-      "id": "w-mwthf9va-2",
+      "id": "w-4",
       "span": 2,
-      "title": "By region",
+      "title": "Revenue by region",
       "type": "bar",
       "x": "region",
-      "y": "units"
+      "y": "revenue"
      },
      {
       "agg": "count",
       "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
-      "id": "w-mwthf9va-3",
-      "span": 2,
-      "title": "Share of region",
+      "id": "w-5",
+      "span": 1,
+      "title": "Orders by category",
       "type": "pie",
-      "x": "region"
+      "x": "category"
      },
      {
       "agg": "sum",
       "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
-      "id": "w-mwthf9va-4",
+      "id": "w-6",
       "span": 2,
-      "title": "Trend of region",
-      "type": "line",
-      "x": "region",
+      "title": "Units by category",
+      "type": "bar",
+      "x": "category",
       "y": "units"
      },
      {
       "agg": "sum",
       "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
-      "id": "w-mwthf9va-5",
-      "span": 3,
-      "title": "Rows from region",
-      "type": "table",
-      "y": "units"
+      "id": "w-7",
+      "span": 1,
+      "title": "Revenue by category",
+      "type": "pie",
+      "x": "category",
+      "y": "revenue"
+     }
+    ]
+   },
+   {
+    "created_at": "2026-11-23T20:04:20.013974",
+    "dataset_ids": [
+     "70e919d6-23b3-42b9-be96-eb8c1d29801d"
+    ],
+    "description": "Who is affected: age, glucose, work type and smoking status.",
+    "id": "db-stroke-risk",
+    "name": "Stroke Risk Overview",
+    "owner_id": "user-you",
+    "pinned": false,
+    "pinned_by": [],
+    "preview": {
+     "chart": {
+      "kind": "bar",
+      "labels": [
+       "Private",
+       "Self-employed",
+       "children",
+       "Govt_job",
+       "Never_worked"
+      ],
+      "series": [
+       2925.0,
+       819.0,
+       687.0,
+       657.0,
+       22.0
+      ]
+     },
+     "kpi": {
+      "label": "Patients",
+      "value": "5,110"
+     }
+    },
+    "refresh_minutes": 0,
+    "shares": [],
+    "slicers": [
+     "gender",
+     "work_type"
+    ],
+    "status": "published",
+    "updated_at": "2026-11-23T20:04:30.304140",
+    "widgets": [
+     {
+      "agg": "count",
+      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
+      "id": "w-1",
+      "span": 1,
+      "title": "Patients",
+      "type": "kpi"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
+      "id": "w-2",
+      "span": 1,
+      "title": "Average glucose",
+      "type": "kpi",
+      "y": "avg_glucose_level"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
+      "id": "w-3",
+      "span": 1,
+      "title": "Stroke cases",
+      "type": "kpi",
+      "y": "stroke"
+     },
+     {
+      "agg": "count",
+      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
+      "id": "w-4",
+      "span": 2,
+      "title": "Patients by work type",
+      "type": "bar",
+      "x": "work_type"
+     },
+     {
+      "agg": "count",
+      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
+      "id": "w-5",
+      "span": 1,
+      "title": "Smoking status",
+      "type": "pie",
+      "x": "smoking_status"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
+      "id": "w-6",
+      "span": 2,
+      "title": "Average glucose by work type",
+      "type": "bar",
+      "x": "work_type",
+      "y": "avg_glucose_level"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
+      "id": "w-7",
+      "span": 1,
+      "title": "Stroke cases by gender",
+      "type": "pie",
+      "x": "gender",
+      "y": "stroke"
+     }
+    ]
+   },
+   {
+    "created_at": "2026-11-23T20:04:20.041088",
+    "dataset_ids": [
+     "f972714d-4069-4796-8dd0-213268bfd577"
+    ],
+    "description": "Headcount, salary and experience by department.",
+    "id": "db-workforce",
+    "name": "Workforce Overview",
+    "owner_id": "user-shared",
+    "pinned": false,
+    "pinned_by": [
+     "user-you"
+    ],
+    "preview": {
+     "chart": {
+      "kind": "bar",
+      "labels": [
+       "Engineering",
+       "Finance",
+       "Marketing",
+       "Sales",
+       "Support"
+      ],
+      "series": [
+       95500.0,
+       73500.0,
+       61500.0,
+       60000.0,
+       46000.0
+      ]
+     },
+     "kpi": {
+      "label": "Employees",
+      "value": "12"
+     }
+    },
+    "refresh_minutes": 0,
+    "shares": [],
+    "slicers": [
+     "department"
+    ],
+    "status": "published",
+    "updated_at": "2026-11-23T20:04:20.061803",
+    "widgets": [
+     {
+      "agg": "count",
+      "dataset_id": "f972714d-4069-4796-8dd0-213268bfd577",
+      "id": "w-1",
+      "span": 1,
+      "title": "Employees",
+      "type": "kpi"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "f972714d-4069-4796-8dd0-213268bfd577",
+      "id": "w-2",
+      "span": 1,
+      "title": "Average salary",
+      "type": "kpi",
+      "y": "salary"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "f972714d-4069-4796-8dd0-213268bfd577",
+      "id": "w-3",
+      "span": 1,
+      "title": "Average experience (yrs)",
+      "type": "kpi",
+      "y": "years_experience"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "f972714d-4069-4796-8dd0-213268bfd577",
+      "id": "w-4",
+      "span": 2,
+      "title": "Average salary by department",
+      "type": "bar",
+      "x": "department",
+      "y": "salary"
+     },
+     {
+      "agg": "count",
+      "dataset_id": "f972714d-4069-4796-8dd0-213268bfd577",
+      "id": "w-5",
+      "span": 1,
+      "title": "Headcount by location",
+      "type": "pie",
+      "x": "location"
      }
     ]
    }
