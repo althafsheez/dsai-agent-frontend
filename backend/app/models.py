@@ -273,3 +273,19 @@ class AgentMemory(TimestampMixin, Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     key: Mapped[str] = mapped_column(String(100))
     value: Mapped[str] = mapped_column(Text)
+
+
+class ConnectorConnection(TimestampMixin, Base):
+    """A user's OAuth link to an external data source. Tokens are stored encrypted and never returned by the API."""
+
+    __tablename__ = "connector_connections"
+    __table_args__ = (UniqueConstraint("user_id", "provider", name="uq_connector_user_provider"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    account_email: Mapped[str | None] = mapped_column(String(320))
+    scopes: Mapped[str] = mapped_column(Text, default="")
+    access_token_enc: Mapped[str] = mapped_column(Text)
+    refresh_token_enc: Mapped[str | None] = mapped_column(Text)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

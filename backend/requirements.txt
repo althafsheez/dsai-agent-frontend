@@ -4,6 +4,8 @@ sqlalchemy==2.0.44
 alembic==1.17.2
 pydantic-settings==2.12.0
 python-multipart==0.0.20
+httpx==0.28.1
+cryptography==50.0.2
 -r ../agentic/runtime/requirements.txt
 
 # Test dependencies

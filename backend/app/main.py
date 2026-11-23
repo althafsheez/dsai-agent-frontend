@@ -4,6 +4,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -17,14 +18,16 @@ from .config import Settings, get_settings
 from .db import make_engine, make_session_factory
 from .migrations import upgrade_schema
 from .errors import APIError, api_error_handler
-from .routes import chats, meta, quick_assistant, resources, runs, workspaces
+from .routes import chats, connectors, meta, quick_assistant, resources, runs, workspaces
 from .services.agent_adapter import AgentToolAdapter
 from .services.identity import seed_demo_users
 from .services.runs import RunCoordinator, reconcile_stale_runs
 from .storage import LocalFileStorage
 
 
-def create_app(settings: Settings | None = None, provider: LLMProvider | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, provider: LLMProvider | None = None, connector_http: httpx.AsyncClient | None = None,
+) -> FastAPI:
     settings = settings or get_settings()
     engine = make_engine(settings.database_url)
     session_factory = make_session_factory(engine)
@@ -35,6 +38,7 @@ def create_app(settings: Settings | None = None, provider: LLMProvider | None = 
     )
     sandbox_pool = E2BSandboxPool(settings.e2b_api_key)
     storage = LocalFileStorage(settings.storage_root)
+    connector_client = connector_http or httpx.AsyncClient(timeout=httpx.Timeout(30.0), follow_redirects=False)
     tool_registry = build_tool_registry(
         sandbox_pool, AgentToolAdapter(session_factory, storage),
         tavily_api_key=settings.tavily_api_key,
@@ -54,6 +58,7 @@ def create_app(settings: Settings | None = None, provider: LLMProvider | None = 
             seed_demo_users(session)
             reconcile_stale_runs(session)
         yield
+        await connector_client.aclose()
         engine.dispose()
 
     app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
@@ -73,6 +78,7 @@ def create_app(settings: Settings | None = None, provider: LLMProvider | None = 
     app.state.sandbox_pool = sandbox_pool
     app.state.run_coordinator = RunCoordinator()
     app.state.storage = storage
+    app.state.connector_http = connector_client
     app.include_router(meta.router)
     app.include_router(workspaces.router)
     app.include_router(chats.router)
@@ -80,6 +86,7 @@ def create_app(settings: Settings | None = None, provider: LLMProvider | None = 
     app.include_router(resources.catalog_router)
     app.include_router(runs.router)
     app.include_router(quick_assistant.router)
+    app.include_router(connectors.router)
     return app
 
 

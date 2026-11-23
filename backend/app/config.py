@@ -39,6 +39,16 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DSAI_E2B_API_KEY", "E2B_API_KEY"),
     )
     max_agent_steps: int = Field(default=8, ge=1)
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    google_redirect_uri: str = "http://localhost:8000/api/connectors/google-drive/callback"
+    frontend_url: str = "http://localhost:3000"
+    # Encrypts stored connector tokens and signs OAuth state. Generate one with `python -c "import secrets;print(secrets.token_urlsafe(32))"`.
+    connector_secret: str | None = None
+
+    @property
+    def google_drive_configured(self) -> bool:
+        return bool(self.google_client_id and self.google_client_secret and self.connector_secret)
 
     @field_validator("cors_origins", mode="before")
     @classmethod

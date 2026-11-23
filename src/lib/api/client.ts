@@ -1,5 +1,8 @@
 import type {
   ApiList,
+  ConnectorStatusDto,
+  DriveFilesPage,
+  DriveImportResult,
   ChatDto,
   CreateChatResponse,
   ExecutionEvent,
@@ -180,6 +183,14 @@ export function branchChat(chatId: string, messageId: string): Promise<ChatDto> 
   return requestJson<ChatDto>(`/chats/${encodeURIComponent(chatId)}/branch`, {
     method: "POST",
     body: JSON.stringify({ message_id: messageId, client_request_id: crypto.randomUUID() }),
+  });
+}
+
+/** Rewrites a question and deletes every later turn; the caller then re-runs the question. */
+export function editChatMessage(chatId: string, messageId: string, content: string): Promise<MessageDto> {
+  return requestJson<MessageDto>(`/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ content }),
   });
 }
 
@@ -544,4 +555,34 @@ export async function resumeChatQueue(
   }
   parser.push(decoder.decode());
   parser.finish();
+}
+
+export function getConnectors(): Promise<{ items: ConnectorStatusDto[] }> {
+  return requestJson("/connectors");
+}
+
+/** Returns the Google consent URL; the caller navigates the browser there. */
+export async function startGoogleDriveAuth(): Promise<string> {
+  const { authorization_url } = await requestJson<{ authorization_url: string }>("/connectors/google-drive/authorize", { method: "POST" });
+  return authorization_url;
+}
+
+export async function disconnectGoogleDrive(): Promise<void> {
+  const response = await fetch(`${API_ROOT}/connectors/google-drive`, { method: "DELETE", headers: requestHeaders() });
+  if (!response.ok) throw await apiError(response);
+}
+
+export function listDriveFiles(input: { folderId?: string | null; query?: string; pageToken?: string | null }): Promise<DriveFilesPage> {
+  const params = new URLSearchParams();
+  if (input.folderId) params.set("folder_id", input.folderId);
+  if (input.query) params.set("q", input.query);
+  if (input.pageToken) params.set("page_token", input.pageToken);
+  return requestJson(`/connectors/google-drive/files${params.size ? `?${params}` : ""}`);
+}
+
+export function importDriveFiles(input: { fileIds: string[]; scopeType: "chat" | "workspace"; scopeId: string }): Promise<DriveImportResult> {
+  return requestJson("/connectors/google-drive/import", {
+    method: "POST",
+    body: JSON.stringify({ file_ids: input.fileIds, scope_type: input.scopeType, scope_id: input.scopeId }),
+  });
 }

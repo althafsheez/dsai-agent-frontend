@@ -161,3 +161,32 @@ export interface SteeringInstructionDto {
   checkpoint: string | null;
   created_at: string;
 }
+
+export interface ConnectorStatusDto {
+  id: string;
+  /** "unavailable" means the server has no Google credentials configured. */
+  status: "connected" | "disconnected" | "unavailable";
+  configured: boolean;
+  account_email: string | null;
+  connected_at: string | null;
+}
+
+export interface DriveFileDto {
+  id: string;
+  name: string;
+  mime_type: string;
+  is_folder: boolean;
+  size_bytes: number | null;
+  modified_at: string | null;
+  importable: boolean;
+}
+
+export interface DriveFilesPage {
+  items: DriveFileDto[];
+  next_page_token: string | null;
+}
+
+export interface DriveImportResult {
+  imported: Array<{ file_id: string; resource: { id: string; name: string; resource_type: "dataset" | "artifact" }; already_imported: boolean }>;
+  failed: Array<{ file_id: string; code: string; message: string }>;
+}

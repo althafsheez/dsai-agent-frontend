@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDownUp,
   ArrowRight,
@@ -23,6 +24,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { ApiError, disconnectGoogleDrive, getConnectors, startGoogleDriveAuth } from "@/lib/api";
+import { DriveBrowserDialog } from "./drive-browser-dialog";
 import { dataSourceConnector } from "../catalog";
 import { readConnected, toggleId, writeConnected } from "../connection-store";
 
@@ -63,7 +66,17 @@ function categoryLabel(category: ConnectorPreview["category"]) {
   return "App";
 }
 
-function ConnectorRow({ connector, connected, onToggle }: { connector: ConnectorPreview; connected: boolean; onToggle: () => void }) {
+const GOOGLE_DRIVE_ID = "google-drive";
+
+interface LiveState {
+  /** The backend owns this connector's connection: no demo toggle. */
+  unavailable: boolean;
+  busy: boolean;
+  email: string | null;
+  onBrowse: () => void;
+}
+
+function ConnectorRow({ connector, connected, onToggle, live }: { connector: ConnectorPreview; connected: boolean; onToggle: () => void; live?: LiveState }) {
   const Icon = connector.icon;
   return (
     <article className="flex min-w-0 items-center gap-3.5 rounded-xl border bg-surface/50 p-3.5 transition-colors hover:border-border-strong hover:bg-surface">
@@ -78,31 +91,77 @@ function ConnectorRow({ connector, connected, onToggle }: { connector: Connector
           </span>
         </div>
         <p className="mt-0.5 line-clamp-1 text-[11px] leading-relaxed text-muted-foreground">
-          {connector.description}
+          {live?.unavailable ? "Not configured on this server. Add Google credentials to the backend to enable it." : connected && live?.email ? `Connected as ${live.email}` : connector.description}
         </p>
       </div>
       {connected ? <span className="hidden shrink-0 items-center gap-1 rounded-full border border-emerald-400/30 px-2 py-0.5 text-[10px] text-emerald-300 sm:inline-flex"><Check className="size-3" />Connected</span> : null}
+      {live && connected ? (
+        <button type="button" onClick={live.onBrowse} className="h-8 shrink-0 rounded-md bg-foreground px-3 text-xs text-background hover:opacity-90">Import files</button>
+      ) : null}
       <button
         type="button"
         aria-pressed={connected}
         aria-label={`${connected ? "Disconnect" : "Connect"} ${connector.name}`}
         onClick={onToggle}
-        className={`h-8 shrink-0 rounded-md px-3 text-xs transition-colors ${connected ? "bg-raised text-muted-foreground hover:text-foreground" : "bg-foreground text-background hover:opacity-90"}`}
+        disabled={live ? live.busy || (live.unavailable && !connected) : false}
+        className={`h-8 shrink-0 rounded-md px-3 text-xs transition-colors disabled:opacity-50 ${connected ? "bg-raised text-muted-foreground hover:text-foreground" : "bg-foreground text-background hover:opacity-90"}`}
       >
-        {connected ? "Disconnect" : "Connect"}
+        {live?.busy ? "Working…" : connected ? "Disconnect" : "Connect"}
       </button>
     </article>
   );
 }
 
 export function ConnectorsPage() {
+  const queryClient = useQueryClient();
   const [connected, setConnected] = useState<string[]>([]);
   useEffect(() => setConnected(readConnected()), []);
+  const connectors$ = useQuery({ queryKey: ["connectors"], queryFn: getConnectors });
+  const drive = connectors$.data?.items.find((item) => item.id === GOOGLE_DRIVE_ID);
+  const [driveNotice, setDriveNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  const [browserOpen, setBrowserOpen] = useState(false);
+
+  // Google sends the browser back with ?connected=google-drive or ?error=<code>.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const error = params.get("error");
+    if (params.get("connected") === GOOGLE_DRIVE_ID) setDriveNotice({ tone: "ok", text: "Google Drive connected." });
+    else if (error) setDriveNotice({ tone: "error", text: error === "access_denied" ? "Google Drive access was not granted." : "Google Drive could not be connected. Try again." });
+    else return;
+    window.history.replaceState(null, "", window.location.pathname);
+    void queryClient.invalidateQueries({ queryKey: ["connectors"] });
+  }, [queryClient]);
+
+  const connectDrive = useMutation({
+    mutationFn: startGoogleDriveAuth,
+    onSuccess: (url) => window.location.assign(url),
+    onError: (error) => setDriveNotice({ tone: "error", text: error instanceof ApiError ? error.message : "Could not start Google sign-in." }),
+  });
+  const disconnectDrive = useMutation({
+    mutationFn: disconnectGoogleDrive,
+    onSuccess: () => { setDriveNotice({ tone: "ok", text: "Google Drive disconnected." }); void queryClient.invalidateQueries({ queryKey: ["connectors"] }); },
+    onError: () => setDriveNotice({ tone: "error", text: "Could not disconnect Google Drive. Try again." }),
+  });
+  const driveConnected = drive?.status === "connected";
+  const liveState: LiveState = {
+    unavailable: drive?.status === "unavailable",
+    busy: connectDrive.isPending || disconnectDrive.isPending,
+    email: drive?.account_email ?? null,
+    onBrowse: () => setBrowserOpen(true),
+  };
+
   function toggleConnection(id: string) {
+    if (id === GOOGLE_DRIVE_ID) {
+      setDriveNotice(null);
+      if (driveConnected) disconnectDrive.mutate(); else connectDrive.mutate();
+      return;
+    }
     const next = toggleId(connected, id);
     setConnected(next);
     writeConnected(next);
   }
+  const isConnected = (id: string) => (id === GOOGLE_DRIVE_ID ? driveConnected : connected.includes(id));
+  const liveFor = (id: string) => (id === GOOGLE_DRIVE_ID ? liveState : undefined);
   const [category, setCategory] = useState<ConnectorCategory>("all");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("popular");
@@ -146,6 +205,12 @@ export function ConnectorsPage() {
           </div>
         </div>
       </header>
+
+      {driveNotice && (
+        <div role={driveNotice.tone === "error" ? "alert" : "status"} className={cn("mb-5 rounded-md border px-4 py-3 text-xs", driveNotice.tone === "error" ? "border-red-400/30 text-red-300" : "border-emerald-400/30 text-emerald-300")}>
+          {driveNotice.text}
+        </div>
+      )}
 
       {showAddHelp && (
         <div
@@ -262,7 +327,7 @@ export function ConnectorsPage() {
               </div>
               <div className="grid gap-3 lg:grid-cols-2">
                 {popular.map((connector) => (
-                  <ConnectorRow key={connector.id} connector={connector} connected={connected.includes(connector.id)} onToggle={() => toggleConnection(connector.id)} />
+                  <ConnectorRow key={connector.id} connector={connector} connected={isConnected(connector.id)} onToggle={() => toggleConnection(connector.id)} live={liveFor(connector.id)} />
                 ))}
               </div>
             </section>
@@ -288,7 +353,7 @@ export function ConnectorsPage() {
               </div>
               <div className="grid gap-3 lg:grid-cols-2">
                 {yours.map((connector) => (
-                  <ConnectorRow key={connector.id} connector={connector} connected={connected.includes(connector.id)} onToggle={() => toggleConnection(connector.id)} />
+                  <ConnectorRow key={connector.id} connector={connector} connected={isConnected(connector.id)} onToggle={() => toggleConnection(connector.id)} live={liveFor(connector.id)} />
                 ))}
               </div>
             </section>
@@ -312,6 +377,7 @@ export function ConnectorsPage() {
           </button>
         </div>
       )}
+      <DriveBrowserDialog open={browserOpen} onOpenChange={setBrowserOpen} onReauth={() => setDriveNotice({ tone: "error", text: "Google access expired. Reconnect Google Drive." })} />
     </section>
   );
 }
