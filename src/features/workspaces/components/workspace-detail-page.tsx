@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Database, FileText, Folder, MessageSquare, Plus, Workflow, X } from "lucide-react";
+import { ChevronRight, Database, Download, FileText, Folder, MessageSquare, Plus, Search, Workflow, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   createWorkspaceWorkflow,
@@ -195,9 +195,189 @@ export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
           </div>
         )}
       </section>}
-      <div hidden={tab !== "datasets"}>
-        <WorkspaceDatasets workspaceId={workspaceId} workspaceName={item.name} datasets={datasets.data?.items ?? []} onUpload={(file) => uploadDatasetMutation.mutate(file)} uploadFailed={uploadDatasetMutation.isError} />
-      </div>
+      {tab === "datasets" && (
+        <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
+          <div className="rounded-xl border bg-card/40">
+            <div className="flex flex-wrap items-center gap-3 border-b p-4 sm:p-5">
+              <div className="mr-auto">
+                <h3 className="text-xl font-semibold tracking-tight">Datasets</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Data shared by every chat in this workspace.
+                </p>
+              </div>
+              <label className="relative">
+                <span className="sr-only">Search datasets</span>
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={datasetSearch}
+                  onChange={(event) => setDatasetSearch(event.target.value)}
+                  placeholder="Search datasets…"
+                  className="h-9 w-48 rounded-md border bg-background pl-9 pr-3 text-xs outline-none"
+                />
+              </label>
+              <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
+                <Plus className="size-4" />
+                Add Dataset
+                <input
+                  type="file"
+                  accept=".csv,.tsv,.xlsx,.xls,.parquet"
+                  className="sr-only"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) uploadDatasetMutation.mutate(file);
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
+            </div>
+
+            {visibleDatasets.length ? (
+              <div className="divide-y">
+                {visibleDatasets.map((dataset) => (
+                  <button
+                    key={dataset.id}
+                    type="button"
+                    onClick={() => setSelectedDataset(dataset)}
+                    className={cn(
+                      "flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition-colors hover:bg-surface",
+                      selectedDataset?.id === dataset.id && "bg-raised"
+                    )}
+                  >
+                    <Database className="size-4 text-sage shrink-0" />
+                    <span className="min-w-0 flex-1 truncate font-medium">{dataset.name}</span>
+                    <span className="rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      {dataset.name.split(".").pop()?.toUpperCase()}
+                    </span>
+                    <span className="w-16 text-right text-xs text-muted-foreground">
+                      {formatBytes(dataset.size_bytes)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="px-6 py-14 text-center">
+                <p className="text-sm font-medium">No datasets yet</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Upload a structured file to share it with this workspace.
+                </p>
+              </div>
+            )}
+            {uploadDatasetMutation.isError && (
+              <p className="border-t px-4 py-2 text-xs text-red-300">Could not upload this dataset.</p>
+            )}
+          </div>
+
+          <aside className="rounded-xl border bg-surface/50 p-6">
+            {selectedDataset ? (
+              <div className="space-y-6">
+                <div className="flex items-start gap-3.5">
+                  <div className="grid size-12 shrink-0 place-items-center rounded-xl border bg-raised text-slate shadow-sm">
+                    <Database className="size-6 text-slate" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="rounded border bg-background/80 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                        {selectedDataset.name.split(".").pop()?.toUpperCase() ?? "DATASET"}
+                      </span>
+                      <span className="rounded border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-400">
+                        Ready
+                      </span>
+                    </div>
+                    <h3 className="mt-1.5 truncate text-lg font-bold tracking-tight text-foreground" title={selectedDataset.name}>
+                      {selectedDataset.name}
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Workspace scope · Added {formatDate(selectedDataset.created_at || new Date().toISOString())}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg border bg-background/60 p-3.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Rows</span>
+                    <p className="mt-1 text-xl font-bold tracking-tight text-foreground">
+                      {selectedDataset.row_count != null ? selectedDataset.row_count.toLocaleString() : "—"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border bg-background/60 p-3.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Columns</span>
+                    <p className="mt-1 text-xl font-bold tracking-tight text-foreground">
+                      {(selectedDataset.column_count ?? selectedDataset.columns?.length) != null
+                        ? (selectedDataset.column_count ?? selectedDataset.columns?.length)
+                        : "—"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border bg-background/60 p-3.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">File Size</span>
+                    <p className="mt-1 text-sm font-semibold tracking-tight text-foreground">
+                      {formatBytes(selectedDataset.size_bytes)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border bg-background/60 p-3.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Origin</span>
+                    <p className="mt-1 text-sm font-semibold capitalize tracking-tight text-foreground">
+                      {selectedDataset.origin ?? "Uploaded"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between border-b pb-2">
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground">
+                      Schema Architecture
+                    </h4>
+                    <span className="text-[11px] font-medium text-muted-foreground">
+                      {selectedDataset.columns?.length ?? 0} fields
+                    </span>
+                  </div>
+
+                  {selectedDataset.columns?.length ? (
+                    <div className="max-h-60 space-y-1.5 overflow-y-auto pr-1">
+                      {selectedDataset.columns.map((column, index) => (
+                        <div
+                          key={`${column.name}-${index}`}
+                          className="flex items-center justify-between gap-3 rounded-md border bg-background/40 px-3 py-2 text-xs"
+                        >
+                          <span className="font-mono font-medium text-foreground truncate">{column.name}</span>
+                          <span className="rounded bg-raised border px-1.5 py-0.5 font-mono text-[10px] uppercase text-muted-foreground shrink-0">
+                            {column.data_type}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed py-6 text-center">
+                      <p className="text-xs text-muted-foreground">Schema is not available yet.</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-2">
+                  <a
+                    href={selectedDataset.download_url}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg border bg-raised px-4 py-2.5 text-xs font-medium text-foreground transition-colors hover:bg-surface hover:text-foreground"
+                  >
+                    <Download className="size-4 text-slate" />
+                    Download dataset
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <div className="grid min-h-[320px] place-items-center text-center">
+                <div className="max-w-xs">
+                  <div className="mx-auto grid size-12 place-items-center rounded-xl border bg-raised text-muted-foreground">
+                    <Database className="size-6 text-muted-foreground" />
+                  </div>
+                  <p className="mt-4 text-base font-semibold text-foreground">Select a dataset</p>
+                  <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed">
+                    Its metadata and schema will appear here.
+                  </p>
+                </div>
+              </div>
+            )}
+          </aside>
+        </section>
+      )}
       {tab === "workflows" && <section><div className="mb-4 flex items-center justify-between"><div><h3 className="text-xl font-semibold">Workflows</h3><p className="mt-1 text-xs text-muted-foreground">Automation owned by this workspace.</p></div><Button type="button" onClick={() => setCreatingWorkflow(true)}><Plus/>Create Workflow</Button></div>{creatingWorkflow && <form onSubmit={(event) => { event.preventDefault(); if (workflowName.trim()) createWorkflowMutation.mutate(); }} className="mb-4 flex gap-2 rounded-lg border bg-surface p-3"><input autoFocus value={workflowName} onChange={(event) => setWorkflowName(event.target.value)} placeholder="Workflow name" className="h-9 min-w-0 flex-1 rounded border bg-background px-3 text-sm outline-none"/><Button type="submit" disabled={!workflowName.trim() || createWorkflowMutation.isPending}>{createWorkflowMutation.isPending ? "Creating…" : "Create"}</Button><Button type="button" variant="ghost" onClick={() => setCreatingWorkflow(false)}>Cancel</Button></form>}{workflows.data?.items.length ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{workflows.data.items.map((workflow) => <article key={workflow.id} className="rounded-lg border bg-surface p-4"><div className="flex items-start gap-3"><div className="grid size-9 place-items-center rounded border bg-raised"><Workflow className="size-4"/></div><div className="min-w-0"><h4 className="truncate text-sm font-medium">{workflow.name}</h4><p className="mt-1 text-xs text-muted-foreground">{workflow.description || "No description"}</p></div></div><div className="mt-4 flex items-center justify-between border-t pt-3 text-xs"><span className="capitalize text-muted-foreground">{workflow.status}</span><span className="text-muted-foreground">Updated {formatDate(workflow.updated_at)}</span></div></article>)}</div> : <div className="rounded-lg border border-dashed px-6 py-16 text-center"><Workflow className="mx-auto size-7 text-muted-foreground"/><p className="mt-3 text-sm font-medium">No workflows in this workspace</p><p className="mt-1 text-xs text-muted-foreground">Create a workflow to keep this workspace’s recurring work together.</p></div>}</section>}
       {tab === "context" && <section className="grid min-h-[520px] overflow-hidden rounded-lg border md:grid-cols-[280px_minmax(0,1fr)]"><aside className="border-b p-3 md:border-b-0 md:border-r"><div className="mb-3 flex items-center justify-between"><p className="text-xs font-medium">Context files</p><Button size="icon" variant="ghost" type="button" aria-label="New context file" onClick={() => { setSelectedContextId(null); setContextDraft(""); }}><Plus/></Button></div><div className="space-y-1">{(contextFiles.data?.items ?? []).map((file) => <button key={file.id} type="button" onClick={() => { setSelectedContextId(file.id); setContextDraft(file.content); }} className={cn("flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs", selectedContextId === file.id ? "bg-raised text-foreground" : "text-muted-foreground hover:bg-surface")}><FileText className="size-3.5"/><span className="truncate">{file.name}</span></button>)}</div></aside><div className="flex min-w-0 flex-col"><div className="flex h-12 items-center justify-between border-b px-4"><input value={selectedContext?.name ?? (selectedContextId ? "" : "notes.md")} onChange={(event) => { if (selectedContext) updateWorkspaceContextFile(workspaceId, selectedContext.id, { name: event.target.value }).then(() => queryClient.invalidateQueries({ queryKey: ["workspace", workspaceId, "context-files"] })); }} disabled={!selectedContext} className="min-w-0 bg-transparent text-sm font-medium outline-none disabled:text-foreground"/><div className="flex gap-2">{selectedContext && <Button size="sm" variant="ghost" type="button" onClick={() => deleteContextMutation.mutate(selectedContext.id)}><X/>Delete</Button>}<Button size="sm" type="button" onClick={() => saveContextMutation.mutate()} disabled={saveContextMutation.isPending}>{saveContextMutation.isPending ? "Saving…" : "Save"}</Button></div></div><textarea value={contextDraft} onChange={(event) => setContextDraft(event.target.value)} placeholder="# Workspace instructions\n\nAdd durable instructions for future analyses…" className="min-h-[440px] flex-1 resize-none bg-background p-5 font-mono text-sm leading-6 outline-none"/>{saveContextMutation.isError && <p className="border-t px-4 py-2 text-xs text-red-300">Could not save this context file.</p>}</div></section>}
     </div>
