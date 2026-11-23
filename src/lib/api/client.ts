@@ -4,6 +4,8 @@ import type {
   DriveFilesPage,
   DashboardAiDataset,
   DashboardAiResult,
+  DashboardCustomResult,
+  DatasetRelations,
   DashboardAiWidget,
   DriveImportResult,
   ChatDto,
@@ -597,18 +599,37 @@ export function importDriveFiles(input: { fileIds: string[]; scopeType: "chat" |
   });
 }
 
-export function generateDashboardWithAi(input: { prompt: string; datasets: DashboardAiDataset[]; modelId: string }): Promise<DashboardAiResult> {
+export function generateDashboardWithAi(input: { prompt: string; datasets: DashboardAiDataset[]; modelId: string; context?: string }): Promise<DashboardAiResult> {
   return requestJson("/dashboards/ai/generate", {
     method: "POST",
-    body: JSON.stringify({ prompt: input.prompt, datasets: input.datasets, model_id: input.modelId }),
+    body: JSON.stringify({ prompt: input.prompt, datasets: input.datasets, model_id: input.modelId, context: input.context ?? "" }),
   });
 }
 
-export function tuneDashboardWithAi(input: { instruction: string; widgets: DashboardAiWidget[]; slicers: string[]; name: string; datasets: DashboardAiDataset[]; modelId: string }): Promise<DashboardAiResult> {
+export function tuneDashboardWithAi(input: { instruction: string; widgets: DashboardAiWidget[]; slicers: string[]; name: string; datasets: DashboardAiDataset[]; modelId: string; context?: string }): Promise<DashboardAiResult> {
   return requestJson("/dashboards/ai/tune", {
     method: "POST",
-    body: JSON.stringify({ instruction: input.instruction, widgets: input.widgets, slicers: input.slicers, name: input.name, datasets: input.datasets, model_id: input.modelId }),
+    body: JSON.stringify({ instruction: input.instruction, widgets: input.widgets, slicers: input.slicers, name: input.name, datasets: input.datasets, model_id: input.modelId, context: input.context ?? "" }),
   });
+}
+
+/** A chart no preset covers: the AI writes a Python script, the server runs it, and the working tile comes back. */
+export function buildCustomChartWithAi(input: { request: string; title?: string; datasetIds: string[]; modelId: string }): Promise<{ widget: DashboardAiWidget; result: DashboardCustomResult }> {
+  return requestJson("/dashboards/ai/custom", {
+    method: "POST",
+    body: JSON.stringify({ request: input.request, title: input.title ?? "", dataset_ids: input.datasetIds, model_id: input.modelId }),
+  });
+}
+
+/** Runs a saved tile script on the current rows. */
+export async function runCustomChart(script: string, datasetIds: string[]): Promise<DashboardCustomResult> {
+  const body = await requestJson<{ result: DashboardCustomResult }>("/dashboards/custom/run", { method: "POST", body: JSON.stringify({ script, dataset_ids: datasetIds }) });
+  return body.result;
+}
+
+/** Where two or more datasets overlap, and where they disagree about the same quantity. */
+export function analyzeDatasets(datasetIds: string[]): Promise<DatasetRelations> {
+  return requestJson("/dashboards/ai/analyze", { method: "POST", body: JSON.stringify({ dataset_ids: datasetIds }) });
 }
 
 export function reviewDashboardWithAi(input: { widgets: DashboardAiWidget[]; datasets: DashboardAiDataset[]; modelId: string }): Promise<DashboardAiResult> {

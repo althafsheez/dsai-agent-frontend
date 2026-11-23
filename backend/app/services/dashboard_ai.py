@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import re
 from typing import Any
 
 from agentic.runtime.contracts import ChatTurn, LLMProvider, ProviderError
 
-WIDGET_TYPES = {"kpi", "gauge", "bar", "hbar", "line", "area", "pie", "radar", "funnel", "treemap", "histogram", "scatter", "table"}
+from .dashboard_script import MAX_SCRIPT, ScriptError, run_script, validate_script
+
+logger = logging.getLogger(__name__)
+
+WIDGET_TYPES = {"custom", "kpi", "gauge", "bar", "hbar", "line", "area", "pie", "radar", "funnel", "treemap", "histogram", "scatter", "table"}
 NO_CATEGORY = {"kpi", "gauge", "table"}
 NUMERIC_X = {"histogram", "scatter"}
 AGGREGATES = {"sum", "avg", "count"}
@@ -19,6 +25,9 @@ SPEC = (
     "kpi, gauge (an average against the column's maximum) and table need no x; histogram takes a numeric x and counts rows per range; "
     "scatter takes a numeric x and a numeric y (one dot per row). Mix chart types so the dashboard is varied: ranking charts (hbar, funnel), "
     "composition (pie, treemap), trend (line, area), distribution (histogram), relationship (scatter), comparison across many measures (radar). "
+    'If a request cannot be shown with any of those types (a calculation across datasets, a ratio, a cohort, a custom ranking, anything unusual), '
+    'add {"type":"custom","title":str,"dataset_id":str,"datasets":[ids it needs],"request":"what to compute and how to show it, in words"}; '
+    "the app then writes and runs a Python script for it. Use custom only when no preset type fits. "
     "Use only dataset ids and column names that appear in the schema."
 )
 
@@ -88,6 +97,23 @@ def sanitize_widgets(raw: Any, datasets: list[dict[str, Any]]) -> tuple[list[dic
             else:
                 notes.append(f"Removed “{label}”: its dataset is not selected.")
                 continue
+        if wtype == "custom":
+            ids = [value for value in item.get("datasets", []) if isinstance(value, str) and value in schema.datasets] if isinstance(item.get("datasets"), list) else []
+            script = str(item.get("script") or "")
+            if script:
+                try:
+                    validate_script(script)
+                except ScriptError as exc:
+                    notes.append(f"“{label}”: the script was refused ({exc}); it will be rewritten.")
+                    script = ""
+            span = item.get("span") if item.get("span") in (1, 2, 3) else 2
+            widget_id = str(item.get("id") or "")
+            if not widget_id or widget_id in used_ids:
+                widget_id = f"w-ai-{index}-{len(cleaned)}"
+            used_ids.add(widget_id)
+            cleaned.append({"id": widget_id, "type": "custom", "title": label, "dataset_id": dataset_id, "datasets": ids or [dataset_id], "x": None, "y": None, "agg": "count",
+                            "span": span, "script": script, "request": str(item.get("request") or label)[:400]})
+            continue
         agg = str(item.get("agg", "sum")).lower()
         if agg not in AGGREGATES:
             agg = "sum"
@@ -179,6 +205,11 @@ def _schema_text(datasets: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _context(text: str) -> str:
+    """What the app learned about how the selected datasets relate, and the user's choice about conflicts."""
+    return f"\nHow these datasets relate (from the app; follow the user's choice when files disagree):\n{text[:3000]}\n" if text.strip() else ""
+
+
 def _extract_json(text: str) -> Any:
     fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.S)
     candidate = fenced.group(1) if fenced else text
@@ -188,29 +219,43 @@ def _extract_json(text: str) -> Any:
     return json.loads(candidate[start:end + 1])
 
 
+ATTEMPT_SECONDS = 45
+
+
+async def _stream_reply(provider: LLMProvider, prompt: str, model_id: str, effort: str | None) -> str:
+    reply = ""
+    async for chunk in provider.stream_text([ChatTurn(role="user", content=prompt)], model_id, effort):
+        reply += chunk
+    return reply
+
+
 async def _ask(provider: LLMProvider, prompt: str, model_id: str, effort: str | None) -> Any:
-    """Up to 3 attempts: Gemini intermittently fails calls that succeed when repeated."""
+    """Up to 3 attempts: Gemini intermittently fails calls (or stalls without answering) that succeed when repeated."""
     last: Exception | None = None
-    for _ in range(3):
-        reply = ""
+
+    for attempt in range(3):
         try:
-            async for chunk in provider.stream_text([ChatTurn(role="user", content=prompt)], model_id, effort):
-                reply += chunk
-            return _extract_json(reply)
+            return _extract_json(await asyncio.wait_for(_stream_reply(provider, prompt, model_id, effort), ATTEMPT_SECONDS))
+        except asyncio.TimeoutError:
+            last = ProviderError("provider_timeout", "The AI took too long to answer.")
+            logger.warning("Dashboard AI attempt %d timed out after %ds", attempt + 1, ATTEMPT_SECONDS)
         except (ProviderError, ValueError) as exc:
             last = exc
+            logger.warning("Dashboard AI attempt failed: %s (%s)", exc, repr(exc.__cause__)[:300] if exc.__cause__ else "no cause")
+            if exc.__cause__ is not None and attempt < 2:
+                await asyncio.sleep(2 * (attempt + 1))  # Gemini "high demand" spikes are short; waiting beats three instant retries.
     assert last is not None
     raise last
 
 
-async def generate(provider: LLMProvider, prompt: str, datasets: list[dict[str, Any]], model_id: str, effort: str | None) -> dict[str, Any]:
+async def generate(provider: LLMProvider, prompt: str, datasets: list[dict[str, Any]], model_id: str, effort: str | None, context: str = "") -> dict[str, Any]:
     request = (
         "You design BI dashboards (like Power BI). Reply with ONLY a JSON object: "
         '{"name": str, "description": str, "widgets": [widget, ...], "slicers": [column, ...], "suggestions": [str, ...]}. '
         f"Build 5 to 9 widgets: KPIs first, then charts that answer the request, then a table if useful. {SPEC} "
         "slicers: 2 to 3 category columns people would filter by. "
         "suggestions: 3 short follow-up requests the user could ask next to improve this dashboard.\n\n"
-        f"Datasets:\n{_schema_text(datasets)}\n\nUser request: {prompt}"
+        f"Datasets:\n{_schema_text(datasets)}\n{_context(context)}\nUser request: {prompt}"
     )
     try:
         data = await _ask(provider, request, model_id, effort)
@@ -225,7 +270,7 @@ async def generate(provider: LLMProvider, prompt: str, datasets: list[dict[str, 
 
 async def tune(
     provider: LLMProvider, instruction: str, widgets: list[dict[str, Any]], slicers: list[str], name: str,
-    datasets: list[dict[str, Any]], model_id: str, effort: str | None,
+    datasets: list[dict[str, Any]], model_id: str, effort: str | None, context: str = "",
 ) -> dict[str, Any]:
     """Apply a plain-language change to an existing dashboard. Everything returned is repaired against the real columns."""
     current, _ = sanitize_widgets(widgets, datasets)
@@ -236,7 +281,7 @@ async def tune(
         'Reply with ONLY a JSON object: {"name": str, "widgets": [widget, ...], "slicers": [column, ...], '
         '"notes": [short strings describing each change you made], "suggestions": [3 short follow-up requests]}. '
         f"{SPEC}\n\nDatasets:\n{_schema_text(datasets)}\n\nDashboard name: {name}\n"
-        f"Current widgets:\n{json.dumps(current)}\nCurrent slicers: {json.dumps(slicers)}\n\nUser request: {instruction}"
+        f"Current widgets:\n{json.dumps(current)}\nCurrent slicers: {json.dumps(slicers)}\n{_context(context)}\nUser request: {instruction}"
     )
     try:
         data = await _ask(provider, request, model_id, effort)
@@ -273,3 +318,69 @@ async def review(provider: LLMProvider, widgets: list[dict[str, Any]], datasets:
         notes.append("The AI review returned nothing usable; kept the automatic fixes.")
         return {"ok": True, "ai": False, "widgets": repaired, "notes": notes}
     return {"ok": True, "ai": True, "widgets": improved, "notes": notes + ai_notes + more}
+
+
+SCRIPT_CONTRACT = (
+    "Write a short Python 3 script. Variables already defined: `datasets` (list of {id, name, columns: [names], rows: [[cells as strings]]}), "
+    "`data` (the same, keyed by id), `num(value)` (string to float or None), `col(dataset, column_name)` (list of that column's cells). "
+    "Only these imports work: math, statistics, collections, datetime, itertools, re, json, functools, heapq, bisect, decimal, fractions, string, random. "
+    "No files, network, eval or dunder attributes. Compute what is asked, then set `result` to one dict: "
+    '{"kind": bar|hbar|line|area|pie|radar|funnel|treemap|histogram, "title": str, "labels": [str], "series": [number]} for categories, '
+    '{"kind": "scatter", "points": [[x, y], ...]}, {"kind": "table", "columns": [str], "rows": [[...]]}, '
+    '{"kind": "kpi", "value": number, "label": str} or {"kind": "gauge", "value": number, "max": number}. '
+    "Keep at most 30 labels. Skip rows whose numbers are None. Reply with ONLY the code in a ```python block."
+)
+
+
+def _script_from(reply: str) -> str:
+    fenced = re.search(r"```(?:python)?\s*(.*?)```", reply, re.S)
+    return (fenced.group(1) if fenced else reply).strip()
+
+
+async def write_script(provider: LLMProvider, request_text: str, title: str, loaded: list[dict[str, Any]], model_id: str, effort: str | None) -> tuple[str, dict[str, Any]]:
+    """Ask for a script, run it on the real rows, and feed any error back, up to three tries. Returns (script, result)."""
+    schema = _schema_text([{"id": d["id"], "name": d["name"], "columns": [{"name": c} for c in d["columns"]], "rows": d["rows"][:4], "row_count": len(d["rows"])} for d in loaded])
+    problem = ""
+    last = "The AI did not return a script."
+    for attempt in range(3):
+        prompt = f"{SCRIPT_CONTRACT}\n\nDatasets:\n{schema}\n\nChart title: {title}\nWhat to compute: {request_text}"
+        if problem:
+            prompt += f"\n\nYour previous script failed: {problem}\nFix it and send the whole script again."
+        try:
+            reply = await asyncio.wait_for(_stream_reply(provider, prompt, model_id, effort), ATTEMPT_SECONDS)
+        except asyncio.TimeoutError:
+            last = "The AI took too long to answer."
+            continue
+        except ProviderError as exc:
+            last = f"The AI was unavailable: {exc}"
+            logger.warning("Dashboard script attempt failed: %s (%s)", exc, repr(exc.__cause__)[:300] if exc.__cause__ else "no cause")
+            if exc.__cause__ is not None and attempt < 2:
+                await asyncio.sleep(2 * (attempt + 1))
+            continue
+        script = _script_from(reply)[:MAX_SCRIPT + 1]
+        try:
+            return script, run_script(script, loaded)
+        except ScriptError as exc:
+            problem = last = str(exc)
+    raise ScriptError(last)
+
+
+async def fill_custom(provider: LLMProvider, widgets: list[dict[str, Any]], load, model_id: str, effort: str | None, notes: list[str]) -> list[dict[str, Any]]:
+    """Give every custom widget that has no working script one, written for its request. `load(dataset_id)` returns full rows or None."""
+    result: list[dict[str, Any]] = []
+    for widget in widgets:
+        if widget.get("type") != "custom" or widget.get("script"):
+            result.append(widget)
+            continue
+        loaded = [item for item in (load(dataset_id) for dataset_id in widget.get("datasets") or [widget["dataset_id"]]) if item]
+        if not loaded:
+            notes.append(f"Removed “{widget['title']}”: its data could not be read.")
+            continue
+        try:
+            script, _ = await write_script(provider, widget.get("request") or widget["title"], widget["title"], loaded, model_id, effort)
+        except ScriptError as exc:
+            notes.append(f"Could not build “{widget['title']}” with a script: {exc}")
+            continue
+        notes.append(f"“{widget['title']}” is not a preset chart, so the AI wrote a small Python script for it.")
+        result.append({**widget, "script": script})
+    return result

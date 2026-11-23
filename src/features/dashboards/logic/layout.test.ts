@@ -17,3 +17,13 @@ describe("packedSpans", () => {
     expect(packedSpans([])).toEqual({});
   });
 });
+
+describe("moveItem", () => {
+  it("moves an item and clamps at the ends", async () => {
+    const { moveItem } = await import("./layout");
+    expect(moveItem(["a", "b", "c"], 0, 2)).toEqual(["b", "c", "a"]);
+    expect(moveItem(["a", "b", "c"], 2, 0)).toEqual(["c", "a", "b"]);
+    expect(moveItem(["a", "b", "c"], 0, -1)).toEqual(["a", "b", "c"]);
+    expect(moveItem(["a", "b", "c"], 2, 5)).toEqual(["a", "b", "c"]);
+  });
+});

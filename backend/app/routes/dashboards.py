@@ -12,9 +12,12 @@ from agentic.runtime.contracts import ProviderError
 
 from ..dependencies import get_current_user, get_db
 from ..errors import APIError
-from ..models import Dashboard, Resource, User
+from ..models import Dashboard, FileObject, Resource, User
 from ..services import dashboard_ai
+from ..services import dataset_relations
 from ..services.dashboard_preview import compute_preview
+from ..services.dashboard_script import ScriptError, run_script
+from ..services.dataset_preview import read_csv_rows
 
 router = APIRouter(prefix="/api/dashboards/ai", tags=["dashboards"])
 store_router = APIRouter(prefix="/api/dashboards", tags=["dashboards"])
@@ -38,6 +41,7 @@ class GenerateRequest(BaseModel):
     datasets: list[DatasetBrief] = Field(min_length=1, max_length=8)
     model_id: str
     effort: str | None = None
+    context: str = Field(default="", max_length=3000)
 
 
 class TuneRequest(BaseModel):
@@ -48,6 +52,7 @@ class TuneRequest(BaseModel):
     datasets: list[DatasetBrief] = Field(min_length=1, max_length=8)
     model_id: str
     effort: str | None = None
+    context: str = Field(default="", max_length=3000)
 
 
 class ReviewRequest(BaseModel):
@@ -64,25 +69,108 @@ def _validated(request: Request, model_id: str, effort: str | None) -> None:
         raise APIError(422, exc.code, str(exc)) from exc
 
 
+def _loader(request: Request, db: Session, user: User):
+    """Reads a dataset's full rows for a script. Only datasets the user owns or can see through a dashboard."""
+    def load(dataset_id: str) -> dict | None:
+        row = db.execute(select(Resource, FileObject).join(FileObject, FileObject.id == Resource.file_object_id).where(Resource.id == dataset_id)).one_or_none()
+        if row is None or (row[0].created_by != user.id and not can_view_dataset(db, user, dataset_id)):
+            return None
+        try:
+            rows = read_csv_rows(row[0].name, request.app.state.storage.read_bytes(row[1].relative_storage_path))
+        except OSError:
+            return None
+        return None if rows is None else {"id": dataset_id, "name": row[0].name, "columns": [column["name"] for column in rows["columns"]], "rows": rows["rows"]}
+
+    return load
+
+
+async def _with_scripts(result: dict, data, request: Request, db: Session, user: User) -> dict:
+    """Widgets the AI marked custom get a Python script written (and test-run on the real rows) before they are returned."""
+    notes = list(result.get("notes", []))
+    result["widgets"] = await dashboard_ai.fill_custom(request.app.state.provider, result["widgets"], _loader(request, db, user), data.model_id, data.effort, notes)
+    result["notes"] = notes
+    if not result["widgets"]:
+        raise APIError(502, "dashboard_ai_failed", "None of the widgets could be built. Try rephrasing the request.")
+    return result
+
+
 @router.post("/generate")
-async def generate_dashboard(data: GenerateRequest, request: Request, user: User = Depends(get_current_user)) -> dict:
+async def generate_dashboard(data: GenerateRequest, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
     _validated(request, data.model_id, data.effort)
     datasets = [item.model_dump() for item in data.datasets]
-    result = await dashboard_ai.generate(request.app.state.provider, data.prompt.strip(), datasets, data.model_id, data.effort)
+    result = await dashboard_ai.generate(request.app.state.provider, data.prompt.strip(), datasets, data.model_id, data.effort, data.context)
     if not result["ok"]:
         raise APIError(502, "dashboard_ai_failed", result["error"])
-    return result
+    return await _with_scripts(result, data, request, db, user)
 
 
 @router.post("/tune")
-async def tune_dashboard(data: TuneRequest, request: Request, user: User = Depends(get_current_user)) -> dict:
+async def tune_dashboard(data: TuneRequest, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
     """Change an existing dashboard from a plain-language instruction (layout, charts, filters, titles, anything)."""
     _validated(request, data.model_id, data.effort)
     datasets = [item.model_dump() for item in data.datasets]
-    result = await dashboard_ai.tune(request.app.state.provider, data.instruction.strip(), data.widgets, data.slicers, data.name, datasets, data.model_id, data.effort)
+    result = await dashboard_ai.tune(request.app.state.provider, data.instruction.strip(), data.widgets, data.slicers, data.name, datasets, data.model_id, data.effort, data.context)
     if not result["ok"]:
         raise APIError(502, "dashboard_ai_failed", result["error"])
-    return result
+    return await _with_scripts(result, data, request, db, user)
+
+
+class CustomRequest(BaseModel):
+    request: str = Field(min_length=3, max_length=1000)
+    title: str = Field(default="", max_length=80)
+    dataset_ids: list[str] = Field(min_length=1, max_length=8)
+    model_id: str
+    effort: str | None = None
+
+
+@router.post("/custom")
+async def build_custom_chart(data: CustomRequest, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    """A chart no preset covers: the AI writes a Python script for it, it is run on the real rows, and the working script comes back."""
+    _validated(request, data.model_id, data.effort)
+    load = _loader(request, db, user)
+    loaded = [item for item in (load(dataset_id) for dataset_id in data.dataset_ids) if item]
+    if not loaded:
+        raise APIError(404, "dataset_not_found", "None of those datasets could be read.")
+    try:
+        script, result = await dashboard_ai.write_script(request.app.state.provider, data.request.strip(), data.title or data.request[:60], loaded, data.model_id, data.effort)
+    except ScriptError as exc:
+        raise APIError(502, "dashboard_script_failed", str(exc)) from exc
+    widget = {"id": f"w-py-{abs(hash(script)) % 10**8}", "type": "custom", "title": data.title or result.get("title") or data.request[:60], "dataset_id": loaded[0]["id"],
+              "datasets": [item["id"] for item in loaded], "x": None, "y": None, "agg": "count", "span": 2, "script": script, "request": data.request.strip()}
+    return {"widget": widget, "result": result}
+
+
+class RunRequest(BaseModel):
+    script: str = Field(max_length=7000)
+    dataset_ids: list[str] = Field(min_length=1, max_length=8)
+
+
+run_router = APIRouter(prefix="/api/dashboards/custom", tags=["dashboards"])
+
+
+@run_router.post("/run")
+def run_custom_chart(data: RunRequest, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    """Runs a saved chart script on the current rows."""
+    load = _loader(request, db, user)
+    loaded = [item for item in (load(dataset_id) for dataset_id in data.dataset_ids) if item]
+    if not loaded:
+        raise APIError(404, "dataset_not_found", "None of those datasets could be read.")
+    try:
+        return {"result": run_script(data.script, loaded)}
+    except ScriptError as exc:
+        raise APIError(422, "dashboard_script_failed", str(exc)) from exc
+
+
+class AnalyzeRequest(BaseModel):
+    dataset_ids: list[str] = Field(min_length=2, max_length=8)
+
+
+@router.post("/analyze")
+def analyze_datasets(data: AnalyzeRequest, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    """How the chosen datasets overlap, and where two files disagree about the same quantity."""
+    load = _loader(request, db, user)
+    loaded = [item for item in (load(dataset_id) for dataset_id in data.dataset_ids) if item]
+    return dataset_relations.analyze(loaded)
 
 
 @router.post("/review")

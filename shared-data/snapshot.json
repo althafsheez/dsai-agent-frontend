@@ -1376,6 +1376,184 @@
     ]
    },
    {
+    "created_at": "2026-11-23T21:03:16.670125",
+    "dataset_ids": [
+     "6a23d32a-b83c-4ea6-a4e9-86820f8b77fc",
+     "c4927f34-706e-4266-8c0f-9c90557c9966"
+    ],
+    "description": "Two files, two different revenue totals for the same orders. The finance ledger is treated as the source of truth; the gap is shown, not hidden.",
+    "id": "db-crm-vs-finance",
+    "name": "Sales: CRM vs Finance",
+    "owner_id": "user-you",
+    "pinned": false,
+    "pinned_by": [],
+    "preview": {
+     "tiles": [
+      {
+       "span": 1,
+       "title": "Revenue per Finance ledger",
+       "type": "kpi",
+       "value": "16,384"
+      },
+      {
+       "span": 1,
+       "title": "Revenue per CRM export",
+       "type": "kpi",
+       "value": "16,941"
+      },
+      {
+       "span": 1,
+       "title": "Orders in the ledger",
+       "type": "kpi",
+       "value": "40"
+      },
+      {
+       "labels": [
+        "North",
+        "East",
+        "West",
+        "South"
+       ],
+       "series": [
+        5422.44,
+        4057.57,
+        3844.06,
+        3059.67
+       ],
+       "span": 1,
+       "title": "Finance ledger revenue by region (source of trut",
+       "type": "bar"
+      },
+      {
+       "labels": [
+        "East",
+        "North",
+        "South",
+        "West"
+       ],
+       "series": [
+        246.33,
+        59.97,
+        178.19,
+        72.38
+       ],
+       "span": 2,
+       "title": "Revenue gap by region (CRM minus Finance)",
+       "type": "bar"
+      },
+      {
+       "columns": [
+        "order_id",
+        "CRM revenue",
+        "Finance revenue",
+        "gap"
+       ],
+       "rows": [
+        [
+         "ORD-1037",
+         "788.47",
+         "693.85",
+         "94.62"
+        ],
+        [
+         "ORD-1033",
+         "685.46",
+         "603.20",
+         "82.26"
+        ],
+        [
+         "ORD-1025",
+         "650.14",
+         "572.12",
+         "78.02"
+        ]
+       ],
+       "span": 3,
+       "title": "Orders where the systems disagree most",
+       "type": "table"
+      }
+     ],
+     "total": 6
+    },
+    "refresh_minutes": 0,
+    "shares": [],
+    "slicers": [
+     "region"
+    ],
+    "status": "published",
+    "updated_at": "2026-11-23T21:03:16.670128",
+    "widgets": [
+     {
+      "agg": "sum",
+      "dataset_id": "6a23d32a-b83c-4ea6-a4e9-86820f8b77fc",
+      "id": "w-1",
+      "span": 1,
+      "title": "Revenue per Finance ledger",
+      "type": "kpi",
+      "y": "revenue"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "c4927f34-706e-4266-8c0f-9c90557c9966",
+      "id": "w-2",
+      "span": 1,
+      "title": "Revenue per CRM export",
+      "type": "kpi",
+      "y": "revenue"
+     },
+     {
+      "agg": "count",
+      "dataset_id": "6a23d32a-b83c-4ea6-a4e9-86820f8b77fc",
+      "id": "w-3",
+      "span": 1,
+      "title": "Orders in the ledger",
+      "type": "kpi"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "6a23d32a-b83c-4ea6-a4e9-86820f8b77fc",
+      "id": "w-4",
+      "span": 1,
+      "title": "Finance ledger revenue by region (source of truth)",
+      "type": "bar",
+      "x": "region",
+      "y": "revenue"
+     },
+     {
+      "agg": "count",
+      "dataset_id": "c4927f34-706e-4266-8c0f-9c90557c9966",
+      "datasets": [
+       "c4927f34-706e-4266-8c0f-9c90557c9966",
+       "6a23d32a-b83c-4ea6-a4e9-86820f8b77fc"
+      ],
+      "id": "w-gap",
+      "request": "For each region, the total CRM revenue minus the total Finance revenue (just sum each file by region), so the gap between the two systems is visible. Use a bar.",
+      "script": "import collections\n\ncrm_ds = data[\"c4927f34-706e-4266-8c0f-9c90557c9966\"]\nfin_ds = data[\"6a23d32a-b83c-4ea6-a4e9-86820f8b77fc\"]\n\ncrm_regions = col(crm_ds, \"region\")\ncrm_revs = col(crm_ds, \"revenue\")\nfin_regions = col(fin_ds, \"region\")\nfin_revs = col(fin_ds, \"revenue\")\n\ncrm_totals = collections.defaultdict(float)\nfor reg, rev_str in zip(crm_regions, crm_revs):\n    val = num(rev_str)\n    if val is not None and reg:\n        crm_totals[reg] += val\n\nfin_totals = collections.defaultdict(float)\nfor reg, rev_str in zip(fin_regions, fin_revs):\n    val = num(rev_str)\n    if val is not None and reg:\n        fin_totals[reg] += val\n\nall_regions = sorted(list(set(list(crm_totals.keys()) + list(fin_totals.keys()))))\n\nlabels = []\nseries = []\n\nfor reg in all_regions:\n    if len(labels) >= 30:\n        break\n    gap = crm_totals[reg] - fin_totals[reg]\n    labels.append(str(reg))\n    series.append(round(float(gap), 2))\n\nresult = {\n    \"kind\": \"bar\",\n    \"title\": \"Revenue gap by region (CRM minus Finance)\",\n    \"labels\": labels,\n    \"series\": series\n}",
+      "span": 2,
+      "title": "Revenue gap by region (CRM minus Finance)",
+      "type": "custom",
+      "x": null,
+      "y": null
+     },
+     {
+      "agg": "count",
+      "dataset_id": "c4927f34-706e-4266-8c0f-9c90557c9966",
+      "datasets": [
+       "c4927f34-706e-4266-8c0f-9c90557c9966",
+       "6a23d32a-b83c-4ea6-a4e9-86820f8b77fc"
+      ],
+      "id": "w-top",
+      "request": "A table of the 6 orders where the CRM revenue and the Finance revenue differ the most, matched on order_id, with columns order_id, CRM revenue, Finance revenue, gap (CRM minus Finance), biggest gap first.",
+      "script": "crm_ds = data.get(\"c4927f34-706e-4266-8c0f-9c90557c9966\")\nfin_ds = data.get(\"6a23d32a-b83c-4ea6-a4e9-86820f8b77fc\")\n\ncrm_map = {}\nfor row in crm_ds[\"rows\"]:\n    order_id = row[0]\n    rev = num(row[3])\n    if rev is not None:\n        crm_map[order_id] = rev\n\nfin_map = {}\nfor row in fin_ds[\"rows\"]:\n    order_id = row[0]\n    rev = num(row[3])\n    if rev is not None:\n        fin_map[order_id] = rev\n\ndiffs = []\nfor order_id, crm_rev in crm_map.items():\n    if order_id in fin_map:\n        fin_rev = fin_map[order_id]\n        gap = crm_rev - fin_rev\n        diffs.append((abs(gap), order_id, crm_rev, fin_rev, gap))\n\ndiffs.sort(key=lambda x: x[0], reverse=True)\n\nrows = []\nfor _, order_id, crm_rev, fin_rev, gap in diffs[:6]:\n    rows.append([order_id, f\"{crm_rev:.2f}\", f\"{fin_rev:.2f}\", f\"{gap:.2f}\"])\n\nresult = {\n    \"kind\": \"table\",\n    \"columns\": [\"order_id\", \"CRM revenue\", \"Finance revenue\", \"gap\"],\n    \"rows\": rows\n}",
+      "span": 3,
+      "title": "Orders where the systems disagree most",
+      "type": "custom",
+      "x": null,
+      "y": null
+     }
+    ]
+   },
+   {
     "created_at": "2026-11-23T20:04:20.048924",
     "dataset_ids": [
      "2cdb89b5-bbb6-4a17-a02d-aad624a8ac61"
@@ -2033,7 +2211,7 @@
        "type": "treemap"
       }
      ],
-     "total": 8
+     "total": 9
     },
     "refresh_minutes": 0,
     "shares": [],
@@ -2042,7 +2220,7 @@
      "category"
     ],
     "status": "published",
-    "updated_at": "2026-11-23T20:23:39.842721",
+    "updated_at": "2026-11-23T20:58:25.343870",
     "widgets": [
      {
       "agg": "count",
@@ -2117,6 +2295,19 @@
       "type": "scatter",
       "x": "units",
       "y": "revenue"
+     },
+     {
+      "agg": "count",
+      "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
+      "datasets": [
+       "f9dcfa8e-9085-4d28-98df-1bb9c289c04b"
+      ],
+      "id": "w-ai-8-8",
+      "request": "Group by region, calculate total revenue divided by total units, and return a horizontal bar chart or sorted table ranking regions by this ratio from highest to lowest.",
+      "script": "import collections\n\nds = data[\"f9dcfa8e-9085-4d28-98df-1bb9c289c04b\"]\nregion_col = col(ds, \"region\")\nunits_col = col(ds, \"units\")\nrevenue_col = col(ds, \"revenue\")\n\nregion_data = collections.defaultdict(lambda: [0.0, 0.0])  # [total_revenue, total_units]\n\nfor r_val, u_val, rev_val in zip(region_col, units_col, revenue_col):\n    u = num(u_val)\n    rev = num(rev_val)\n    if u is not None and rev is not None and r_val is not None:\n        region_data[r_val][0] += rev\n        region_data[r_val][1] += u\n\nratios = []\nfor reg, (tot_rev, tot_units) in region_data.items():\n    if tot_units > 0:\n        ratios.append((reg, tot_rev / tot_units))\n    else:\n        ratios.append((reg, 0.0))\n\nratios.sort(key=lambda x: x[1], reverse=True)\n\nlabels = [item[0] for item in ratios[:30]]\nseries = [item[1] for item in ratios[:30]]\n\nresult = {\n    \"kind\": \"hbar\",\n    \"title\": \"Regions ranked by revenue per unit sold\",\n    \"labels\": labels,\n    \"series\": series\n}",
+      "span": 2,
+      "title": "Regions ranked by revenue per unit sold",
+      "type": "custom"
      }
     ]
    },
@@ -14551,6 +14742,14 @@
     "size_bytes": 165066
    },
    {
+    "content_hash": "9039ee30f2420683574758ecd836296663839c78efc012626d10dda8771a2910",
+    "created_at": "2026-11-23T20:39:27.368566",
+    "id": "438db6aa-b60e-4087-ae36-5868fb3b5acf",
+    "mime_type": "text/csv",
+    "relative_storage_path": "90/2f2031e312e84e878d8d712234a72f76.bin",
+    "size_bytes": 1003
+   },
+   {
     "content_hash": "58656540962c03094f8f3186cf98ebc9192bd64b9da52182b265450435589c32",
     "created_at": "2026-11-19T17:01:17.140204",
     "id": "452f587c-e19b-4784-b6f9-3d3fca0f724a",
@@ -14637,6 +14836,14 @@
     "mime_type": "text/csv",
     "relative_storage_path": "86/19749ebd23394e9384bc3ea99475df65.bin",
     "size_bytes": 448
+   },
+   {
+    "content_hash": "f66ea21bec9a8e50c61cb1a673363cb88326266e72a598aa8eb52e55c22fea07",
+    "created_at": "2026-11-23T20:39:27.346619",
+    "id": "bd7700c9-3535-40f9-8d25-c547139d3ce4",
+    "mime_type": "text/csv",
+    "relative_storage_path": "f6/916676cbda484c2bb67bcb325c92320f.bin",
+    "size_bytes": 1005
    },
    {
     "content_hash": "900d2450c12b8f3c4ca8f940990fce6ba2ed217b48a4ee6159119cf425a14471",
@@ -14809,9 +15016,21 @@
     "user_id": "user-you"
    },
    {
+    "created_at": "2026-11-23T20:39:27.369639",
+    "id": "954594a7-d61a-4dd7-b049-2216f3664be4",
+    "resource_id": "6a23d32a-b83c-4ea6-a4e9-86820f8b77fc",
+    "user_id": "user-you"
+   },
+   {
     "created_at": "2026-11-23T18:37:25.261282",
     "id": "99846053-a8d6-4364-83ce-50922d6f23b4",
     "resource_id": "2cdb89b5-bbb6-4a17-a02d-aad624a8ac61",
+    "user_id": "user-you"
+   },
+   {
+    "created_at": "2026-11-23T20:39:27.348659",
+    "id": "aee69c2d-c976-442f-a0ec-3dbb1bf0e4f2",
+    "resource_id": "c4927f34-706e-4266-8c0f-9c90557c9966",
     "user_id": "user-you"
    },
    {
@@ -16990,6 +17209,15 @@
     "scope_type": "workspace"
    },
    {
+    "client_upload_id": "demo-sales_finance_ledger.csv",
+    "created_at": "2026-11-23T20:39:27.369813",
+    "id": "151762d6-41b3-4d2c-86e3-1b08232276ce",
+    "message_id": null,
+    "resource_id": "6a23d32a-b83c-4ea6-a4e9-86820f8b77fc",
+    "scope_id": "user-you",
+    "scope_type": "library"
+   },
+   {
     "client_upload_id": null,
     "created_at": "2026-11-21T01:09:09.515718",
     "id": "18b05921-004a-4886-a069-9d8b84545b65",
@@ -17591,6 +17819,15 @@
     "resource_id": "1dea7029-bc7a-4650-ba32-b987059c8cc8",
     "scope_id": "06295661-3f01-40c5-b9ac-83935fb137b7",
     "scope_type": "chat"
+   },
+   {
+    "client_upload_id": "demo-sales_crm_export.csv",
+    "created_at": "2026-11-23T20:39:27.349192",
+    "id": "98401134-fb91-481c-b821-a915d96496a6",
+    "message_id": null,
+    "resource_id": "c4927f34-706e-4266-8c0f-9c90557c9966",
+    "scope_id": "user-you",
+    "scope_type": "library"
    },
    {
     "client_upload_id": "gdrive:1kJrEckYGZKziWp6N7bU2bIgZY80ITsCy",
@@ -24378,6 +24615,282 @@
      "size_bytes": 484
     },
     "name": "products.csv",
+    "origin": "uploaded",
+    "resource_type": "dataset",
+    "run_id": null,
+    "source": "input"
+   },
+   {
+    "created_at": "2026-11-23T20:39:27.369205",
+    "created_by": "user-you",
+    "file_object_id": "438db6aa-b60e-4087-ae36-5868fb3b5acf",
+    "id": "6a23d32a-b83c-4ea6-a4e9-86820f8b77fc",
+    "metadata_json": {
+     "column_count": 4,
+     "columns": [
+      {
+       "data_type": "string",
+       "name": "order_id"
+      },
+      {
+       "data_type": "string",
+       "name": "region"
+      },
+      {
+       "data_type": "string",
+       "name": "units"
+      },
+      {
+       "data_type": "string",
+       "name": "revenue"
+      }
+     ],
+     "preview_rows": [
+      [
+       "ORD-1001",
+       "East",
+       "3",
+       "355.31"
+      ],
+      [
+       "ORD-1002",
+       "North",
+       "2",
+       "753.44"
+      ],
+      [
+       "ORD-1003",
+       "North",
+       "6",
+       "557.89"
+      ],
+      [
+       "ORD-1004",
+       "South",
+       "1",
+       "150.48"
+      ],
+      [
+       "ORD-1005",
+       "West",
+       "2",
+       "244.06"
+      ],
+      [
+       "ORD-1006",
+       "West",
+       "1",
+       "758.02"
+      ],
+      [
+       "ORD-1007",
+       "North",
+       "4",
+       "597.11"
+      ],
+      [
+       "ORD-1008",
+       "North",
+       "7",
+       "120.66"
+      ],
+      [
+       "ORD-1009",
+       "South",
+       "1",
+       "472.09"
+      ],
+      [
+       "ORD-1010",
+       "South",
+       "5",
+       "423.69"
+      ],
+      [
+       "ORD-1011",
+       "North",
+       "5",
+       "539.41"
+      ],
+      [
+       "ORD-1012",
+       "South",
+       "2",
+       "556.91"
+      ],
+      [
+       "ORD-1013",
+       "South",
+       "6",
+       "140.7"
+      ],
+      [
+       "ORD-1014",
+       "North",
+       "1",
+       "587.59"
+      ],
+      [
+       "ORD-1015",
+       "West",
+       "9",
+       "430.63"
+      ],
+      [
+       "ORD-1016",
+       "East",
+       "8",
+       "560.16"
+      ],
+      [
+       "ORD-1017",
+       "West",
+       "6",
+       "286.71"
+      ],
+      [
+       "ORD-1018",
+       "South",
+       "4",
+       "147.12"
+      ],
+      [
+       "ORD-1019",
+       "East",
+       "9",
+       "486.0"
+      ],
+      [
+       "ORD-1020",
+       "East",
+       "8",
+       "316.11"
+      ],
+      [
+       "ORD-1021",
+       "North",
+       "2",
+       "439.81"
+      ],
+      [
+       "ORD-1022",
+       "South",
+       "6",
+       "204.63"
+      ],
+      [
+       "ORD-1023",
+       "West",
+       "7",
+       "112.15"
+      ],
+      [
+       "ORD-1024",
+       "North",
+       "9",
+       "549.88"
+      ],
+      [
+       "ORD-1025",
+       "East",
+       "6",
+       "572.12"
+      ],
+      [
+       "ORD-1026",
+       "West",
+       "8",
+       "136.39"
+      ],
+      [
+       "ORD-1027",
+       "North",
+       "5",
+       "468.76"
+      ],
+      [
+       "ORD-1028",
+       "North",
+       "1",
+       "679.55"
+      ],
+      [
+       "ORD-1029",
+       "East",
+       "8",
+       "275.77"
+      ],
+      [
+       "ORD-1030",
+       "West",
+       "6",
+       "98.5"
+      ],
+      [
+       "ORD-1031",
+       "West",
+       "6",
+       "217.8"
+      ],
+      [
+       "ORD-1032",
+       "North",
+       "8",
+       "128.34"
+      ],
+      [
+       "ORD-1033",
+       "East",
+       "3",
+       "603.2"
+      ],
+      [
+       "ORD-1034",
+       "West",
+       "7",
+       "831.79"
+      ],
+      [
+       "ORD-1035",
+       "West",
+       "2",
+       "216.42"
+      ],
+      [
+       "ORD-1036",
+       "West",
+       "9",
+       "307.83"
+      ],
+      [
+       "ORD-1037",
+       "South",
+       "7",
+       "693.85"
+      ],
+      [
+       "ORD-1038",
+       "East",
+       "7",
+       "888.9"
+      ],
+      [
+       "ORD-1039",
+       "West",
+       "4",
+       "203.76"
+      ],
+      [
+       "ORD-1040",
+       "South",
+       "3",
+       "270.2"
+      ]
+     ],
+     "row_count": 40,
+     "size_bytes": 1003
+    },
+    "name": "sales_finance_ledger.csv",
     "origin": "uploaded",
     "resource_type": "dataset",
     "run_id": null,
@@ -35000,6 +35513,282 @@
     "source": "input"
    },
    {
+    "created_at": "2026-11-23T20:39:27.347817",
+    "created_by": "user-you",
+    "file_object_id": "bd7700c9-3535-40f9-8d25-c547139d3ce4",
+    "id": "c4927f34-706e-4266-8c0f-9c90557c9966",
+    "metadata_json": {
+     "column_count": 4,
+     "columns": [
+      {
+       "data_type": "string",
+       "name": "order_id"
+      },
+      {
+       "data_type": "string",
+       "name": "region"
+      },
+      {
+       "data_type": "string",
+       "name": "units"
+      },
+      {
+       "data_type": "string",
+       "name": "revenue"
+      }
+     ],
+     "preview_rows": [
+      [
+       "ORD-1001",
+       "East",
+       "3",
+       "403.76"
+      ],
+      [
+       "ORD-1002",
+       "North",
+       "2",
+       "753.44"
+      ],
+      [
+       "ORD-1003",
+       "North",
+       "6",
+       "557.89"
+      ],
+      [
+       "ORD-1004",
+       "South",
+       "1",
+       "150.48"
+      ],
+      [
+       "ORD-1005",
+       "West",
+       "2",
+       "277.34"
+      ],
+      [
+       "ORD-1006",
+       "West",
+       "1",
+       "758.02"
+      ],
+      [
+       "ORD-1007",
+       "North",
+       "4",
+       "597.11"
+      ],
+      [
+       "ORD-1008",
+       "North",
+       "7",
+       "120.66"
+      ],
+      [
+       "ORD-1009",
+       "South",
+       "1",
+       "536.47"
+      ],
+      [
+       "ORD-1010",
+       "South",
+       "5",
+       "423.69"
+      ],
+      [
+       "ORD-1011",
+       "North",
+       "5",
+       "539.41"
+      ],
+      [
+       "ORD-1012",
+       "South",
+       "2",
+       "556.91"
+      ],
+      [
+       "ORD-1013",
+       "South",
+       "6",
+       "159.89"
+      ],
+      [
+       "ORD-1014",
+       "North",
+       "1",
+       "587.59"
+      ],
+      [
+       "ORD-1015",
+       "West",
+       "9",
+       "430.63"
+      ],
+      [
+       "ORD-1016",
+       "East",
+       "8",
+       "560.16"
+      ],
+      [
+       "ORD-1017",
+       "West",
+       "6",
+       "325.81"
+      ],
+      [
+       "ORD-1018",
+       "South",
+       "4",
+       "147.12"
+      ],
+      [
+       "ORD-1019",
+       "East",
+       "9",
+       "486.0"
+      ],
+      [
+       "ORD-1020",
+       "East",
+       "8",
+       "316.11"
+      ],
+      [
+       "ORD-1021",
+       "North",
+       "2",
+       "499.78"
+      ],
+      [
+       "ORD-1022",
+       "South",
+       "6",
+       "204.63"
+      ],
+      [
+       "ORD-1023",
+       "West",
+       "7",
+       "112.15"
+      ],
+      [
+       "ORD-1024",
+       "North",
+       "9",
+       "549.88"
+      ],
+      [
+       "ORD-1025",
+       "East",
+       "6",
+       "650.14"
+      ],
+      [
+       "ORD-1026",
+       "West",
+       "8",
+       "136.39"
+      ],
+      [
+       "ORD-1027",
+       "North",
+       "5",
+       "468.76"
+      ],
+      [
+       "ORD-1028",
+       "North",
+       "1",
+       "679.55"
+      ],
+      [
+       "ORD-1029",
+       "East",
+       "8",
+       "313.37"
+      ],
+      [
+       "ORD-1030",
+       "West",
+       "6",
+       "98.5"
+      ],
+      [
+       "ORD-1031",
+       "West",
+       "6",
+       "217.8"
+      ],
+      [
+       "ORD-1032",
+       "North",
+       "8",
+       "128.34"
+      ],
+      [
+       "ORD-1033",
+       "East",
+       "3",
+       "685.46"
+      ],
+      [
+       "ORD-1034",
+       "West",
+       "7",
+       "831.79"
+      ],
+      [
+       "ORD-1035",
+       "West",
+       "2",
+       "216.42"
+      ],
+      [
+       "ORD-1036",
+       "West",
+       "9",
+       "307.83"
+      ],
+      [
+       "ORD-1037",
+       "South",
+       "7",
+       "788.47"
+      ],
+      [
+       "ORD-1038",
+       "East",
+       "7",
+       "888.9"
+      ],
+      [
+       "ORD-1039",
+       "West",
+       "4",
+       "203.76"
+      ],
+      [
+       "ORD-1040",
+       "South",
+       "3",
+       "270.2"
+      ]
+     ],
+     "row_count": 40,
+     "size_bytes": 1005
+    },
+    "name": "sales_crm_export.csv",
+    "origin": "uploaded",
+    "resource_type": "dataset",
+    "run_id": null,
+    "source": "input"
+   },
+   {
     "created_at": "2026-11-19T17:36:30.265212",
     "created_by": "user-you",
     "file_object_id": "f2d5315a-fe41-44a1-854a-412cf6b24a90",
@@ -42383,7 +43172,7 @@
        "5"
       ]
      ],
-     "refreshed_at": "2026-11-23T20:26:05.579524+00:00",
+     "refreshed_at": "2026-11-23T21:03:15.810796+00:00",
      "row_count": 12,
      "size_bytes": 571,
      "source_connector": "google-drive"

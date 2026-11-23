@@ -24,3 +24,13 @@ export function packedSpans(widgets: Array<Pick<DashboardWidget, "id" | "span">>
   close();
   return spans;
 }
+
+/** The list with the item at `from` moved to `to` (clamped). Returns the same list when nothing moves. */
+export function moveItem<T>(items: T[], from: number, to: number): T[] {
+  const target = Math.min(Math.max(to, 0), items.length - 1);
+  if (from < 0 || from >= items.length || from === target) return items;
+  const next = [...items];
+  const [item] = next.splice(from, 1);
+  next.splice(target, 0, item);
+  return next;
+}

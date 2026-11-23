@@ -200,14 +200,26 @@ export interface DashboardAiDataset {
 }
 export interface DashboardAiWidget {
   id: string;
-  type: "kpi" | "bar" | "line" | "pie" | "table";
+  type: string;
   title: string;
   dataset_id: string;
   x?: string | null;
   y?: string | null;
   agg: "sum" | "avg" | "count";
   span: 1 | 2 | 3;
+  script?: string;
+  request?: string;
+  datasets?: string[];
 }
+export interface DashboardCustomResult {
+  kind: string; title?: string; labels?: string[]; series?: number[]; points?: Array<[number, number]>;
+  columns?: string[]; rows?: string[][]; value?: number; max?: number; label?: string;
+}
+export interface DatasetPairReport {
+  a: string; b: string; shared_columns: string[]; key: string | null; matched_rows: number; summary: string;
+  conflicts: Array<{ column: string; by: string; differing: number; of: number; totals?: boolean; examples: Array<{ key: string; a: number; b: number }> }>;
+}
+export interface DatasetRelations { datasets: Array<{ id: string; name: string; rows: number }>; pairs: DatasetPairReport[]; conflict: boolean }
 export interface DashboardAiResult {
   ok: boolean;
   ai?: boolean;

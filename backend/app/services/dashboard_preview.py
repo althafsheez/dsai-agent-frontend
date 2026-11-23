@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import FileObject, Resource
+from .dashboard_script import ScriptError, run_script
 from .dataset_preview import read_csv_rows
 
 log = logging.getLogger(__name__)
@@ -106,6 +107,27 @@ def _tile(widget: dict[str, Any], source: dict[str, Any]) -> dict[str, Any] | No
     return None
 
 
+def _custom_tile(widget: dict[str, Any], data: dict[str, dict[str, Any]], tile: dict[str, Any]) -> dict[str, Any] | None:
+    ids = [i for i in (widget.get("datasets") or [widget.get("dataset_id")]) if i in data]
+    if not ids or not widget.get("script"):
+        return None
+    try:
+        out = run_script(widget["script"], [{"id": i, "name": data[i].get("name", i), "columns": data[i]["columns"], "rows": data[i]["rows"]} for i in ids])
+    except ScriptError:
+        log.warning("Custom chart script failed while building a preview")
+        return None
+    kind = out["kind"]
+    tile = {**tile, "type": kind, "title": tile["title"] or out.get("title", "")}
+    if kind in ("kpi", "gauge"):
+        top = out.get("max") or 0
+        return {**tile, "value": _compact(out["value"]), **({"max": _compact(top), "ratio": round(min(max(out["value"] / top, 0), 1), 3) if top > 0 else 0} if kind == "gauge" else {})}
+    if kind == "scatter":
+        return {**tile, "points": out["points"][:80]}
+    if kind == "table":
+        return {**tile, "columns": out["columns"][:4], "rows": [row[:4] for row in out["rows"][:3]]}
+    return {**tile, "labels": out["labels"][:10], "series": out["series"][:10]}
+
+
 def build_preview(widgets: list[dict[str, Any]], data: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """The listing card: the dashboard's first widgets as small tiles, in the same order, types and widths as the dashboard itself.
 
@@ -114,7 +136,10 @@ def build_preview(widgets: list[dict[str, Any]], data: dict[str, dict[str, Any]]
     tiles = []
     for widget in widgets:
         source = data.get(widget.get("dataset_id", ""))
-        tile = _tile(widget, source) if source is not None else None
+        if widget.get("type") == "custom":
+            tile = _custom_tile(widget, data, {"title": str(widget.get("title", ""))[:48], "span": widget.get("span") if widget.get("span") in (1, 2, 3) else 2})
+        else:
+            tile = _tile(widget, source) if source is not None else None
         if tile is not None:
             tiles.append(tile)
         if len(tiles) == TILES:
@@ -125,7 +150,8 @@ def build_preview(widgets: list[dict[str, Any]], data: dict[str, dict[str, Any]]
 def compute_preview(db: Session, storage: Any, widgets: list[dict[str, Any]]) -> dict[str, Any]:
     """Reads the datasets the widgets use (the dashboard grants that access) and summarises them for the listing card."""
     data: dict[str, dict[str, Any]] = {}
-    for dataset_id in {widget.get("dataset_id") for widget in widgets if isinstance(widget.get("dataset_id"), str)}:
+    wanted = {widget.get("dataset_id") for widget in widgets} | {i for widget in widgets for i in (widget.get("datasets") or [])}
+    for dataset_id in {i for i in wanted if isinstance(i, str)}:
         row = db.execute(select(Resource, FileObject).join(FileObject, FileObject.id == Resource.file_object_id).where(Resource.id == dataset_id)).one_or_none()
         if row is None:
             continue
@@ -135,5 +161,5 @@ def compute_preview(db: Session, storage: Any, widgets: list[dict[str, Any]]) ->
             log.warning("Could not read dataset %s for a dashboard preview", dataset_id)
             continue
         if rows is not None:
-            data[dataset_id] = {"columns": [column["name"] for column in rows["columns"]], "rows": rows["rows"], "total_rows": rows["total_rows"]}
+            data[dataset_id] = {"name": row[0].name, "columns": [column["name"] for column in rows["columns"]], "rows": rows["rows"], "total_rows": rows["total_rows"]}
     return build_preview(widgets, data)

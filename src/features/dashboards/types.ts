@@ -1,11 +1,14 @@
 import type { DashboardPreviewDto } from "@/lib/api";
-export type WidgetType = "kpi" | "gauge" | "bar" | "hbar" | "line" | "area" | "pie" | "radar" | "funnel" | "treemap" | "histogram" | "scatter" | "table";
+export type WidgetType = "kpi" | "gauge" | "bar" | "hbar" | "line" | "area" | "pie" | "radar" | "funnel" | "treemap" | "histogram" | "scatter" | "table" | "custom";
 /** Chart types that group rows by a category column and aggregate a number. */
 export const GROUPED_TYPES: WidgetType[] = ["bar", "hbar", "line", "area", "pie", "radar", "funnel", "treemap"];
 /** Types that take a number column (not a category) as their x. */
 export const NUMERIC_X_TYPES: WidgetType[] = ["histogram", "scatter"];
 /** Types with no x column at all. */
 export const SINGLE_VALUE_TYPES: WidgetType[] = ["kpi", "gauge", "table"];
+/** What a script-built ("custom") tile can draw. */
+export type CustomKind = "bar" | "hbar" | "line" | "area" | "pie" | "radar" | "funnel" | "treemap" | "histogram" | "scatter" | "table" | "kpi" | "gauge";
+export interface CustomResult { kind: CustomKind; title?: string; labels?: string[]; series?: number[]; points?: Array<[number, number]>; columns?: string[]; rows?: string[][]; value?: number; max?: number; label?: string }
 /** Active filters: column name to the allowed values (slicers and chart clicks both write here). */
 export type Filters = Record<string, string[]>;
 export type Aggregate = "sum" | "avg" | "count";
@@ -22,7 +25,14 @@ export interface DashboardWidget {
   agg: Aggregate;
   /** Grid columns taken out of 3 */
   span: 1 | 2 | 3;
+  /** "custom" tiles only: the Python script the AI wrote for a chart no preset covers, the request behind it, and every dataset it reads. */
+  script?: string;
+  request?: string;
+  datasets?: string[];
 }
+
+/** Every dataset a set of widgets reads (custom tiles can read several). */
+export const usedDatasetIds = (widgets: Array<Pick<DashboardWidget, "dataset_id" | "datasets">>): string[] => [...new Set(widgets.flatMap((widget) => [widget.dataset_id, ...(widget.datasets ?? [])]))];
 
 export interface Dashboard {
   id: string;

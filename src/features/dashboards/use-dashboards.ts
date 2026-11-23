@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { generateDashboardWithAi, getDatasetRows, getLibrary, getModels, listDashboardPeople, reviewDashboardWithAi, syncDatasetFromDrive, tuneDashboardWithAi } from "@/lib/api";
+import { analyzeDatasets, buildCustomChartWithAi, generateDashboardWithAi, getDatasetRows, getLibrary, getModels, listDashboardPeople, reviewDashboardWithAi, syncDatasetFromDrive, tuneDashboardWithAi } from "@/lib/api";
 import type { DashboardAiResult } from "@/lib/api";
 import { deleteDashboard, duplicateDashboard, getDashboard, listDashboards, pinDashboard, saveDashboard } from "./data/dashboard-store";
 import type { DashboardWidget, DatasetLite } from "./types";
@@ -47,7 +47,7 @@ export function useDeleteDashboard() {
 }
 
 const brief = (dataset: DatasetLite) => ({ id: dataset.id, name: dataset.name, columns: dataset.columns, rows: dataset.rows.slice(0, 20), row_count: dataset.row_count });
-const toWidget = (widget: DashboardAiResult["widgets"][number]): DashboardWidget => ({ ...widget, x: widget.x ?? undefined, y: widget.y ?? undefined });
+const toWidget = (widget: DashboardAiResult["widgets"][number]): DashboardWidget => ({ ...widget, type: widget.type as DashboardWidget["type"], x: widget.x ?? undefined, y: widget.y ?? undefined });
 
 export interface AiOutcome { name?: string; description?: string; widgets: DashboardWidget[]; notes: string[]; ai?: boolean; slicers?: string[]; suggestions?: string[] }
 
@@ -56,14 +56,14 @@ export function useDashboardAi() {
   const models = useQuery({ queryKey: ["models"], queryFn: getModels });
   const modelId = models.data?.default_model_id ?? models.data?.models[0]?.id ?? "";
   const generate = useMutation({
-    mutationFn: async (input: { prompt: string; datasets: DatasetLite[] }): Promise<AiOutcome> => {
-      const result = await generateDashboardWithAi({ prompt: input.prompt, datasets: input.datasets.map(brief), modelId });
+    mutationFn: async (input: { prompt: string; datasets: DatasetLite[]; context?: string }): Promise<AiOutcome> => {
+      const result = await generateDashboardWithAi({ prompt: input.prompt, datasets: input.datasets.map(brief), modelId, context: input.context });
       return { name: result.name, description: result.description, widgets: result.widgets.map(toWidget), notes: result.notes, slicers: result.slicers, suggestions: result.suggestions };
     },
   });
   const tune = useMutation({
-    mutationFn: async (input: { instruction: string; widgets: DashboardWidget[]; slicers: string[]; name: string; datasets: DatasetLite[] }): Promise<AiOutcome> => {
-      const result = await tuneDashboardWithAi({ instruction: input.instruction, widgets: input.widgets as DashboardAiResult["widgets"], slicers: input.slicers, name: input.name, datasets: input.datasets.map(brief), modelId });
+    mutationFn: async (input: { instruction: string; widgets: DashboardWidget[]; slicers: string[]; name: string; datasets: DatasetLite[]; context?: string }): Promise<AiOutcome> => {
+      const result = await tuneDashboardWithAi({ instruction: input.instruction, widgets: input.widgets as DashboardAiResult["widgets"], slicers: input.slicers, name: input.name, datasets: input.datasets.map(brief), modelId, context: input.context });
       return { name: result.name, widgets: result.widgets.map(toWidget), notes: result.notes, slicers: result.slicers, suggestions: result.suggestions };
     },
   });
@@ -73,7 +73,19 @@ export function useDashboardAi() {
       return { widgets: result.widgets.map(toWidget), notes: result.notes, ai: result.ai };
     },
   });
-  return { ready: Boolean(modelId), generate, tune, review };
+  const custom = useMutation({
+    mutationFn: async (input: { request: string; title?: string; datasetIds: string[] }): Promise<DashboardWidget> => {
+      const { widget } = await buildCustomChartWithAi({ ...input, modelId });
+      return toWidget(widget);
+    },
+  });
+  return { ready: Boolean(modelId), generate, tune, review, custom };
+}
+
+/** How the chosen datasets overlap and where they disagree. Only asked for when two or more are chosen. */
+export function useDatasetRelations(ids: string[]) {
+  const key = [...ids].sort();
+  return useQuery({ queryKey: ["dashboard-relations", key], queryFn: () => analyzeDatasets(key), enabled: key.length >= 2, staleTime: 60_000, retry: false });
 }
 
 /**

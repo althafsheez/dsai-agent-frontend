@@ -97,7 +97,7 @@ export function gaugeValue(widget: DashboardWidget, dataset: DatasetLite): { val
 }
 
 export const CHART_LABEL: Record<WidgetType, string> = {
-  kpi: "KPI", gauge: "Gauge", bar: "Bar", hbar: "Horizontal bar", line: "Line", area: "Area", pie: "Pie", radar: "Radar", funnel: "Funnel", treemap: "Treemap", histogram: "Histogram", scatter: "Scatter", table: "Table",
+  kpi: "KPI", gauge: "Gauge", bar: "Bar", hbar: "Horizontal bar", line: "Line", area: "Area", pie: "Pie", radar: "Radar", funnel: "Funnel", treemap: "Treemap", histogram: "Histogram", scatter: "Scatter", table: "Table", custom: "Python script",
 };
 
 let counter = 0;
@@ -111,7 +111,7 @@ export function newWidget(type: WidgetType, dataset: DatasetLite): DashboardWidg
   const single = SINGLE_VALUE_TYPES.includes(type);
   const column = numericX ? y : x;
   const subject = single || !column ? (y ?? dataset.name) : column;
-  const prefix = { kpi: "Total", gauge: "Average", bar: "By", hbar: "Ranking of", line: "Trend of", area: "Area of", pie: "Share of", radar: "Profile of", funnel: "Funnel of", treemap: "Breakdown of", histogram: "Distribution of", scatter: "Relationship of", table: "Rows from" }[type];
+  const prefix = { kpi: "Total", gauge: "Average", bar: "By", hbar: "Ranking of", line: "Trend of", area: "Area of", pie: "Share of", radar: "Profile of", funnel: "Funnel of", treemap: "Breakdown of", histogram: "Distribution of", scatter: "Relationship of", table: "Rows from", custom: "Custom view of" }[type];
   const base = { id: widgetId(), type, title: `${prefix} ${subject}`, dataset_id: dataset.id, span: (single ? (type === "table" ? 3 : 1) : 2) as DashboardWidget["span"] };
   if (single) return { ...base, y, agg: type === "gauge" ? "avg" : y ? "sum" : "count" };
   if (type === "histogram") return { ...base, x: y, agg: "count" };

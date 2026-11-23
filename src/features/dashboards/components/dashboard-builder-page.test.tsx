@@ -10,13 +10,13 @@ vi.mock("next/dynamic", () => ({ default: () => function Stub({ widget }: { widg
 
 const columns = [{ name: "region", data_type: "string" }, { name: "revenue", data_type: "string" }];
 const rows = [["North", "10"], ["South", "20"]];
-const { generate, saveRecord } = vi.hoisted(() => ({ generate: vi.fn(), saveRecord: vi.fn() }));
+const { generate, tune, custom, analyze, saveRecord } = vi.hoisted(() => ({ generate: vi.fn(), tune: vi.fn(), custom: vi.fn(), analyze: vi.fn(), saveRecord: vi.fn() }));
 vi.mock("@/lib/api", () => ({
   ApiError: class extends Error { status = 0 },
   getLibrary: async () => ({ items: [{ id: "d1", name: "sales.csv", resource_type: "dataset", columns, preview_rows: rows, row_count: 2 }] }),
   getModels: async () => ({ default_model_id: "m", models: [], configuration_status: "ok" }),
   getDatasetRows: async () => ({ name: "sales.csv", columns, rows, total_rows: 2, truncated: false }),
-  generateDashboardWithAi: generate, tuneDashboardWithAi: vi.fn(), reviewDashboardWithAi: vi.fn(),
+  generateDashboardWithAi: generate, tuneDashboardWithAi: tune, reviewDashboardWithAi: vi.fn(), buildCustomChartWithAi: custom, analyzeDatasets: analyze,
   saveDashboardRecord: saveRecord, getDashboardRecord: async () => { throw new Error("none"); }, listDashboardRecords: async () => [],
   uploadResource: vi.fn(), listDashboardPeople: async () => [], syncDatasetFromDrive: vi.fn(),
 }));
@@ -48,14 +48,31 @@ describe("dashboard builder", () => {
     expect(saveRecord).toHaveBeenCalledWith(expect.objectContaining({ name: "Sales", slicers: ["region"], dataset_ids: ["d1"] }));
   });
 
-  it("adds a chart by hand from the Charts tab and can undo it", async () => {
+  it("hands a manually composed tile to the AI, which builds it", async () => {
+    tune.mockReset();
+    generate.mockResolvedValue({ ok: true, name: "Sales", description: "", notes: [], slicers: [], suggestions: [],
+      widgets: [{ id: "w1", type: "bar", title: "Revenue by region", dataset_id: "d1", x: "region", y: "revenue", agg: "sum", span: 2 }] });
     const user = userEvent.setup();
     renderPage();
     await user.click(await screen.findByRole("checkbox"));
-    await user.click(screen.getByRole("tab", { name: "charts" }));
-    await user.click(screen.getByRole("button", { name: "Bar" }));
-    expect(await screen.findByRole("textbox", { name: "Ask AI to change this dashboard" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Undo" }));
-    expect(await screen.findByRole("textbox", { name: "Describe the dashboard" })).toBeVisible();
+    expect(screen.getByLabelText("What a Bar needs")).toHaveTextContent("A category column to group by");
+    expect(screen.getByRole("button", { name: "Build with AI" })).toBeDisabled();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Category column" }), "region");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Number column" }), "revenue");
+    await user.click(screen.getByRole("button", { name: "Build with AI" }));
+    expect(generate).toHaveBeenCalledWith(expect.objectContaining({ prompt: expect.stringContaining('Add a Bar tile from the dataset "sales.csv": the sum of "revenue" grouped by "region".') }));
+    expect(await screen.findByLabelText("Revenue by region")).toBeVisible();
+  });
+
+  it("asks the AI to write a Python script for a tile no preset covers", async () => {
+    custom.mockResolvedValue({ widget: { id: "w-py", type: "custom", title: "Top region share", dataset_id: "d1", datasets: ["d1"], agg: "count", span: 2, script: "result = {}", request: "share of the top region" }, result: { kind: "kpi", value: 66 } });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: "Anything else (Python)" }));
+    await user.type(screen.getByRole("textbox", { name: "Describe the tile" }), "share of the top region");
+    await user.click(screen.getByRole("button", { name: "Build with AI" }));
+    expect(custom).toHaveBeenCalledWith(expect.objectContaining({ request: "share of the top region", datasetIds: ["d1"] }));
+    expect(await screen.findByLabelText("Top region share")).toBeVisible();
   });
 });
