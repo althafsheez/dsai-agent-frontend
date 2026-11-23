@@ -1,7 +1,6 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Clock3 } from "lucide-react";
 import Link from "next/link";
 import { getChats, getWorkspaces } from "@/lib/api";
 
@@ -80,9 +79,8 @@ export function RecentChats() {
             </p>
             <time
               dateTime={chat.updated_at}
-              className="flex items-center justify-end gap-1.5 self-center whitespace-nowrap text-[12px] text-muted-foreground"
+              className="self-center text-right whitespace-nowrap text-[12px] text-muted-foreground"
             >
-              <Clock3 className="size-3.5" />
               {relativeUpdatedAt(chat.updated_at)}
             </time>
           </Link>

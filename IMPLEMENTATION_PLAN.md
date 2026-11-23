@@ -35,6 +35,7 @@ Updated 2026-11-09 from final user decisions. Implement and verify sequentially.
 - Gates: API tests for no pre-send record, partial upload retry, scope after move, 100-row cap, favorite no copies, independent archive/soft delete, access failures and refresh persistence.
 
 ## Phase 4 — Gemini runs, queue and steering — PENDING
+- Main chat now uses the shared `agentic/agent/react_loop.py` tool loop. Verified initial and follow-up streamed messages with live Gemini through the FastAPI endpoint.
 - Verified partial text-chat slice: backend model discovery, functional model/effort selection, first and follow-up POST-SSE runs, progressive rendering, persisted reload, deterministic SSE parsing, durable queued follow-ups with automatic same-stream execution, and persisted steering applied by restarting generation at a safe event checkpoint. Queue removal is implemented. Title generation, Quick Assistant, queue resume-after-failure, and the remaining lifecycle gates are not implemented.
 - Single Gemini runner, allowlisted model/effort metadata, title generation with manual-rename protection.
 - Incremental fetch SSE + progressive DB events/text; tool/summary/error renderers.
@@ -44,6 +45,8 @@ Updated 2026-11-09 from final user decisions. Implement and verify sequentially.
 - Gates: deterministic runner/SSE tests for split chunks, race/cancel/retry/queue/steer; actual credential-backed Gemini response, title and explanation when keys configured. No fake model names.
 
 ## Phase 5 — E2B and output rendering — PENDING
+- Verified one live Gemini → E2B Python run through the main chat endpoint, including registration and download of the resulting CSV. The full chart-plus-table gate remains open.
+- Verified selective E2B staging with 43 authorized files. A live greeting created no sandbox. A separate live Gemini analysis staged only the requested CSV, reused it across tool calls, and generated a PNG and PDF that were downloaded and saved to Library.
 - Inspect multiple dataset inputs, execute Python in per-run E2B, sync outputs after tool checkpoints.
 - Preserve/dedup intermediate versions; CSV/Excel/Parquet -> Dataset, images/charts/reports -> Artifact.
 - Inline image/chart/file renderers, validated Recharts specification, expand, preview, download, Library.

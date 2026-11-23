@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..agent import AgentRunner, RunnerCancelled, RunnerSteered
-from ..agent.tools import ToolContext
+from agentic.runtime.contracts import AgentExecution, ChatTurn, LLMProvider, ProviderError, ToolContext
+from agentic.runtime.events import RunnerCancelled, RunnerSteered
+
 from ..errors import APIError
 from ..models import AgentRun, Chat, ExecutionEvent, Message, SteeringInstruction, User, utc_now
-from ..providers import ChatTurn, LLMProvider, ProviderError
 from ..schemas import EventEnvelope, QueueStart, RetryStart, RunResponse, RunStart, SteerStart
 from .records import require_chat
+from .resource_uploads import attach_library_resources
 
 
 class RunCoordinator:
@@ -140,17 +141,48 @@ def prepare_retry(
     return prepare_run(session, user, old_run.chat_id, start, provider, previous_run_id=old_run.id)
 
 
+def queued_runs_query(chat_id: str):
+    return (
+        select(AgentRun)
+        .join(Message, Message.id == AgentRun.user_message_id)
+        .where(AgentRun.chat_id == chat_id, AgentRun.status == "queued", Message.status == "queued")
+        .order_by(Message.position)
+    )
+
+
+def reorder_queued_runs(session: Session, chat_id: str, run_ids: list[str]) -> None:
+    queue = {run.id: run for run in session.scalars(queued_runs_query(chat_id))}
+    if len(run_ids) != len(queue) or set(run_ids) != queue.keys():
+        raise APIError(409, "queue_changed", "The queue changed. Try moving the question again.")
+    if run_ids == list(queue):
+        return
+
+    message_ids = [message_id for run in queue.values() for message_id in (run.user_message_id, run.assistant_message_id)]
+    messages = {message.id: message for message in session.scalars(select(Message).where(Message.id.in_(message_ids)))}
+    ordered_messages = [
+        messages[message_id]
+        for run_id in run_ids
+        for message_id in (queue[run_id].user_message_id, queue[run_id].assistant_message_id)
+    ]
+    positions = sorted(message.position for message in ordered_messages)
+    # Vacate the existing slots before reassigning them under the unique chat/position constraint.
+    for message in ordered_messages:
+        message.position = -message.position
+    session.flush()
+    for position, message in zip(positions, ordered_messages, strict=True):
+        message.position = position
+    session.commit()
+
+
 def prepare_queued_run(
     session: Session,
     user: User,
     active_run: AgentRun,
     data: QueueStart,
     provider: LLMProvider,
+    register_files: Callable[[Message], None] | None = None,
 ) -> tuple[Message, AgentRun, int]:
     require_chat(session, user, active_run.chat_id)
-    if active_run.status != "running":
-        raise APIError(409, "run_not_active", "Questions can only be queued while a run is active.")
-    _validate_provider(provider, data.model_id, data.effort)
     duplicate = session.scalar(
         select(AgentRun).where(
             AgentRun.chat_id == active_run.chat_id,
@@ -161,21 +193,28 @@ def prepare_queued_run(
         message = session.get(Message, duplicate.user_message_id)
         if message is None:
             raise RuntimeError("Queued run user message no longer exists.")
-        position = session.scalar(
-            select(func.count()).select_from(AgentRun).where(
-                AgentRun.chat_id == active_run.chat_id,
-                AgentRun.status == "queued",
-                AgentRun.created_at <= duplicate.created_at,
-            )
-        ) or 1
+        queue = list(session.scalars(queued_runs_query(active_run.chat_id)))
+        position = queue.index(duplicate) + 1 if duplicate in queue else 1
         return message, duplicate, position
+
+    if active_run.status != "running":
+        # The initial run may have advanced to a different queued question while files were read.
+        current_run = session.scalar(select(AgentRun).where(
+            AgentRun.chat_id == active_run.chat_id, AgentRun.status == "running",
+        ))
+        if current_run is None or active_run.status in {"cancelled", "interrupted"}:
+            raise APIError(409, "run_not_active", "The analysis has finished. Your draft is ready to send.")
+    _validate_provider(provider, data.model_id, data.effort)
+    content = data.content.strip()
+    if not content:
+        raise APIError(422, "empty_message", "Message content cannot be blank.")
 
     next_position = (session.scalar(select(func.max(Message.position)).where(Message.chat_id == active_run.chat_id)) or 0) + 1
     user_message = Message(
         chat_id=active_run.chat_id,
         role="user",
         kind="normal",
-        content=data.content,
+        content=content,
         status="queued",
         position=next_position,
         client_request_id=data.client_request_id,
@@ -191,6 +230,9 @@ def prepare_queued_run(
     )
     session.add_all((user_message, assistant))
     session.flush()
+    attach_library_resources(session, user.id, user_message.id, data.resource_ids)
+    if register_files is not None:
+        register_files(user_message)
     queued_run = AgentRun(
         chat_id=active_run.chat_id,
         user_message_id=user_message.id,
@@ -380,13 +422,14 @@ def _finalize_cancelled(session: Session, run: AgentRun, reason: str) -> Executi
 async def stream_run(
     session_factory: sessionmaker[Session],
     run_id: str,
-    runner: AgentRunner,
+    runner: AgentExecution,
     coordinator: RunCoordinator,
 ) -> AsyncIterator[str]:
+    tool_context: ToolContext | None = None
     try:
         with session_factory() as session:
             run = session.get(AgentRun, run_id)
-            if run is None:
+            if run is None or run.status != "queued":
                 return
             run.status = "running"
             run.started_at = utc_now()
@@ -503,6 +546,9 @@ async def stream_run(
                     yield _sse(steering_event)
             break
 
+        await runner.close(tool_context)
+        tool_context = None
+
         with session_factory() as session:
             run = session.get(AgentRun, run_id)
             if run is None:
@@ -534,11 +580,7 @@ async def stream_run(
                 yield _sse(completed_message)
             completed = _persist_event(session, run.id, "agent.completed", {"run_id": run.id})
             yield _sse(completed)
-            next_run = session.scalar(
-                select(AgentRun)
-                .where(AgentRun.chat_id == run.chat_id, AgentRun.status == "queued")
-                .order_by(AgentRun.created_at, AgentRun.id)
-            )
+            next_run = session.scalar(queued_runs_query(run.chat_id).limit(1))
         if next_run is not None:
             async for queued_event in stream_run(session_factory, next_run.id, runner, coordinator):
                 yield queued_event
@@ -610,13 +652,17 @@ async def stream_run(
                 _finalize_cancelled(session, run, "disconnect")
         raise
     finally:
-        coordinator.clear(run_id)
+        try:
+            if tool_context is not None:
+                await runner.close(tool_context)
+        finally:
+            coordinator.clear(run_id)
 
 
 async def execute_run_in_background(
     session_factory: sessionmaker[Session],
     run_id: str,
-    runner: AgentRunner,
+    runner: AgentExecution,
     coordinator: RunCoordinator,
 ) -> None:
     """Consume the execution generator independently from any browser connection."""
@@ -636,13 +682,16 @@ async def stream_persisted_events(
         if initial_run is None:
             return
         chat_id = initial_run.chat_id
-        started_at = initial_run.created_at
+        first_position = session.scalar(select(Message.position).where(Message.id == initial_run.assistant_message_id))
+        if first_position is None:
+            return
     while True:
         with session_factory() as session:
             runs = list(session.scalars(
                 select(AgentRun)
-                .where(AgentRun.chat_id == chat_id, AgentRun.created_at >= started_at)
-                .order_by(AgentRun.created_at, AgentRun.id)
+                .join(Message, Message.id == AgentRun.assistant_message_id)
+                .where(AgentRun.chat_id == chat_id, Message.position >= first_position)
+                .order_by(Message.position)
             ))
             events: list[ExecutionEvent] = []
             for run in runs:
@@ -655,11 +704,12 @@ async def stream_persisted_events(
                     .order_by(ExecutionEvent.sequence)
                 ))
             all_terminal = bool(runs) and all(run.status in terminal for run in runs)
-            initial_status = next((run.status for run in runs if run.id == run_id), None)
+            last_started = next((run for run in reversed(runs) if run.started_at is not None or run.id == run_id), None)
+            paused = last_started is not None and last_started.status in {"failed", "cancelled", "interrupted"}
         for event in events:
             sequences[event.run_id] = event.sequence
             yield _sse(event)
-        if (all_terminal or initial_status in {"failed", "cancelled", "interrupted"}) and not events:
+        if (all_terminal or paused) and not events:
             return
         await asyncio.sleep(0.1)
 

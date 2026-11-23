@@ -42,7 +42,14 @@ describe("library page", () => {
     render(<QueryClientProvider client={client}><LibraryPage /></QueryClientProvider>);
 
     expect(await screen.findByText("Revenue report.pdf")).toBeVisible();
-    expect(await screen.findByText(/return left \+ right/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Library ownership: All" }));
+    await user.click(screen.getByRole("button", { name: "Shared with me" }));
+    expect(screen.getByText("Nothing shared with you yet")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Library ownership: Shared with me" }));
+    await user.click(screen.getByRole("button", { name: "All", pressed: false }));
+    const keyword = await screen.findByText("return");
+    expect(keyword).toHaveStyle({ color: "#c586c0" });
+    expect(keyword.closest("code")?.textContent).toBe("def total(left, right):\n    return left + right\n");
     await user.click(screen.getByRole("tab", { name: "Visuals" }));
     expect(screen.getByText("Revenue chart.png")).toBeVisible();
     expect(screen.queryByText("Revenue report.pdf")).not.toBeInTheDocument();

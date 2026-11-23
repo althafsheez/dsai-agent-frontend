@@ -35,6 +35,7 @@ class WorkspaceUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=160)
     description: str | None = Field(default=None, max_length=4000)
     archived: bool | None = None
+    pinned: bool | None = None
 
 
 class WorkspaceResponse(APIModel):
@@ -45,7 +46,28 @@ class WorkspaceResponse(APIModel):
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
+    pinned_at: datetime | None
     deleted_at: datetime | None
+
+
+WorkspaceRole = Literal["viewer", "editor"]
+
+
+class WorkspaceInviteCreate(BaseModel):
+    email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    role: WorkspaceRole = "viewer"
+
+
+class WorkspaceInviteUpdate(BaseModel):
+    role: WorkspaceRole
+
+
+class WorkspaceInviteResponse(APIModel):
+    id: str
+    workspace_id: str
+    email: str
+    role: WorkspaceRole
+    created_at: datetime
 
 
 class WorkspaceContextFileCreate(BaseModel):
@@ -99,6 +121,7 @@ class ChatUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     workspace_id: str | None = None
     archived: bool | None = None
+    pinned: bool | None = None
     is_unread: bool | None = None
 
 
@@ -111,6 +134,7 @@ class ChatResponse(APIModel):
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
+    pinned_at: datetime | None
     deleted_at: datetime | None
     first_run_at: datetime | None
     is_unread: bool
@@ -119,6 +143,13 @@ class ChatResponse(APIModel):
 
 class ChatPresence(BaseModel):
     viewing: bool
+
+
+class MessageAttachment(APIModel):
+    resource_type: Literal["dataset", "artifact"]
+    resource_id: str
+    name: str
+    size_bytes: int
 
 
 class MessageResponse(APIModel):
@@ -130,12 +161,13 @@ class MessageResponse(APIModel):
     status: str
     created_at: datetime
     updated_at: datetime
-    attachment_refs: list[dict[str, str]] = Field(default_factory=list)
+    attachment_refs: list[MessageAttachment] = Field(default_factory=list)
 
 
 class MessageCreate(BaseModel):
     content: str = Field(min_length=1, max_length=100_000)
     client_request_id: str = Field(min_length=1, max_length=100)
+    resource_ids: list[str] = Field(default_factory=list)
 
 
 class QuickMessageCreate(BaseModel):
@@ -145,6 +177,8 @@ class QuickMessageCreate(BaseModel):
     model_id: str
     effort: str | None = None
     client_request_id: str = Field(min_length=1, max_length=100)
+    # Main-chat messages after this one are hidden from Quick Assistant: it sees the chat as it was when opened.
+    context_until_message_id: str | None = Field(default=None, max_length=100)
 
 
 class QuickMessageResponse(APIModel):
@@ -199,6 +233,16 @@ class QueueStart(BaseModel):
     model_id: str
     effort: str | None = None
     client_request_id: str = Field(min_length=1, max_length=100)
+    resource_ids: list[str] = Field(default_factory=list)
+
+
+class QueueUpdate(BaseModel):
+    content: str = Field(min_length=1, max_length=100_000)
+    remove_resource_ids: list[str] = Field(default_factory=list)
+
+
+class QueueOrder(BaseModel):
+    run_ids: list[str] = Field(min_length=1)
 
 
 class SteerStart(BaseModel):
