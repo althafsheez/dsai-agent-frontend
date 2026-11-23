@@ -1,0 +1,11 @@
+sku,product,category,price,stock,rating
+P-001,Wireless Mouse,Hardware,24.99,340,4.4
+P-002,Mechanical Keyboard,Hardware,89.00,120,4.7
+P-003,USB-C Hub,Hardware,39.50,210,4.1
+P-004,Analytics Pro License,Software,299.00,999,4.6
+P-005,Data Cleaner Add-on,Software,49.00,999,4.0
+P-006,Priority Support Plan,Support,149.00,999,4.3
+P-007,27in Monitor,Hardware,219.99,64,4.5
+P-008,Webcam HD,Hardware,59.90,150,3.9
+P-009,Cloud Backup 1TB,Software,99.00,999,4.2
+P-010,Onboarding Package,Support,499.00,999,4.8

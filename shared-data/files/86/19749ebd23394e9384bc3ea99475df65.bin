@@ -1,0 +1,13 @@
+ticket_id,priority,status,category,hours_to_resolve,csat
+T-5001,High,Resolved,Billing,6.5,4
+T-5002,Low,Resolved,How-to,1.2,5
+T-5003,Medium,Open,Bug,0,0
+T-5004,High,Resolved,Bug,18.0,3
+T-5005,Low,Resolved,Account,2.4,5
+T-5006,Medium,Resolved,Billing,4.1,4
+T-5007,High,Open,Outage,0,0
+T-5008,Low,Resolved,How-to,0.8,5
+T-5009,Medium,Resolved,Bug,9.3,3
+T-5010,Medium,Resolved,Account,3.7,4
+T-5011,High,Resolved,Outage,22.5,2
+T-5012,Low,Open,How-to,0,0
