@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AssistantMessage } from "./assistant-message";
 
 describe("AssistantMessage", () => {
-  it("shows total run time alongside tool time", () => {
+  it("shows total run time in the reasoning trace header", () => {
     render(<AssistantMessage message={{
       id: "assistant-1", role: "assistant", status: "completed",
       createdAt: "2026-11-13T00:00:00Z", blocks: [],
@@ -17,7 +17,6 @@ describe("AssistantMessage", () => {
       error_code: null, error_detail: null,
     }} />);
     expect(screen.getByText("Total time · 12.0 s")).toBeVisible();
-    expect(screen.getByText(/500 ms/)).toBeVisible();
   });
 
   it("renders fenced code as a full code card with actions", () => {

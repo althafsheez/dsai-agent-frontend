@@ -49,60 +49,59 @@ const mockSteps: TraceStep[] = [
 ];
 
 describe("AgentTrace component (Reasoning Trace)", () => {
-  it("renders reasoning trace header with summary and toggles open/close", async () => {
+  it("shows the latest thought in the header and toggles the timeline", async () => {
     const user = userEvent.setup();
     render(<AgentTrace steps={mockSteps} isStreaming={false} />);
 
     expect(screen.getByText("Reasoning Trace")).toBeVisible();
-    expect(screen.getByText("Execute Python (Retry)")).toBeVisible();
+    expect(screen.getByText("Self-corrected trend calculation")).toBeVisible();
+    expect(screen.queryByText("Load schema for sales.csv")).not.toBeInTheDocument();
 
-    // Toggle open
-    const toggleButton = screen.getByRole("button", { name: "Toggle Reasoning Trace" });
-    await user.click(toggleButton);
-
-    expect(screen.getByText("Inspect Dataset")).toBeVisible();
-    expect(screen.getByText("Execute Python")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Toggle Reasoning Trace" }));
+    expect(screen.getByText("Load schema for sales.csv")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Expand Initial trend calculation attempt python block" })).toBeVisible();
   });
 
-  it("auto-expands during streaming and shows pulsing ellipsis", () => {
+  it("opens while streaming and shows the reasoning ellipsis", () => {
     render(<AgentTrace steps={mockSteps} isStreaming={true} />);
 
     expect(screen.getByRole("status", { name: "Reasoning in progress" })).toBeInTheDocument();
-    // Timeline is open by default while streaming
-    expect(screen.getByText("Inspect Dataset")).toBeVisible();
+    expect(screen.getByText("Load schema for sales.csv")).toBeVisible();
   });
 
-  it("indicates hybrid recovery when a failed step was self-corrected", async () => {
+  it("says code is executing while a code step is running", () => {
+    const running: TraceStep[] = [{ ...mockSteps[2], status: "running", stdout: undefined }];
+    render(<AgentTrace steps={running} isStreaming={true} />);
+    expect(screen.getByText("Executing code...")).toBeVisible();
+  });
+
+  it("keeps code collapsed until expanded and shows its output", async () => {
+    const user = userEvent.setup();
     render(<AgentTrace steps={mockSteps} isStreaming={true} />);
 
-    // Step 2 failed but was recovered by step 3
-    expect(screen.getByText("Recovered")).toBeVisible();
-    expect(screen.getByText(/Self-corrected:/i)).toBeVisible();
+    expect(screen.queryByText("Processed 1,250 rows successfully")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Expand Self-corrected trend calculation python block" }));
+    expect(screen.getByText("Processed 1,250 rows successfully")).toBeVisible();
+    expect(screen.getByText("Output (success)")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Expand Initial trend calculation attempt python block" }));
+    expect(screen.getByText("Output (failed)")).toBeVisible();
+    expect(screen.getByText("KeyError: 'revenue'")).toBeVisible();
   });
 
-  it("expands code and allows resource chip clicking", async () => {
+  it("selects generated resources", async () => {
     const user = userEvent.setup();
     const onResourceSelect = vi.fn();
-
     render(<AgentTrace steps={mockSteps} isStreaming={true} onResourceSelect={onResourceSelect} />);
 
-    // Expand step 1
-    await user.click(screen.getByRole("button", { name: /Inspect Dataset/i }));
-    const inputChip = screen.getByRole("button", { name: "Select sales.csv" });
-    expect(inputChip).toBeVisible();
-    await user.click(inputChip);
-    expect(onResourceSelect).toHaveBeenCalledWith("ds-1");
-
-    // Expand step 3
-    await user.click(screen.getByRole("button", { name: /Execute Python \(Retry\)/ }));
-    const outputChip = screen.getByRole("button", { name: "Select revenue_trend.png" });
-    expect(outputChip).toBeVisible();
-    await user.click(outputChip);
+    await user.click(screen.getByRole("button", { name: "Select revenue_trend.png" }));
     expect(onResourceSelect).toHaveBeenCalledWith("art-1");
+  });
 
-    // Check code and output
-    expect(screen.getByText("df['rev'] = df['TotalRevenue'].astype(float)")).toBeVisible();
-    expect(screen.getByText("Processed 1,250 rows successfully")).toBeVisible();
+  it("shows an error for a failed step without code", async () => {
+    const failed: TraceStep[] = [{ ...mockSteps[0], status: "failed", error: "Dataset could not be read" }];
+    render(<AgentTrace steps={failed} isStreaming={true} />);
+    expect(screen.getByText("Dataset could not be read")).toBeVisible();
   });
 
   it("truncates long thought text at 250 characters and expands on toggle", async () => {
@@ -112,28 +111,16 @@ describe("AgentTrace component (Reasoning Trace)", () => {
 
     render(<IndividualThoughtTextRenderer text={longText} isStreaming={false} />);
 
-    // Show more button present
-    const showMoreButton = screen.getByRole("button", { name: "Show more" });
-    expect(showMoreButton).toBeVisible();
-
-    await user.click(showMoreButton);
+    await user.click(screen.getByRole("button", { name: "Show more" }));
     expect(screen.getByRole("button", { name: "Show less" })).toBeVisible();
   });
 
-  it("auto-expands on expand-and-scroll-to-table custom event", async () => {
+  it("opens when a data reference asks to scroll to its table", async () => {
     render(<AgentTrace steps={mockSteps} isStreaming={false} />);
+    expect(screen.queryByText("Load schema for sales.csv")).not.toBeInTheDocument();
 
-    // Initially collapsed
-    expect(screen.queryByText("Inspect Dataset")).not.toBeInTheDocument();
+    window.dispatchEvent(new CustomEvent("expand-and-scroll-to-table", { detail: { tableName: "sales.csv" } }));
 
-    // Dispatch deep-link scroll event
-    window.dispatchEvent(
-      new CustomEvent("expand-and-scroll-to-table", {
-        detail: { tableName: "sales.csv" },
-      })
-    );
-
-    // Now expanded
-    expect(await screen.findByText("Inspect Dataset")).toBeVisible();
+    expect(await screen.findByText("Load schema for sales.csv")).toBeVisible();
   });
 });
