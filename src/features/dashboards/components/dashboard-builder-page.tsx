@@ -4,13 +4,15 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ArrowLeft, Save, Sparkles } from "lucide-react";
+import { ArrowLeft, HardDrive, LoaderCircle, Save, Sparkles, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { suggestWidgets } from "../logic/aggregate";
-import { useDashboardDatasets, useSaveDashboard } from "../use-dashboards";
+import { useDashboardAi, useDashboardDatasets, useSaveDashboard } from "../use-dashboards";
+import { AiNotes } from "./ai-notes";
 import type { DashboardWidget } from "../types";
 import { AddWidget } from "./add-widget";
 import { DatasetPicker } from "./dataset-picker";
+import { DriveBrowserDialog } from "@/features/connectors/components/drive-browser-dialog";
 
 const WidgetCard = dynamic(() => import("./widget-card").then((m) => m.WidgetCard), { ssr: false });
 
@@ -25,6 +27,10 @@ export function DashboardBuilderPage() {
   const [description, setDescription] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [widgets, setWidgets] = useState<DashboardWidget[]>([]);
+  const [driveOpen, setDriveOpen] = useState(false);
+  const [prompt, setPrompt] = useState("");
+  const [notes, setNotes] = useState<string[]>([]);
+  const ai = useDashboardAi();
 
   function toggle(id: string) {
     const dataset = datasets.find((item) => item.id === id);
@@ -40,6 +46,23 @@ export function DashboardBuilderPage() {
 
   const chosen = datasets.filter((dataset) => selected.includes(dataset.id));
   const canSave = name.trim().length > 0 && widgets.length > 0 && !save.isPending;
+
+  async function generate() {
+    const source = chosen.length ? chosen : datasets;
+    setNotes([]);
+    const result = await ai.generate.mutateAsync({ prompt, datasets: source });
+    setSelected([...new Set(result.widgets.map((widget) => widget.dataset_id))]);
+    setWidgets(result.widgets);
+    if (!name.trim() && result.name) setName(result.name);
+    if (!description.trim() && result.description) setDescription(result.description);
+    setNotes(result.notes);
+  }
+
+  async function checkAndFix() {
+    const result = await ai.review.mutateAsync({ widgets, datasets: chosen });
+    setWidgets(result.widgets);
+    setNotes(result.notes.length ? result.notes : ["No problems found."]);
+  }
 
   async function submit() {
     const saved = await save.mutateAsync({ name, description, dataset_ids: selected, widgets });
@@ -62,10 +85,31 @@ export function DashboardBuilderPage() {
         <label className="block min-w-0 text-xs text-muted-foreground">Description<input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What it is for" className={`${field} mt-1`} /></label>
       </div>
 
-      <h2 className="mb-2 mt-6 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Datasets</h2>
+      <div className="mt-6 rounded-xl border bg-surface/40 p-4">
+        <label htmlFor="dashboard-prompt" className="flex items-center gap-1.5 text-xs font-medium"><Wand2 className="size-3.5 text-sage" />Describe the dashboard you want</label>
+        <textarea id="dashboard-prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={2} placeholder="e.g. Show revenue and units by region, with a KPI row and a table of the top rows" className="mt-2 w-full resize-none rounded-md border bg-background p-2.5 text-xs outline-none placeholder:text-muted-foreground focus:border-border-strong" />
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[11px] text-muted-foreground">{chosen.length ? `Using ${chosen.length} selected dataset${chosen.length === 1 ? "" : "s"}.` : datasets.length ? "No dataset selected: the AI will pick from your Library." : "Add a dataset first."}</p>
+          <Button type="button" size="sm" onClick={() => void generate().catch(() => undefined)} disabled={!ai.ready || prompt.trim().length < 3 || !datasets.length || ai.generate.isPending}>
+            {ai.generate.isPending ? <LoaderCircle className="animate-spin" /> : <Sparkles />}{ai.generate.isPending ? "Building…" : "Generate with AI"}
+          </Button>
+        </div>
+        {ai.generate.isError ? <p role="alert" className="mt-2 text-xs text-red-300">{ai.generate.error instanceof Error ? ai.generate.error.message : "The AI could not build a dashboard."}</p> : null}
+      </div>
+
+      <div className="mb-2 mt-6 flex items-center justify-between gap-3">
+        <h2 className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Datasets</h2>
+        <Button type="button" variant="outline" size="sm" onClick={() => setDriveOpen(true)}><HardDrive />Import from Google Drive</Button>
+      </div>
+      <DriveBrowserDialog open={driveOpen} onOpenChange={setDriveOpen} onReauth={() => router.push("/connectors")} onImported={() => void datasetsQuery.refetch()} />
       <DatasetPicker datasets={datasets} selected={selected} onToggle={toggle} loading={datasetsQuery.isLoading} />
 
-      <h2 className="mb-2 mt-6 flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Preview {widgets.length ? <span className="inline-flex items-center gap-1 normal-case tracking-normal"><Sparkles className="size-3" />Starter charts from your data (charts use the dataset’s first preview rows; row counts are the full file)</span> : null}</h2>
+      <div className="mb-2 mt-6 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Preview {widgets.length ? <span className="inline-flex items-center gap-1 normal-case tracking-normal"><Sparkles className="size-3" />Charts use the dataset’s first preview rows; row counts are the full file</span> : null}</h2>
+        {widgets.length ? <Button type="button" variant="outline" size="sm" onClick={() => void checkAndFix().catch(() => undefined)} disabled={!ai.ready || ai.review.isPending}>{ai.review.isPending ? <LoaderCircle className="animate-spin" /> : <Wand2 />}{ai.review.isPending ? "Checking…" : "AI check & fix"}</Button> : null}
+      </div>
+      <AiNotes notes={notes} title="AI notes" />
+      {ai.review.isError ? <p role="alert" className="mt-2 text-xs text-red-300">The AI check failed. Try again.</p> : null}
       {widgets.length ? (
         <div className="grid grid-flow-dense gap-3 md:grid-cols-3">
           {widgets.map((widget) => (

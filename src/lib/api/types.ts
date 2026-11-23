@@ -190,3 +190,29 @@ export interface DriveImportResult {
   imported: Array<{ file_id: string; resource: { id: string; name: string; resource_type: "dataset" | "artifact" }; already_imported: boolean }>;
   failed: Array<{ file_id: string; code: string; message: string }>;
 }
+
+export interface DashboardAiDataset {
+  id: string;
+  name: string;
+  columns: Array<{ name: string; data_type: string }>;
+  rows: Array<Array<string | number | boolean | null>>;
+  row_count: number | null;
+}
+export interface DashboardAiWidget {
+  id: string;
+  type: "kpi" | "bar" | "line" | "pie" | "table";
+  title: string;
+  dataset_id: string;
+  x?: string | null;
+  y?: string | null;
+  agg: "sum" | "avg" | "count";
+  span: 1 | 2 | 3;
+}
+export interface DashboardAiResult {
+  ok: boolean;
+  ai?: boolean;
+  name?: string;
+  description?: string;
+  widgets: DashboardAiWidget[];
+  notes: string[];
+}

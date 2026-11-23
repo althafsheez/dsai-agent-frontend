@@ -76,7 +76,7 @@ def google() -> FakeGoogle:
 
 
 def make_settings(tmp_path, *, configured: bool) -> Settings:
-    extra = {"google_client_id": "client-id", "google_client_secret": "client-secret", "connector_secret": "test-secret"} if configured else {}
+    extra = {"google_client_id": "client-id", "google_client_secret": "client-secret", "connector_secret": "test-secret"} if configured else {"google_client_id": "", "google_client_secret": ""}
     return Settings(
         database_url=f"sqlite:///{tmp_path / 'drive.db'}", storage_root=tmp_path / "storage",
         auto_create_schema=True, cors_origins=["http://localhost:3000"], frontend_url="http://app.test", **extra)

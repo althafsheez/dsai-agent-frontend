@@ -1,9 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, LayoutDashboard, MoreHorizontal, Pin, Plus, Search, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { listDashboards } from "../data/dashboard-store";
+import type { Dashboard } from "../types";
 
 type Ownership = "all" | "owned" | "shared" | "pinned";
 type Sort = "updated_desc" | "updated_asc" | "name_asc";
@@ -176,7 +179,7 @@ function DashboardCard({ dashboard, onTogglePin }: { dashboard: DashboardPreview
       <div className="flex flex-1 flex-col px-4 pb-3.5 pt-3">
         <div className="flex items-start gap-2">
           <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground" title={dashboard.name}>
-            {dashboard.name}
+            <Link href={`/dashboards/${dashboard.id}`} className="hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">{dashboard.name}</Link>
           </h2>
           <button
             type="button"
@@ -226,6 +229,17 @@ function DashboardCard({ dashboard, onTogglePin }: { dashboard: DashboardPreview
   );
 }
 
+function fromStored(item: Dashboard): DashboardPreview {
+  const minutes = Math.max(1, Math.round((Date.now() - new Date(item.updated_at).getTime()) / 60_000));
+  const updated = minutes < 60 ? `${minutes}m ago` : minutes < 1440 ? `${Math.round(minutes / 60)}h ago` : `${Math.round(minutes / 1440)}d ago`;
+  return {
+    id: item.id, name: item.name, description: item.description || "Custom dashboard", owner: item.owner, ownership: item.ownership,
+    updated, updatedRank: 0, widgets: item.widgets.length, pinned: item.pinned, preview: "bar",
+    series: [22, 34, 28, 44, 38, 52, 47, 60],
+    kpi: { label: "Widgets", value: String(item.widgets.length), delta: item.status === "published" ? "Published" : "Draft", positive: item.status === "published" },
+  };
+}
+
 export function DashboardsPage() {
   const [search, setSearch] = useState("");
   const [ownership, setOwnership] = useState<Ownership>("all");
@@ -240,7 +254,18 @@ export function DashboardsPage() {
       return next;
     });
 
-  const all = useMemo(() => dashboardPreviews.map((item) => ({ ...item, pinned: pinnedIds.has(item.id) })), [pinnedIds]);
+  const [created, setCreated] = useState<DashboardPreview[]>([]);
+  useEffect(() => {
+    let active = true;
+    void listDashboards().then((items) => {
+      if (!active) return;
+      const known = new Set(dashboardPreviews.map((item) => item.id));
+      setCreated(items.filter((item) => !known.has(item.id)).map(fromStored));
+    });
+    return () => { active = false; };
+  }, []);
+
+  const all = useMemo(() => [...created, ...dashboardPreviews].map((item) => ({ ...item, pinned: pinnedIds.has(item.id) || item.pinned })), [created, pinnedIds]);
 
   const counts = useMemo<Record<Ownership, number>>(
     () => ({
@@ -282,13 +307,8 @@ export function DashboardsPage() {
           </div>
           <p className="mt-1 text-xs text-muted-foreground">Monitor key metrics, custom charts and analytics views.</p>
         </div>
-        <Button
-          type="button"
-          disabled
-          title="Dashboard creation is planned for a future release"
-          className="disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <Plus /> New Dashboard
+        <Button asChild>
+          <Link href="/dashboards/new"><Plus /> New Dashboard</Link>
         </Button>
       </header>
 

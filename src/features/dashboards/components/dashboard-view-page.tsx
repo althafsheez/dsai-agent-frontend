@@ -4,12 +4,13 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Eye, Globe, Pencil, Save, Trash2, Undo2 } from "lucide-react";
+import { ArrowLeft, Eye, Globe, LoaderCircle, Pencil, Save, Trash2, Undo2, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useDashboard, useDashboardDatasets, useDeleteDashboard, useSaveDashboard } from "../use-dashboards";
+import { useDashboard, useDashboardAi, useDashboardDatasets, useDeleteDashboard, useSaveDashboard } from "../use-dashboards";
 import type { Dashboard, DashboardWidget } from "../types";
 import { AddWidget } from "./add-widget";
+import { AiNotes } from "./ai-notes";
 
 const WidgetCard = dynamic(() => import("./widget-card").then((m) => m.WidgetCard), { ssr: false });
 
@@ -26,6 +27,8 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   const [mode, setMode] = useState<Mode>("view");
   const [draft, setDraft] = useState<DashboardWidget[]>([]);
   const [name, setName] = useState("");
+  const [notes, setNotes] = useState<string[]>([]);
+  const ai = useDashboardAi();
 
   useEffect(() => {
     if (dashboard && mode === "view") { setDraft(dashboard.widgets); setName(dashboard.name); }
@@ -51,6 +54,13 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
     widgets: overrides.widgets ?? dashboard.widgets, status: overrides.status, pinned: overrides.pinned,
   });
 
+  async function checkAndFix() {
+    const used = datasets.filter((dataset) => draft.some((widget) => widget.dataset_id === dataset.id));
+    const result = await ai.review.mutateAsync({ widgets: draft, datasets: used });
+    setDraft(result.widgets);
+    setNotes(result.notes.length ? result.notes : ["No problems found."]);
+  }
+
   async function saveEdits() {
     await save.mutateAsync(writeFields({ widgets: draft, name }));
     setMode("view");
@@ -71,7 +81,8 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
         <div className="flex flex-wrap items-center gap-2">
           {editing ? (
             <>
-              <Button type="button" variant="outline" onClick={() => setMode("view")}><Undo2 />Discard</Button>
+              <Button type="button" variant="outline" onClick={() => void checkAndFix().catch(() => undefined)} disabled={!ai.ready || !draft.length || ai.review.isPending}>{ai.review.isPending ? <LoaderCircle className="animate-spin" /> : <Wand2 />}{ai.review.isPending ? "Checking…" : "AI check & fix"}</Button>
+              <Button type="button" variant="outline" onClick={() => { setNotes([]); setMode("view"); }}><Undo2 />Discard</Button>
               <Button type="button" onClick={saveEdits} disabled={!dirty || !name.trim() || save.isPending}><Save />Save changes</Button>
             </>
           ) : (
@@ -83,8 +94,10 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
         </div>
       </header>
 
+      {editing ? <AiNotes notes={notes} title="AI notes" /> : null}
+      {ai.review.isError ? <p role="alert" className="mb-3 text-xs text-red-300">The AI check failed. Try again.</p> : null}
       {widgets.length ? (
-        <div className="grid grid-flow-dense gap-3 md:grid-cols-3">
+        <div className="mt-3 grid grid-flow-dense gap-3 md:grid-cols-3">
           {widgets.map((widget) => (
             <WidgetCard key={widget.id} widget={widget} dataset={datasetFor(widget)} editable={editing} onChange={(next) => setDraft(draft.map((item) => (item.id === next.id ? next : item)))} onRemove={() => setDraft(draft.filter((item) => item.id !== widget.id))} />
           ))}

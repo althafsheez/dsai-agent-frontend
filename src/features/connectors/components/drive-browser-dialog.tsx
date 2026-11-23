@@ -1,10 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, FileText, Folder, LoaderCircle, Search } from "lucide-react";
+import { Bookmark, ChevronRight, FileText, Folder, LoaderCircle, Search } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { ApiError, getWorkspaces, importDriveFiles, listDriveFiles } from "@/lib/api";
+import { addResourceToLibrary, ApiError, getWorkspaces, importDriveFiles, listDriveFiles } from "@/lib/api";
 import type { DriveFileDto } from "@/lib/api";
 import { formatBytes } from "@/features/context-sidebar/resource-utils";
 
@@ -15,7 +16,9 @@ function errorText(error: unknown): string {
   return error instanceof ApiError ? error.message : "Something went wrong. Try again.";
 }
 
-export function DriveBrowserDialog({ open, onOpenChange, onReauth }: { open: boolean; onOpenChange: (open: boolean) => void; onReauth: () => void }) {
+export interface DriveImportTarget { scopeType: "chat" | "workspace"; scopeId: string; label: string }
+
+export function DriveBrowserDialog({ open, onOpenChange, onReauth, target: fixedTarget, onImported }: { open: boolean; onOpenChange: (open: boolean) => void; onReauth: () => void; target?: DriveImportTarget; onImported?: () => void }) {
   const queryClient = useQueryClient();
   const [trail, setTrail] = useState<Crumb[]>([ROOT]);
   const [search, setSearch] = useState("");
@@ -53,13 +56,17 @@ export function DriveBrowserDialog({ open, onOpenChange, onReauth }: { open: boo
 
   const targets = (workspaces.data?.items ?? []).filter((workspace) => !workspace.archived_at);
   const target = workspaceId || targets[0]?.id || "";
+  const scope = fixedTarget ?? { scopeType: "workspace" as const, scopeId: target, label: "" };
   const importFiles = useMutation({
-    mutationFn: () => importDriveFiles({ fileIds: selected, scopeType: "workspace", scopeId: target }),
+    mutationFn: async (toLibrary: boolean) => {
+      const result = await importDriveFiles({ fileIds: selected, scopeType: scope.scopeType, scopeId: scope.scopeId });
+      if (toLibrary) await Promise.allSettled(result.imported.map((item) => addResourceToLibrary(item.resource.id)));
+      return result;
+    },
     onSuccess: (result) => {
       setSelected(result.failed.map((item) => item.file_id));
-      queryClient.invalidateQueries({ queryKey: ["datasets"] });
-      queryClient.invalidateQueries({ queryKey: ["artifacts"] });
-      queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+      for (const key of ["datasets", "artifacts", "workspaces", "workspace", "library", "dashboards", "dashboard-datasets"]) queryClient.invalidateQueries({ queryKey: [key] });
+      onImported?.();
     },
   });
 
@@ -71,6 +78,7 @@ export function DriveBrowserDialog({ open, onOpenChange, onReauth }: { open: boo
     setTrail((current) => [...current, { id: file.id, name: file.name }]);
   }
   const result = importFiles.data;
+  const canImport = selected.length > 0 && Boolean(scope.scopeId) && !importFiles.isPending;
   const failedById = new Map((result?.failed ?? []).map((item) => [item.file_id, item.message]));
 
   return (
@@ -98,7 +106,7 @@ export function DriveBrowserDialog({ open, onOpenChange, onReauth }: { open: boo
 
         <div className="min-h-[220px] flex-1 overflow-y-auto rounded-md border" role="list" aria-label="Drive files">
           {files.isPending ? <p className="flex items-center gap-2 p-4 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />Loading…</p> : null}
-          {files.isError ? <p role="alert" className="p-4 text-xs text-red-300">{errorText(files.error)}</p> : null}
+          {files.isError ? <p role="alert" className="p-4 text-xs text-red-300">{errorText(files.error)}{files.error instanceof ApiError && files.error.code === "connector_not_connected" ? <> <Link href="/connectors" className="underline">Open Connectors</Link></> : null}</p> : null}
           {files.isSuccess && !items.length ? <p className="p-4 text-xs text-muted-foreground">{query ? "No files match that search." : "This folder is empty."}</p> : null}
           {items.map((file) => {
             const failure = failedById.get(file.id);
@@ -131,17 +139,26 @@ export function DriveBrowserDialog({ open, onOpenChange, onReauth }: { open: boo
         {importFiles.isError ? <p role="alert" className="text-xs text-red-300">{errorText(importFiles.error)}</p> : null}
 
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <label className="flex items-center gap-2 text-xs text-muted-foreground">
-            Add to workspace
-            <select value={target} onChange={(event) => setWorkspaceId(event.target.value)} disabled={!targets.length} className="h-8 max-w-[10rem] rounded-md border bg-background px-2 text-xs text-foreground">
-              {targets.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
-            </select>
-          </label>
-          <button type="button" disabled={!selected.length || !target || importFiles.isPending} onClick={() => importFiles.mutate()} className="h-8 rounded-md bg-foreground px-3 text-xs text-background hover:opacity-90 disabled:opacity-40">
-            {importFiles.isPending ? "Importing…" : `Import${selected.length ? ` ${selected.length}` : ""}`}
-          </button>
+          {fixedTarget ? (
+            <p className="text-xs text-muted-foreground">Adds to {fixedTarget.label}</p>
+          ) : (
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              Add to workspace
+              <select value={target} onChange={(event) => setWorkspaceId(event.target.value)} disabled={!targets.length} className="h-8 max-w-[10rem] rounded-md border bg-background px-2 text-xs text-foreground">
+                {targets.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
+              </select>
+            </label>
+          )}
+          <div className="flex items-center gap-2">
+            <button type="button" disabled={!canImport} onClick={() => importFiles.mutate(true)} className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs hover:bg-raised disabled:opacity-40">
+              <Bookmark className="size-3.5" />Save to Library
+            </button>
+            <button type="button" disabled={!canImport} onClick={() => importFiles.mutate(false)} className="h-8 rounded-md bg-foreground px-3 text-xs text-background hover:opacity-90 disabled:opacity-40">
+              {importFiles.isPending ? "Importing…" : `Import${selected.length ? ` ${selected.length}` : ""}`}
+            </button>
+          </div>
         </div>
-        {workspaces.isSuccess && !targets.length ? <p className="text-[11px] text-muted-foreground">Create a workspace first; imported files are added to one.</p> : null}
+        {!fixedTarget && workspaces.isSuccess && !targets.length ? <p className="text-[11px] text-muted-foreground">Create a workspace first; imported files are added to one.</p> : null}
       </DialogContent>
     </Dialog>
   );

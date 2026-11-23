@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DashboardViewPage } from "./dashboard-view-page";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
-vi.mock("@/lib/api", () => ({ getLibrary: async () => ({ items: [] }) }));
+vi.mock("@/lib/api", () => ({ getLibrary: async () => ({ items: [] }), getModels: async () => ({ default_model_id: "m", models: [], configuration_status: "ok" }), generateDashboardWithAi: vi.fn(), reviewDashboardWithAi: vi.fn() }));
 
 function renderPage(id: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

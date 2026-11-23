@@ -19,8 +19,8 @@ interface QuickAssistantPopupProps {
   onClose: () => void;
   /** Width in px of the context/file panel open on the right; the popup stays clear of it. */
   rightInset?: number;
-  /** Width of a panel that floats over the chat (below xl); the split view leaves that space free. */
-  overlayInset?: number;
+  /** Reports when the window docks into the left half of the chat area, so the page can make room. */
+  onSplitChange?: (split: boolean) => void;
   /** Asked once as soon as the assistant is ready, e.g. from the `/btw` slash command. */
   autoAsk?: string;
   /** Selected chat text sent here from the right-click menu; it is quoted into the draft, not sent. */
@@ -37,7 +37,7 @@ function compactText(content: string) {
     : part.startsWith("`") && part.endsWith("`") ? <code key={index} className="rounded bg-raised px-1 font-mono text-[11px]">{part.slice(1, -1)}</code> : part);
 }
 
-export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFileSelect, minimized, onMinimize, onRestore, onClose, autoAsk, quote, rightInset = 0, overlayInset = 0 }: QuickAssistantPopupProps) {
+export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFileSelect, minimized, onMinimize, onRestore, onClose, autoAsk, quote, rightInset = 0, onSplitChange }: QuickAssistantPopupProps) {
   const inputId = useId();
   const titleId = useId();
   const [draft, setDraft] = useState("");
@@ -178,8 +178,12 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
 
   const expanded = expandedOverride ?? (sentThisSession || draft.length > LONG_DRAFT_CHARS || draft.includes("\n"));
   const frame = useFloatingFrame({ ref: popupRef, rightInset, expanded });
-  // Full screen splits the chat area in two: the main chat keeps one half and this window takes the other.
+  // Full screen docks this window into the left half of the chat area, between the top bar and the composer.
   const split = frame.fullscreen && frame.canSplit && !minimized;
+  useEffect(() => {
+    onSplitChange?.(split);
+    return () => onSplitChange?.(false);
+  }, [split, onSplitChange]);
 
   return (
     <>
@@ -192,8 +196,8 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
       data-fullscreen={frame.fullscreen}
       aria-hidden={minimized || undefined}
       inert={minimized || undefined}
-      style={split ? { marginRight: overlayInset } : frame.style}
-      className={`${split ? "relative flex h-full min-w-[400px] flex-1 basis-0 flex-col overflow-hidden border-l border-border-strong bg-sidebar " : "absolute z-[70] flex origin-top-left animate-pop-in flex-col overflow-hidden rounded-xl border border-border-strong bg-sidebar shadow-2xl "}${frame.interacting ? "" : "transition-[left,top,width,height,opacity,transform,visibility] duration-300 ease-spring"} ${minimized ? "invisible translate-y-2 scale-95 opacity-0" : "visible opacity-100"}`}
+      style={split ? undefined : frame.style}
+      className={`${split ? "relative col-start-1 row-start-2 flex min-h-0 min-w-[360px] flex-col overflow-hidden border-r border-border-strong bg-sidebar " : "absolute z-[70] flex origin-top-left animate-pop-in flex-col overflow-hidden rounded-xl border border-border-strong bg-sidebar shadow-2xl "}${frame.interacting ? "" : "transition-[left,top,width,height,opacity,transform,visibility] duration-300 ease-spring"} ${minimized ? "invisible translate-y-2 scale-95 opacity-0" : "visible opacity-100"}`}
     >
       <header {...frame.dragProps} className={`flex shrink-0 touch-none select-none items-center gap-2 border-b px-3 py-1.5 ${frame.fullscreen ? "" : "cursor-grab active:cursor-grabbing"}`}>
         <Sparkles className="size-4 shrink-0 text-sage" />

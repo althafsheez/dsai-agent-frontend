@@ -15,6 +15,9 @@ function seed(): Dashboard[] {
     mk("marketing-attribution", "Marketing Attribution", "Sarah", "shared", 120, false, "published"),
     mk("executive-summary", "Executive Summary", "You", "owned", 144, false, "draft"),
     mk("product-adoption", "Product Adoption", "You", "owned", 168, false, "published"),
+    mk("support-operations", "Support Operations", "Priya Nair", "shared", 192, false, "published"),
+    mk("finance-forecast", "Finance Forecast", "You", "owned", 216, false, "published"),
+    mk("inventory-supply", "Inventory & Supply", "Daniel Ortiz", "shared", 240, false, "published"),
   ];
 }
 
@@ -35,14 +38,14 @@ export async function listDashboards(): Promise<Dashboard[]> {
 }
 
 export async function getDashboard(id: string): Promise<Dashboard | null> {
-  return read().find((item) => item.id === id) ?? null;
+  return read().find((item) => item.id === id) ?? seed().find((item) => item.id === id) ?? null;
 }
 
 export type DashboardInput = Pick<Dashboard, "name" | "description" | "dataset_ids" | "widgets"> & { id?: string; status?: Dashboard["status"]; pinned?: boolean };
 
 export async function saveDashboard(input: DashboardInput): Promise<Dashboard> {
   const all = read();
-  const existing = input.id ? all.find((item) => item.id === input.id) : undefined;
+  const existing = input.id ? all.find((item) => item.id === input.id) ?? seed().find((item) => item.id === input.id) : undefined;
   const now = new Date().toISOString();
   const saved: Dashboard = {
     id: existing?.id ?? `db-${Date.now().toString(36)}`,
@@ -57,7 +60,7 @@ export async function saveDashboard(input: DashboardInput): Promise<Dashboard> {
     created_at: existing?.created_at ?? now,
     updated_at: now,
   };
-  write(existing ? all.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...all]);
+  write(all.some((item) => item.id === saved.id) ? all.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...all]);
   return saved;
 }
 

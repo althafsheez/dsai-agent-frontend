@@ -2,6 +2,9 @@ import type {
   ApiList,
   ConnectorStatusDto,
   DriveFilesPage,
+  DashboardAiDataset,
+  DashboardAiResult,
+  DashboardAiWidget,
   DriveImportResult,
   ChatDto,
   CreateChatResponse,
@@ -584,5 +587,19 @@ export function importDriveFiles(input: { fileIds: string[]; scopeType: "chat" |
   return requestJson("/connectors/google-drive/import", {
     method: "POST",
     body: JSON.stringify({ file_ids: input.fileIds, scope_type: input.scopeType, scope_id: input.scopeId }),
+  });
+}
+
+export function generateDashboardWithAi(input: { prompt: string; datasets: DashboardAiDataset[]; modelId: string }): Promise<DashboardAiResult> {
+  return requestJson("/dashboards/ai/generate", {
+    method: "POST",
+    body: JSON.stringify({ prompt: input.prompt, datasets: input.datasets, model_id: input.modelId }),
+  });
+}
+
+export function reviewDashboardWithAi(input: { widgets: DashboardAiWidget[]; datasets: DashboardAiDataset[]; modelId: string }): Promise<DashboardAiResult> {
+  return requestJson("/dashboards/ai/review", {
+    method: "POST",
+    body: JSON.stringify({ widgets: input.widgets, datasets: input.datasets, model_id: input.modelId }),
   });
 }

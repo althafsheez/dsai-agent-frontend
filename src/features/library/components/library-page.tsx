@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3,
+  HardDrive,
   ArrowRight,
   Bookmark,
   Check,
@@ -26,6 +27,8 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useRouter } from "next/navigation";
+import { DriveBrowserDialog } from "@/features/connectors/components/drive-browser-dialog";
 import { SyntaxHighlightedCode } from "@/features/chat/components/syntax-highlighted-code";
 import { FilePreviewSidebar, type ContextFile } from "@/features/context-sidebar";
 import { ShareWorkspaceDialog } from "@/features/workspaces/components/share-workspace-dialog";
@@ -285,6 +288,8 @@ export function LibraryPage() {
   }
 
   const libraryQuery = useQuery({ queryKey: ["library"], queryFn: getLibrary });
+  const [driveOpen, setDriveOpen] = useState(false);
+  const router = useRouter();
 
   const removeMutation = useMutation({
     mutationFn: removeResourceFromLibrary,
@@ -449,6 +454,9 @@ export function LibraryPage() {
               <p className="mt-1 text-sm text-muted-foreground">Files saved from your analyses.</p>
             </div>
           </div>
+          <button type="button" onClick={() => setDriveOpen(true)} className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border bg-surface px-3 text-xs text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground">
+            <HardDrive className="size-3.5" />Import from Google Drive
+          </button>
           <button
             type="button"
             disabled={!hasDatasets || zipMutation.isPending}
@@ -459,6 +467,7 @@ export function LibraryPage() {
             <Download className="size-3.5" />{zipMutation.isPending ? "Preparing ZIP…" : "Download all datasets"}
           </button>
         </header>
+        <DriveBrowserDialog open={driveOpen} onOpenChange={setDriveOpen} onReauth={() => router.push("/connectors")} />
         {zipMutation.isError ? <p role="alert" className="-mt-3 mb-4 text-xs text-red-300">Download failed. Please try again.</p> : null}
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

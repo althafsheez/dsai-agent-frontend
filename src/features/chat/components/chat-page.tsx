@@ -35,6 +35,7 @@ import {
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import { DriveBrowserDialog } from "@/features/connectors/components/drive-browser-dialog";
 import { useUiStore } from "@/stores/ui-store";
 import { ContextSidebar, FilePreviewSidebar, type ContextFile } from "@/features/context-sidebar";
 import {
@@ -229,14 +230,13 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const contextPanelRef = useRef<HTMLDivElement>(null);
   const previewPanelRef = useRef<HTMLDivElement>(null);
   const [rightInset, setRightInset] = useState(0);
-  // Below the xl breakpoint the panels float over the chat instead of sitting beside it; the split view must stay clear of them.
-  const [overlayInset, setOverlayInset] = useState(0);
+  // True while the Quick Assistant is docked on the left of the chat instead of floating.
+  const [quickSplit, setQuickSplit] = useState(false);
   useEffect(() => {
     const panels = [previewPanelRef.current, contextPanelRef.current];
     const measure = () => {
       const panel = panels[0] ?? panels[1];
       setRightInset(panel?.getBoundingClientRect().width ?? 0);
-      setOverlayInset(panel && getComputedStyle(panel).position === "absolute" ? panel.getBoundingClientRect().width : 0);
     };
     measure();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
@@ -248,6 +248,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [libraryDialogOpen, setLibraryDialogOpen] = useState(false);
+  const [driveDialogOpen, setDriveDialogOpen] = useState(false);
   const [connectorCategory, setConnectorCategory] = useState<ConnectorCategory>("all");
   const [connectorQuery, setConnectorQuery] = useState("");
   const [modelId, setModelId] = useState("");
@@ -1365,8 +1366,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
 
   return (
     <section className="relative flex min-h-0 flex-1 overflow-hidden">
-      <div className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] bg-background">
-        <div className="col-span-2 row-start-1">
+      <div className={`grid min-w-0 flex-1 ${quickSplit ? "grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]" : "grid-cols-[minmax(0,0fr)_auto_minmax(0,1fr)]"} grid-rows-[auto_minmax(0,1fr)_auto] bg-background`}>
+        <div className="col-span-full row-start-1">
           <ChatHeader
             title={chatQuery.data?.title ?? "Loading conversation…"}
             workspaceName={workspaceName}
@@ -1386,7 +1387,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
         <div
           ref={conversationScroll.viewportRef}
           aria-label="Conversation messages"
-          className="col-start-2 row-start-2 min-h-0 overflow-y-auto"
+          className="col-start-3 row-start-2 min-h-0 overflow-y-auto"
           onScroll={conversationScroll.onScroll}
           onContextMenu={openSelectionMenu}
           onMouseUp={showAskPill}
@@ -1412,7 +1413,24 @@ export function ChatPage({ chatId }: { chatId: string }) {
             />
           )}
         </div>
-        <form className="col-start-2 row-start-3 bg-background p-3 sm:p-4" onSubmit={submit}>
+        {quickAssistant ? (
+          <QuickAssistantPopup
+            quote={quickAssistant.quote}
+            key={`${chatId}:${quickAssistant.session}`}
+            autoAsk={quickAssistant.autoAsk}
+            chatId={chatId}
+            snapshotMessageId={quickAssistant.snapshotMessageId}
+            resources={[...(datasetsQuery.data?.items ?? []), ...(artifactsQuery.data?.items ?? [])]}
+            onFileSelect={selectFile}
+            minimized={quickAssistant.minimized || Boolean(selectedFile)}
+            onMinimize={minimizeQuickAssistant}
+            onRestore={restoreQuickAssistant}
+            onClose={closeQuickAssistant}
+            rightInset={rightInset}
+            onSplitChange={setQuickSplit}
+          />
+        ) : null}
+        <form className="col-start-2 col-span-2 row-start-3 bg-background p-3 sm:p-4" onSubmit={submit}>
           <QueuedQuestions
             items={queuedQuestions}
             editingId={queueEdit?.runId}
@@ -1533,6 +1551,19 @@ export function ChatPage({ chatId }: { chatId: string }) {
                         >
                           <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#c2d9b8] text-[#172e18] sm:size-9"><BookOpen aria-hidden="true" className="size-4" /></span>
                           <span className="min-w-0"><span className="block text-xs font-semibold leading-4">Import from Library</span><span className="hidden text-[10px] leading-4 text-muted-foreground sm:block">Browse saved assets</span></span>
+                          <ChevronRight aria-hidden="true" className="ml-auto hidden size-3.5 shrink-0 sm:block" />
+                        </button>
+                        <button
+                          type="button"
+                          data-attachment-action
+                          onClick={() => {
+                            setAttachmentMenuOpen(false);
+                            setDriveDialogOpen(true);
+                          }}
+                          className="flex min-w-0 items-center gap-2 rounded-lg border border-border-strong bg-gradient-to-br from-[#2e2a3a] to-[#20272f] p-2 text-left hover:border-slate/70 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ring"
+                        >
+                          <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#d4c8ee] text-[#231a3a] sm:size-9"><HardDrive aria-hidden="true" className="size-4" /></span>
+                          <span className="min-w-0"><span className="block text-xs font-semibold leading-4">Google Drive</span><span className="hidden text-[10px] leading-4 text-muted-foreground sm:block">Import from Drive</span></span>
                           <ChevronRight aria-hidden="true" className="ml-auto hidden size-3.5 shrink-0 sm:block" />
                         </button>
                       </div>
@@ -1699,6 +1730,13 @@ export function ChatPage({ chatId }: { chatId: string }) {
           </div>
         </form>
 
+        <DriveBrowserDialog
+          open={driveDialogOpen}
+          onOpenChange={setDriveDialogOpen}
+          onReauth={() => router.push("/connectors")}
+          target={{ scopeType: "chat", scopeId: chatId, label: "this chat" }}
+          onImported={() => void queryClient.invalidateQueries({ queryKey: ["chat", chatId] })}
+        />
         <LibraryImportDialog
           open={libraryDialogOpen}
           onClose={() => setLibraryDialogOpen(false)}
@@ -1738,23 +1776,6 @@ export function ChatPage({ chatId }: { chatId: string }) {
             <Sparkles className="size-3.5 text-muted-foreground" />Ask Quick Assistant about this
           </button>
         </div>
-      ) : null}
-      {quickAssistant ? (
-        <QuickAssistantPopup
-          quote={quickAssistant.quote}
-          key={`${chatId}:${quickAssistant.session}`}
-          autoAsk={quickAssistant.autoAsk}
-          chatId={chatId}
-          snapshotMessageId={quickAssistant.snapshotMessageId}
-          resources={[...(datasetsQuery.data?.items ?? []), ...(artifactsQuery.data?.items ?? [])]}
-          onFileSelect={selectFile}
-          minimized={quickAssistant.minimized || Boolean(selectedFile)}
-          onMinimize={minimizeQuickAssistant}
-          onRestore={restoreQuickAssistant}
-          onClose={closeQuickAssistant}
-          rightInset={rightInset}
-          overlayInset={overlayInset}
-        />
       ) : null}
       {panelOpen ? (
         <div ref={contextPanelRef} className="absolute inset-y-0 right-0 z-40 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:static xl:z-auto xl:w-[340px] xl:max-w-none xl:shrink-0 xl:shadow-none">
