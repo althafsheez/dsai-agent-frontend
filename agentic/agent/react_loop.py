@@ -23,6 +23,8 @@ def _is_transient(exc: Exception) -> bool:
     """Google's 'high demand' (503), rate limit (429) and brief 500s succeed when repeated."""
     return getattr(exc, "code", None) in (429, 500, 502, 503, 504)
 
+PARALLEL_SAFE_TOOLS = frozenset({"read_file", "list_files", "web_search"})
+
 GEMINI_TOOLS = [
     types.Tool(
         function_declarations=[
@@ -260,9 +262,11 @@ class ReActAgent:
         config: types.GenerateContentConfig, max_turns: int,
         execute_tool: Callable[[str, dict], Awaitable[dict]],
         is_cancelled: Callable[[], bool] | None = None,
+        fallback_models: tuple[str, ...] = (),
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Run tool turns followed by a tool-free synthesis if the budget is exhausted."""
         final_answer = []
+        pending_fallbacks = list(fallback_models)
         start = time.perf_counter()
         first_response = True
         for turn in range(1, max_turns + 2):
@@ -314,12 +318,19 @@ class ReActAgent:
                                 yield {"type": "delta", "content": part.text}
                     break
                 except Exception as exc:
-                    if attempt < 2 and not model_parts and _is_transient(exc):
-                        attempt += 1
-                        logger.warning("gemini_retry attempt=%d model=%s", attempt, model)
+                    if not model_parts and _is_transient(exc):
                         calls, seen_ids = [], set()
-                        await asyncio.sleep(2.0 * attempt)
-                        continue
+                        if attempt < 2:
+                            attempt += 1
+                            logger.warning("gemini_retry attempt=%d model=%s", attempt, model)
+                            await asyncio.sleep(2.0 * attempt)
+                            continue
+                        if pending_fallbacks:
+                            previous, model = model, pending_fallbacks.pop(0)
+                            attempt = 0
+                            logger.warning("gemini_fallback from=%s to=%s", previous, model)
+                            yield {"type": "status", "content": f"{previous} is busy, switching to {model}…"}
+                            continue
                     logger.exception("gemini_stream_failed model=%s", model)
                     yield {"type": "error", "content": "Gemini generation failed."}
                     return
@@ -333,14 +344,25 @@ class ReActAgent:
                 return
             contents.append(types.Content(role="model", parts=model_parts))
             responses = []
+            prepared_calls = []
             for index, call in enumerate(calls, 1):
                 if is_cancelled and is_cancelled():
                     return
                 name = str(call.name or "")
                 args = dict(call.args or {})
                 call_id = call.id or f"turn-{turn}-call-{index}"
+                prepared_calls.append((call, name, args, call_id))
                 yield {"type": "tool_call", "tool": name, "arguments": args, "tool_call_id": call_id}
-                result = await execute_tool(name, args)
+            # Independent read-only calls (several file reads, say) run together instead of one after another.
+            if len(prepared_calls) > 1 and all(name in PARALLEL_SAFE_TOOLS for _, name, _, _ in prepared_calls):
+                results = await asyncio.gather(*(execute_tool(name, args) for _, name, args, _ in prepared_calls))
+            else:
+                results = []
+                for _, name, args, _ in prepared_calls:
+                    if is_cancelled and is_cancelled():
+                        return
+                    results.append(await execute_tool(name, args))
+            for (call, name, _, call_id), result in zip(prepared_calls, results):
                 yield {"type": "tool_result", "tool": name, "result": result, "tool_call_id": call_id}
                 responses.append(types.Part(function_response=types.FunctionResponse(
                     name=name, id=call.id, response=result,

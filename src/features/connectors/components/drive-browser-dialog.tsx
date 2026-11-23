@@ -16,7 +16,7 @@ function errorText(error: unknown): string {
   return error instanceof ApiError ? error.message : "Something went wrong. Try again.";
 }
 
-export interface DriveImportTarget { scopeType: "chat" | "workspace"; scopeId: string; label: string }
+export interface DriveImportTarget { scopeType: "chat" | "workspace" | "library"; scopeId: string; label: string }
 
 export function DriveBrowserDialog({ open, onOpenChange, onReauth, target: fixedTarget, onImported, onPick }: { open: boolean; onOpenChange: (open: boolean) => void; onReauth: () => void; target?: DriveImportTarget; onImported?: (result: DriveImportResult) => void; onPick?: (files: DriveFileDto[]) => void }) {
   const queryClient = useQueryClient();
@@ -159,9 +159,11 @@ export function DriveBrowserDialog({ open, onOpenChange, onReauth, target: fixed
             </label>
           )}
           <div className="flex items-center gap-2">
-            <button type="button" disabled={!canImport} onClick={() => importFiles.mutate(true)} className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs hover:bg-raised disabled:opacity-40">
-              <Bookmark className="size-3.5" />Save to Library
-            </button>
+            {fixedTarget?.scopeType === "library" ? null : (
+              <button type="button" disabled={!canImport} onClick={() => importFiles.mutate(true)} className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs hover:bg-raised disabled:opacity-40">
+                <Bookmark className="size-3.5" />Save to Library
+              </button>
+            )}
             <button type="button" disabled={!canImport} onClick={() => importFiles.mutate(false)} className="h-8 rounded-md bg-foreground px-3 text-xs text-background hover:opacity-90 disabled:opacity-40">
               {importFiles.isPending ? "Importing…" : `Import${selected.length ? ` ${selected.length}` : ""}`}
             </button>

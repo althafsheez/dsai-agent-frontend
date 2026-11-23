@@ -224,7 +224,7 @@ export async function deleteChat(chatId: string): Promise<void> {
 
 export async function uploadResource(input: {
   file: File;
-  scopeType: "chat" | "workspace";
+  scopeType: "chat" | "workspace" | "library";
   scopeId: string;
   messageId?: string;
   clientUploadId: string;
@@ -268,6 +268,8 @@ export type LibraryCategory = "dataset" | "visual" | "code" | "report" | "other"
 type LibraryFields = {
   library_category: LibraryCategory;
   library_created_at: string;
+  /** Added straight to the Library (local upload or Drive), not from any chat or workspace. */
+  uploaded_in_library?: boolean;
   /** The live workspace the file belongs to, directly or through a workspace chat; null for standalone chats. */
   workspace_id: string | null;
   workspace_name: string | null;
@@ -329,6 +331,11 @@ export function getMessages(chatId: string): Promise<ApiList<MessageDto>> {
 export function getQuickAssistantMessages(contextType: "chat" | "workspace", contextId: string, threadId?: string): Promise<ApiList<QuickMessageDto>> {
   const thread = threadId ? `&thread_id=${encodeURIComponent(threadId)}` : "";
   return requestJson<ApiList<QuickMessageDto>>(`/quick-assistant/messages?context_type=${contextType}&context_id=${encodeURIComponent(contextId)}${thread}`);
+}
+
+export async function deleteQuickAssistantThread(contextType: "chat" | "workspace", contextId: string, threadId: string): Promise<void> {
+  const response = await fetch(`${API_ROOT}/quick-assistant/threads?context_type=${contextType}&context_id=${encodeURIComponent(contextId)}&thread_id=${encodeURIComponent(threadId)}`, { method: "DELETE", headers: requestHeaders() });
+  if (!response.ok) throw await apiError(response);
 }
 
 export function getChatRuns(chatId: string): Promise<ApiList<AgentRunDto>> {
@@ -583,7 +590,7 @@ export function listDriveFiles(input: { folderId?: string | null; query?: string
   return requestJson(`/connectors/google-drive/files${params.size ? `?${params}` : ""}`);
 }
 
-export function importDriveFiles(input: { fileIds: string[]; scopeType: "chat" | "workspace"; scopeId: string }): Promise<DriveImportResult> {
+export function importDriveFiles(input: { fileIds: string[]; scopeType: "chat" | "workspace" | "library"; scopeId: string }): Promise<DriveImportResult> {
   return requestJson("/connectors/google-drive/import", {
     method: "POST",
     body: JSON.stringify({ file_ids: input.fileIds, scope_type: input.scopeType, scope_id: input.scopeId }),
@@ -594,6 +601,13 @@ export function generateDashboardWithAi(input: { prompt: string; datasets: Dashb
   return requestJson("/dashboards/ai/generate", {
     method: "POST",
     body: JSON.stringify({ prompt: input.prompt, datasets: input.datasets, model_id: input.modelId }),
+  });
+}
+
+export function tuneDashboardWithAi(input: { instruction: string; widgets: DashboardAiWidget[]; slicers: string[]; name: string; datasets: DashboardAiDataset[]; modelId: string }): Promise<DashboardAiResult> {
+  return requestJson("/dashboards/ai/tune", {
+    method: "POST",
+    body: JSON.stringify({ instruction: input.instruction, widgets: input.widgets, slicers: input.slicers, name: input.name, datasets: input.datasets, model_id: input.modelId }),
   });
 }
 
@@ -610,18 +624,37 @@ export interface DatasetRowsDto {
   rows: Array<Array<string | number | boolean | null>>;
   total_rows: number;
   truncated: boolean;
+  /** When the data was last replaced (upload time, or the last Google Drive re-sync). */
+  refreshed_at?: string;
+  /** Changes whenever the data changes. */
+  version?: string;
+  /** True when the signed-in user can re-sync this dataset from Google Drive. */
+  syncable?: boolean;
 }
 
-/** Up to 6,000 rows of a CSV dataset, for dashboards. */
+/** Up to 6,000 rows of a CSV or XLSX dataset, for dashboards. */
 export function getDatasetRows(resourceId: string, limit = 6000): Promise<DatasetRowsDto> {
   return requestJson(`/datasets/${encodeURIComponent(resourceId)}/rows?limit=${limit}`);
 }
 
+export interface DashboardShareDto { user_id: string; role: "viewer" | "editor"; name?: string }
 export interface DashboardRecordDto {
   id: string; name: string; description: string; status: "draft" | "published"; pinned: boolean;
   slicers: string[]; dataset_ids: string[]; widgets: unknown[]; owner: string; ownership: "owned" | "shared"; created_at: string; updated_at: string;
+  role: "owner" | "editor" | "viewer"; refresh_minutes: number;
+  /** Only sent to the owner. */
+  shares?: DashboardShareDto[];
 }
-export type DashboardSaveBody = Pick<DashboardRecordDto, "name" | "description" | "status" | "pinned" | "slicers" | "dataset_ids" | "widgets"> & { id?: string };
+export type DashboardSaveBody = Pick<DashboardRecordDto, "name" | "description" | "status" | "pinned" | "slicers" | "dataset_ids" | "widgets"> & { id?: string; refresh_minutes?: number; shares?: DashboardShareDto[] };
+
+export interface DashboardPersonDto { id: string; name: string; initials: string }
+export async function listDashboardPeople(): Promise<DashboardPersonDto[]> {
+  return (await requestJson<{ items: DashboardPersonDto[] }>("/dashboards/people")).items;
+}
+/** Re-downloads a Google Drive dataset; resolves with "unchanged" when the file did not change. */
+export function syncDatasetFromDrive(resourceId: string): Promise<{ status: "updated" | "unchanged"; refreshed_at: string }> {
+  return requestJson(`/datasets/${encodeURIComponent(resourceId)}/sync`, { method: "POST" });
+}
 
 export async function listDashboardRecords(): Promise<DashboardRecordDto[]> {
   return (await requestJson<{ items: DashboardRecordDto[] }>("/dashboards")).items;
@@ -635,4 +668,47 @@ export function saveDashboardRecord(body: DashboardSaveBody): Promise<DashboardR
 export async function deleteDashboardRecord(id: string): Promise<void> {
   const response = await fetch(`${API_ROOT}/dashboards/${encodeURIComponent(id)}`, { method: "DELETE", headers: requestHeaders() });
   if (!response.ok) throw await apiError(response);
+}
+
+export interface WorkflowRecordDto {
+  id: string; name: string; description: string; state: "active" | "inactive" | "draft";
+  trigger: { kind: "manual" | "schedule" | "event"; label: string; config?: Record<string, string> };
+  steps: Array<{ id: string; kind: string; title: string; detail: string; config?: Record<string, string> }>;
+  created_at: string; updated_at: string;
+}
+export type WorkflowSaveBody = Pick<WorkflowRecordDto, "name" | "description" | "state" | "trigger" | "steps"> & { id?: string };
+export interface WorkflowRunRecordDto {
+  id: string; workflow_id: string; workflow_name: string; trigger: "manual" | "schedule" | "event";
+  plan: unknown[]; started_at: string; cancelled_at: string | null;
+}
+export type WorkflowRunBody = Pick<WorkflowRunRecordDto, "workflow_id" | "trigger" | "plan"> & { id?: string; started_at?: string };
+
+export async function listWorkflowRecords(): Promise<WorkflowRecordDto[]> {
+  return (await requestJson<{ items: WorkflowRecordDto[] }>("/workflow-store")).items;
+}
+export function getWorkflowRecord(id: string): Promise<WorkflowRecordDto> {
+  return requestJson(`/workflow-store/${encodeURIComponent(id)}`);
+}
+export function saveWorkflowRecord(body: WorkflowSaveBody): Promise<WorkflowRecordDto> {
+  return requestJson("/workflow-store", { method: "PUT", body: JSON.stringify(body) });
+}
+export function setWorkflowRecordState(id: string, state: WorkflowRecordDto["state"]): Promise<WorkflowRecordDto> {
+  return requestJson(`/workflow-store/${encodeURIComponent(id)}/state`, { method: "PUT", body: JSON.stringify({ state }) });
+}
+export async function deleteWorkflowRecord(id: string): Promise<void> {
+  const response = await fetch(`${API_ROOT}/workflow-store/${encodeURIComponent(id)}`, { method: "DELETE", headers: requestHeaders() });
+  if (!response.ok) throw await apiError(response);
+}
+export async function listWorkflowRunRecords(workflowId?: string): Promise<WorkflowRunRecordDto[]> {
+  const query = workflowId ? `?workflow_id=${encodeURIComponent(workflowId)}` : "";
+  return (await requestJson<{ items: WorkflowRunRecordDto[] }>(`/workflow-store/runs${query}`)).items;
+}
+export function getWorkflowRunRecord(id: string): Promise<WorkflowRunRecordDto> {
+  return requestJson(`/workflow-store/runs/${encodeURIComponent(id)}`);
+}
+export function startWorkflowRunRecord(body: WorkflowRunBody): Promise<WorkflowRunRecordDto> {
+  return requestJson("/workflow-store/runs", { method: "POST", body: JSON.stringify(body) });
+}
+export function cancelWorkflowRunRecord(id: string): Promise<WorkflowRunRecordDto> {
+  return requestJson(`/workflow-store/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" });
 }

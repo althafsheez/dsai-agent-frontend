@@ -22,6 +22,7 @@ class E2BSandboxPool:
         self._api_key = api_key
         self._timeout_seconds = timeout_seconds
         self._sandboxes: dict[str, Any] = {}
+        self._pdf_ready: set[str] = set()
         self._output_hashes: dict[str, dict[str, str]] = {}
         self._lock = RLock()
 
@@ -65,15 +66,6 @@ class E2BSandboxPool:
                     # exist, which is safe and expected for a fresh template.
                     sandbox.files.make_dir("/home/user/outputs")
                     sandbox.files.make_dir("/home/user/inputs")
-                    # Each E2B sandbox has its own Python environment.
-                    started = time.perf_counter()
-                    try:
-                        sandbox.commands.run(
-                            "python -c 'import reportlab' || python -m pip install --disable-pip-version-check reportlab==4.4.10",
-                            timeout=120,
-                        )
-                    finally:
-                        logger.info("e2b_dependency_prep duration_ms=%.1f", (time.perf_counter() - started) * 1000)
                 except Exception as exc:
                     if sandbox is not None:
                         try:
@@ -98,6 +90,7 @@ class E2BSandboxPool:
 
         def run() -> dict[str, Any]:
             try:
+                self._ensure_pdf_library(run_id, sandbox, code)
                 execution = sandbox.run_code(code, timeout=bounded_timeout)
                 generated = self._scan_outputs_sync(run_id, sandbox)
                 execution_error = getattr(execution, "error", None)
@@ -126,6 +119,20 @@ class E2BSandboxPool:
                 return {"success": False, "error": f"Sandbox execution failed ({type(exc).__name__}){suffix}."}
 
         return await asyncio.to_thread(run)
+
+    def _ensure_pdf_library(self, run_id: str, sandbox: Any, code: str) -> None:
+        """Installing reportlab takes seconds, so do it only for runs whose code actually uses it."""
+        if "reportlab" not in code or run_id in self._pdf_ready:
+            return
+        started = time.perf_counter()
+        try:
+            sandbox.commands.run(
+                "python -c 'import reportlab' || python -m pip install --disable-pip-version-check reportlab==4.4.10",
+                timeout=120,
+            )
+            self._pdf_ready.add(run_id)
+        finally:
+            logger.info("e2b_dependency_prep duration_ms=%.1f", (time.perf_counter() - started) * 1000)
 
     def _scan_outputs_sync(self, run_id: str, sandbox: Any) -> list[dict[str, Any]]:
         generated: list[dict[str, Any]] = []
@@ -232,6 +239,7 @@ class E2BSandboxPool:
         with self._lock:
             sandbox = self._sandboxes.pop(run_id, None)
             self._output_hashes.pop(run_id, None)
+            self._pdf_ready.discard(run_id)
         if sandbox is not None:
             try:
                 sandbox.kill()

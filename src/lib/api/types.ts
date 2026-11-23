@@ -187,7 +187,7 @@ export interface DriveFilesPage {
 }
 
 export interface DriveImportResult {
-  imported: Array<{ file_id: string; resource: { id: string; name: string; resource_type: "dataset" | "artifact" }; already_imported: boolean }>;
+  imported: Array<{ file_id: string; resource: { id: string; name: string; resource_type: "dataset" | "artifact"; size_bytes?: number }; already_imported: boolean }>;
   failed: Array<{ file_id: string; code: string; message: string }>;
 }
 
@@ -215,4 +215,6 @@ export interface DashboardAiResult {
   description?: string;
   widgets: DashboardAiWidget[];
   notes: string[];
+  slicers?: string[];
+  suggestions?: string[];
 }

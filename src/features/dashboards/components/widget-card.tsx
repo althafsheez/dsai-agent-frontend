@@ -39,11 +39,11 @@ function WidgetBody({ widget, dataset, selected, onSelect }: BodyProps) {
         {widget.type === "pie" ? (
           <PieChart><Pie data={points} dataKey="value" nameKey="name" innerRadius={36} outerRadius={70} paddingAngle={2} onClick={(entry) => onSelect?.(String(entry.name))}>{points.map((point, index) => <Cell key={point.name} fill={COLORS[index % COLORS.length]} fillOpacity={dim(point.name)} />)}</Pie><Tooltip contentStyle={tooltipStyle} /></PieChart>
         ) : widget.type === "line" ? (
-          <LineChart data={points} onClick={chartClick}><CartesianGrid stroke="#2c2f31" vertical={false} /><XAxis dataKey="name" {...axis} /><YAxis {...axis} width={36} /><Tooltip contentStyle={tooltipStyle} /><Line type="monotone" dataKey="value" stroke={COLORS[0]} strokeWidth={2} dot={false} /></LineChart>
+          <LineChart data={points} onClick={chartClick}><CartesianGrid stroke="#2c2f31" vertical={false} /><XAxis dataKey="name" {...axis} /><YAxis {...axis} width={44} tickFormatter={(value: number) => formatNumber(Number(value))} /><Tooltip contentStyle={tooltipStyle} /><Line type="monotone" dataKey="value" stroke={COLORS[0]} strokeWidth={2} dot={false} /></LineChart>
         ) : widget.type === "area" ? (
-          <AreaChart data={points} onClick={chartClick}><CartesianGrid stroke="#2c2f31" vertical={false} /><XAxis dataKey="name" {...axis} /><YAxis {...axis} width={36} /><Tooltip contentStyle={tooltipStyle} /><Area type="monotone" dataKey="value" stroke={COLORS[1]} fill={COLORS[1]} fillOpacity={0.25} strokeWidth={2} /></AreaChart>
+          <AreaChart data={points} onClick={chartClick}><CartesianGrid stroke="#2c2f31" vertical={false} /><XAxis dataKey="name" {...axis} /><YAxis {...axis} width={44} tickFormatter={(value: number) => formatNumber(Number(value))} /><Tooltip contentStyle={tooltipStyle} /><Area type="monotone" dataKey="value" stroke={COLORS[1]} fill={COLORS[1]} fillOpacity={0.25} strokeWidth={2} /></AreaChart>
         ) : (
-          <BarChart data={points}><CartesianGrid stroke="#2c2f31" vertical={false} /><XAxis dataKey="name" {...axis} /><YAxis {...axis} width={36} /><Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#ffffff10" }} /><Bar dataKey="value" fill={COLORS[0]} radius={[3, 3, 0, 0]} cursor={clickable ? "pointer" : undefined} onClick={(entry) => onSelect?.(String((entry as unknown as { name: string }).name))}>{points.map((point) => <Cell key={point.name} fillOpacity={dim(point.name)} />)}</Bar></BarChart>
+          <BarChart data={points}><CartesianGrid stroke="#2c2f31" vertical={false} /><XAxis dataKey="name" {...axis} /><YAxis {...axis} width={44} tickFormatter={(value: number) => formatNumber(Number(value))} /><Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#ffffff10" }} /><Bar dataKey="value" fill={COLORS[0]} radius={[3, 3, 0, 0]} cursor={clickable ? "pointer" : undefined} onClick={(entry) => onSelect?.(String((entry as unknown as { name: string }).name))}>{points.map((point) => <Cell key={point.name} fillOpacity={dim(point.name)} />)}</Bar></BarChart>
         )}
       </ResponsiveContainer>
     </div>
@@ -61,6 +61,17 @@ interface WidgetCardProps {
   onSelect?: (column: string, value: string) => void;
   onChange?: (widget: DashboardWidget) => void;
   onRemove?: () => void;
+}
+
+const AGG_LABEL = { sum: "Sum of", avg: "Average of", count: "Count of rows" } as const;
+
+/** What the widget computes, in words, so a number can be checked against the data. */
+function describe(widget: DashboardWidget, dataset: DatasetLite | undefined): string {
+  if (!dataset) return "";
+  if (widget.type === "table") return `Rows of ${dataset.name}`;
+  const measure = widget.agg === "count" ? AGG_LABEL.count : `${AGG_LABEL[widget.agg]} ${widget.y ?? "value"}`;
+  const by = widget.type !== "kpi" && widget.x ? ` by ${widget.x}` : "";
+  return `${measure}${by} · ${dataset.name}`;
 }
 
 export function WidgetCard({ widget, dataset, editable, filters = {}, span, onSelect, onChange, onRemove }: WidgetCardProps) {
@@ -83,6 +94,7 @@ export function WidgetCard({ widget, dataset, editable, filters = {}, span, onSe
           </>
         ) : null}
       </header>
+      {!editable && dataset ? <p className="truncate px-0.5 text-[10px] text-muted-foreground" title={describe(widget, dataset)}>{describe(widget, dataset)}</p> : null}
       {editable && dataset && widget.type !== "kpi" && widget.type !== "table" ? (
         <div className="mt-2 flex flex-wrap gap-1.5">
           <select aria-label="Chart type" value={widget.type} onChange={(event) => onChange?.({ ...widget, type: event.target.value as DashboardWidget["type"] })} className="h-7 rounded border bg-surface px-1.5 text-[11px]">{types.map((type) => <option key={type} value={type}>{type[0].toUpperCase() + type.slice(1)}</option>)}</select>

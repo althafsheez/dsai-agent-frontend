@@ -303,3 +303,31 @@ class Dashboard(TimestampMixin, Base):
     slicers: Mapped[list[Any]] = mapped_column(JSON, default=list)
     dataset_ids: Mapped[list[Any]] = mapped_column(JSON, default=list)
     widgets: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    # [{"user_id": str, "role": "viewer" | "editor"}]; a published dashboard is also visible to the whole team (view only).
+    shares: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    # 0 = manual refresh only; otherwise the minutes between automatic data refreshes while the dashboard is open.
+    refresh_minutes: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class WorkflowDefinition(TimestampMixin, Base):
+    __tablename__ = "workflow_definitions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str] = mapped_column(Text, default="")
+    state: Mapped[str] = mapped_column(String(16), default="draft")
+    trigger: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    steps: Mapped[list[Any]] = mapped_column(JSON, default=list)
+
+
+class WorkflowRunRecord(TimestampMixin, Base):
+    __tablename__ = "workflow_run_records"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=new_id)
+    workflow_id: Mapped[str] = mapped_column(String(64), index=True)
+    workflow_name: Mapped[str] = mapped_column(String(160))
+    trigger: Mapped[str] = mapped_column(String(16), default="manual")
+    plan: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

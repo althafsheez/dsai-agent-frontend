@@ -10,6 +10,7 @@ import {
   Check,
   ChevronDown,
   ChevronLeft,
+  ChevronRight,
   Code2,
   Database,
   Download,
@@ -19,7 +20,10 @@ import {
   Folder,
   Grid2X2,
   Layers3,
+  Link2,
   List,
+  Paperclip,
+  Plus,
   Search,
   Share2,
   Star,
@@ -40,6 +44,7 @@ import {
   getResourcePreview,
   getResourcePreviewText,
   removeResourceFromLibrary,
+  uploadResource,
   type LibraryResource,
 } from "@/lib/api";
 
@@ -54,6 +59,11 @@ const categoryStyle = {
 function ResourceIcon({ item }: { item: LibraryResource }) {
   const { icon: Icon, color } = categoryStyle[item.library_category];
   return <Icon className={`size-5 ${color}`} />;
+}
+
+function sourceLabel(item: LibraryResource): string {
+  if (item.uploaded_in_library && !item.workspace_id) return "Uploaded in Library";
+  return `From ${item.workspace_name ?? (item.workspace_id ? "workspace" : "standalone chat")}`;
 }
 
 type LibraryView = "grid" | "list";
@@ -289,6 +299,15 @@ export function LibraryPage() {
 
   const libraryQuery = useQuery({ queryKey: ["library"], queryFn: getLibrary });
   const [driveOpen, setDriveOpen] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [connectorsOpen, setConnectorsOpen] = useState(false);
+  const localFileRef = useRef<HTMLInputElement>(null);
+  const uploadMutation = useMutation({
+    mutationFn: async (files: File[]) => {
+      for (const file of files) await uploadResource({ file, scopeType: "library", scopeId: "library", clientUploadId: crypto.randomUUID() });
+    },
+    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["library"] }); },
+  });
   const router = useRouter();
 
   const removeMutation = useMutation({
@@ -371,9 +390,9 @@ export function LibraryPage() {
                   <span aria-hidden="true">·</span>
                   <span className="shrink-0">{formatBytes(item.size_bytes)}</span>
                   <span aria-hidden="true">·</span>
-                  <span className="flex min-w-0 items-center gap-1" title={`From ${item.workspace_name ?? (item.workspace_id ? "workspace" : "standalone chat")}`}>
+                  <span className="flex min-w-0 items-center gap-1" title={sourceLabel(item)}>
                     <Folder aria-hidden="true" className="size-3 shrink-0" />
-                    <span className="truncate">From {item.workspace_name ?? (item.workspace_id ? "workspace" : "standalone chat")}</span>
+                    <span className="truncate">{sourceLabel(item)}</span>
                   </span>
                 </p>
               </button>
@@ -454,9 +473,46 @@ export function LibraryPage() {
               <p className="mt-1 text-sm text-muted-foreground">Files saved from your analyses.</p>
             </div>
           </div>
-          <button type="button" onClick={() => setDriveOpen(true)} className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border bg-surface px-3 text-xs text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground">
-            <HardDrive className="size-3.5" />Import from Google Drive
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+          <div className="relative shrink-0" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setAddMenuOpen(false); }}>
+            <button type="button" aria-haspopup="menu" aria-expanded={addMenuOpen} disabled={uploadMutation.isPending} onClick={() => setAddMenuOpen((open) => !open)} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60">
+              <Plus className="size-3.5" />{uploadMutation.isPending ? "Uploading…" : "Add dataset"}
+            </button>
+            <input
+              ref={localFileRef}
+              type="file"
+              multiple
+              accept=".csv,.tsv,.xlsx,.xls,.parquet"
+              className="sr-only"
+              tabIndex={-1}
+              aria-label="Choose dataset files"
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? []);
+                if (files.length) uploadMutation.mutate(files);
+                event.currentTarget.value = "";
+              }}
+            />
+            {addMenuOpen ? (
+              <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-72 animate-pop-in overflow-hidden rounded-xl border border-border-strong bg-sidebar p-1.5 shadow-2xl">
+                <button type="button" role="menuitem" onClick={() => { setAddMenuOpen(false); localFileRef.current?.click(); }} className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-raised">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#b8cef0] text-[#172033]"><Paperclip className="size-4" /></span>
+                  <span className="min-w-0"><span className="block text-xs font-semibold">Local storage</span><span className="block text-[10px] text-muted-foreground">Upload from your device</span></span>
+                </button>
+                <button type="button" role="menuitem" aria-expanded={connectorsOpen} onClick={() => setConnectorsOpen((open) => !open)} className="mt-0.5 flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-raised">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#c2d9b8] text-[#172e18]"><Link2 className="size-4" /></span>
+                  <span className="min-w-0 flex-1"><span className="block text-xs font-semibold">Connectors</span><span className="block text-[10px] text-muted-foreground">Google Drive and other data sources</span></span>
+                  <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", connectorsOpen && "rotate-90")} />
+                </button>
+                {connectorsOpen ? (
+                  <button type="button" role="menuitem" onClick={() => { setAddMenuOpen(false); setDriveOpen(true); }} className="mt-0.5 flex w-full items-center gap-3 rounded-lg py-2 pl-9 pr-2 text-left hover:bg-raised">
+                    <HardDrive className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1"><span className="block text-xs font-medium">Google Drive</span><span className="block truncate text-[10px] text-muted-foreground">Import files from your Google Drive</span></span>
+                    <span className="shrink-0 rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-0.5 text-[9px] uppercase tracking-wide text-emerald-300">Import</span>
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
           <button
             type="button"
             disabled={!hasDatasets || zipMutation.isPending}
@@ -466,8 +522,9 @@ export function LibraryPage() {
           >
             <Download className="size-3.5" />{zipMutation.isPending ? "Preparing ZIP…" : "Download all datasets"}
           </button>
+          </div>
         </header>
-        <DriveBrowserDialog open={driveOpen} onOpenChange={setDriveOpen} onReauth={() => router.push("/connectors")} />
+        <DriveBrowserDialog open={driveOpen} onOpenChange={setDriveOpen} onReauth={() => router.push("/connectors")} target={{ scopeType: "library", scopeId: "library", label: "your Library" }} />
         {zipMutation.isError ? <p role="alert" className="-mt-3 mb-4 text-xs text-red-300">Download failed. Please try again.</p> : null}
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

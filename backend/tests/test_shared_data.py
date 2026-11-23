@@ -50,3 +50,34 @@ async def test_snapshot_round_trip_into_fresh_database(client: AsyncClient, demo
         again = import_snapshot(engine, fresh_settings.storage_root, shared)
         assert "chats" not in again and "dashboards" not in again
     engine.dispose()
+
+
+async def test_workflow_store_crud_and_runs(client: AsyncClient, demo_headers: dict[str, str]) -> None:
+    body = {"id": "wf-test", "name": "  Weekly  ", "description": "d", "state": "draft",
+            "trigger": {"kind": "manual", "label": "Manual"}, "steps": [{"id": "s1", "kind": "query", "title": "Q", "detail": ""}]}
+    saved = await client.put("/api/workflow-store", headers=demo_headers, json=body)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["name"] == "Weekly"
+
+    assert (await client.put("/api/workflow-store/wf-test/state", headers=demo_headers, json={"state": "active"})).json()["state"] == "active"
+
+    started = await client.post("/api/workflow-store/runs", headers=demo_headers, json={"workflow_id": "wf-test", "trigger": "manual", "plan": []})
+    assert started.status_code == 201 and started.json()["workflow_name"] == "Weekly"
+    run_id = started.json()["id"]
+    assert (await client.post(f"/api/workflow-store/runs/{run_id}/cancel", headers=demo_headers)).json()["cancelled_at"]
+    assert len((await client.get("/api/workflow-store/runs?workflow_id=wf-test", headers=demo_headers)).json()["items"]) == 1
+
+    assert (await client.delete("/api/workflow-store/wf-test", headers=demo_headers)).status_code == 204
+    assert (await client.get("/api/workflow-store/wf-test", headers=demo_headers)).status_code == 404
+    assert (await client.get(f"/api/workflow-store/runs/{run_id}", headers=demo_headers)).status_code == 404
+
+
+async def test_library_upload_is_standalone(client: AsyncClient, demo_headers: dict[str, str]) -> None:
+    files = {"file": ("standalone.csv", b"a,b\n1,2\n3,4\n", "text/csv")}
+    form = {"scope_type": "library", "scope_id": "ignored", "client_upload_id": "lib-1"}
+    response = await client.post("/api/resources/upload", headers=demo_headers, files=files, data=form)
+    assert response.status_code == 201, response.text
+    resource_id = response.json()["resource"]["id"]
+    library = (await client.get("/api/library", headers=demo_headers)).json()["items"]
+    mine = [item for item in library if item["id"] == resource_id]
+    assert mine and mine[0]["workspace_id"] is None and mine[0]["uploaded_in_library"] is True

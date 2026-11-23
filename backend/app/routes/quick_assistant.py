@@ -4,9 +4,9 @@ import json
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_current_user, get_db
@@ -181,6 +181,24 @@ async def get_quick_messages(
     user: User = Depends(get_current_user),
 ) -> dict:
     return {"items": [QuickMessageResponse.model_validate(item) for item in _messages(session, user, context_type, context_id, thread_id)], "next_cursor": None}
+
+
+@router.delete("/threads", status_code=204)
+async def delete_quick_thread(
+    context_type: str,
+    context_id: str,
+    thread_id: str,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Close one Quick Assistant conversation (tab) and remove its messages."""
+    _require_context(session, user, context_type, context_id)
+    session.execute(delete(QuickMessage).where(
+        QuickMessage.context_type == context_type, QuickMessage.context_id == context_id,
+        QuickMessage.user_id == user.id, QuickMessage.thread_id == thread_id,
+    ))
+    session.commit()
+    return Response(status_code=204)
 
 
 @router.post("/messages/stream")

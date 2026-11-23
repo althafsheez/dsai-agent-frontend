@@ -122,7 +122,7 @@ export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
 
       <div className="group/user relative mt-auto border-t border-sidebar-border/40 pt-2.5">
         {compact ? <SidebarUsageStats compact /> : (
-          <div className="absolute inset-x-2 bottom-full z-30 hidden pb-1 group-hover/user:block group-focus-within/user:block">
+          <div className="pointer-events-none absolute inset-x-2 bottom-full z-30 translate-y-2 scale-[0.98] pb-1 opacity-0 transition-[opacity,transform] duration-200 ease-spring group-focus-within/user:pointer-events-auto group-focus-within/user:translate-y-0 group-focus-within/user:scale-100 group-focus-within/user:opacity-100 group-hover/user:pointer-events-auto group-hover/user:translate-y-0 group-hover/user:scale-100 group-hover/user:opacity-100">
             <div className="rounded-lg border border-border-strong bg-raised pt-3 shadow-2xl"><SidebarUsageStats /></div>
           </div>
         )}

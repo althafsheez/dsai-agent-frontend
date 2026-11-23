@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Database, Download, FileText, Folder, HardDrive, MessageSquare, Plus, Search, Workflow, X } from "lucide-react";
+import { ChevronRight, Database, Download, FileText, Folder, HardDrive, Link2, MessageSquare, Paperclip, Plus, Search, Workflow, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   createWorkspaceWorkflow,
@@ -49,6 +49,9 @@ export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("chats");
   const [driveOpen, setDriveOpen] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [connectorsOpen, setConnectorsOpen] = useState(false);
+  const datasetFileRef = useRef<HTMLInputElement>(null);
   const [chatFilters, setChatFilters] = useState<HistoryFilters>({
     status: "active",
     ownership: "all",
@@ -226,24 +229,45 @@ export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
                   className="h-9 w-48 rounded-md border bg-background pl-9 pr-3 text-xs outline-none"
                 />
               </label>
-              <button type="button" onClick={() => setDriveOpen(true)} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-xs text-muted-foreground hover:border-border-strong hover:text-foreground">
-                <HardDrive className="size-4" />
-                From Google Drive
-              </button>
-              <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
-                <Plus className="size-4" />
-                Add Dataset
+              <div className="relative" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setAddMenuOpen(false); }}>
+                <button type="button" aria-haspopup="menu" aria-expanded={addMenuOpen} onClick={() => setAddMenuOpen((open) => !open)} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+                  <Plus className="size-4" />
+                  Add Dataset
+                </button>
                 <input
+                  ref={datasetFileRef}
                   type="file"
                   accept=".csv,.tsv,.xlsx,.xls,.parquet"
                   className="sr-only"
+                  tabIndex={-1}
+                  aria-label="Choose a dataset file"
                   onChange={(event) => {
                     const file = event.target.files?.[0];
                     if (file) uploadDatasetMutation.mutate(file);
                     event.currentTarget.value = "";
                   }}
                 />
-              </label>
+                {addMenuOpen ? (
+                  <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-72 animate-pop-in overflow-hidden rounded-xl border border-border-strong bg-sidebar p-1.5 shadow-2xl">
+                    <button type="button" role="menuitem" onClick={() => { setAddMenuOpen(false); datasetFileRef.current?.click(); }} className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-raised">
+                      <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#b8cef0] text-[#172033]"><Paperclip className="size-4" /></span>
+                      <span className="min-w-0"><span className="block text-xs font-semibold">Add files</span><span className="block text-[10px] text-muted-foreground">From your device</span></span>
+                    </button>
+                    <button type="button" role="menuitem" aria-expanded={connectorsOpen} onClick={() => setConnectorsOpen((open) => !open)} className="mt-0.5 flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-raised">
+                      <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#c2d9b8] text-[#172e18]"><Link2 className="size-4" /></span>
+                      <span className="min-w-0 flex-1"><span className="block text-xs font-semibold">Connectors</span><span className="block text-[10px] text-muted-foreground">Google Drive and other data sources</span></span>
+                      <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", connectorsOpen && "rotate-90")} />
+                    </button>
+                    {connectorsOpen ? (
+                      <button type="button" role="menuitem" onClick={() => { setAddMenuOpen(false); setDriveOpen(true); }} className="mt-0.5 flex w-full items-center gap-3 rounded-lg py-2 pl-9 pr-2 text-left hover:bg-raised">
+                        <HardDrive className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1"><span className="block text-xs font-medium">Google Drive</span><span className="block truncate text-[10px] text-muted-foreground">Import files from your Google Drive</span></span>
+                        <span className="shrink-0 rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-0.5 text-[9px] uppercase tracking-wide text-emerald-300">Import</span>
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             </div>
 
             {visibleDatasets.length ? (

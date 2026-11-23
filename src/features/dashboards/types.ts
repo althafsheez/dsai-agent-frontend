@@ -23,8 +23,15 @@ export interface Dashboard {
   description: string;
   owner: string;
   ownership: "owned" | "shared";
+  /** Published dashboards can be viewed by the whole team; drafts only by the owner and the people it is shared with. */
   status: "draft" | "published";
   pinned: boolean;
+  /** What the signed-in user may do. Built-in demos have none: the owner is "owned", anything else is view-only. */
+  role?: "owner" | "editor" | "viewer";
+  /** Minutes between automatic data refreshes while the dashboard is open; 0 = manual. */
+  refresh_minutes?: number;
+  /** Owner only. */
+  shares?: Array<{ user_id: string; role: "viewer" | "editor"; name?: string }>;
   /** Columns shown as slicers (filter dropdowns) */
   slicers?: string[];
   dataset_ids: string[];
@@ -40,3 +47,5 @@ export interface DatasetLite {
   rows: Array<Array<string | number | boolean | null>>;
   row_count: number | null;
 }
+
+export const roleOf = (dashboard: Pick<Dashboard, "role" | "ownership">): NonNullable<Dashboard["role"]> => dashboard.role ?? (dashboard.ownership === "owned" ? "owner" : "viewer");

@@ -78,3 +78,9 @@ async def test_quick_assistant_threads_are_independent(client, demo_headers, pro
         )
         contents = [item["content"] for item in listed.json()["items"] if item["role"] == "user"]
         assert contents == [expected]
+
+    params = {"context_type": "chat", "context_id": chat_id, "thread_id": "tab-2"}
+    assert (await client.delete("/api/quick-assistant/threads", headers=demo_headers, params=params)).status_code == 204
+    assert (await client.get("/api/quick-assistant/messages", headers=demo_headers, params=params)).json()["items"] == []
+    kept = await client.get("/api/quick-assistant/messages", headers=demo_headers, params={**params, "thread_id": "main"})
+    assert len(kept.json()["items"]) == 2

@@ -256,7 +256,7 @@ async def test_import_validates_scope_and_ownership(drive_client, demo_headers) 
     client, _ = drive_client
     await connect(client, demo_headers)
     bad_scope = await client.post("/api/connectors/google-drive/import", headers=demo_headers, json={
-        "file_ids": ["csv1"], "scope_type": "library", "scope_id": "x"})
+        "file_ids": ["csv1"], "scope_type": "team", "scope_id": "x"})
     assert bad_scope.status_code == 422
     missing = await client.post("/api/connectors/google-drive/import", headers=demo_headers, json={
         "file_ids": ["csv1"], "scope_type": "workspace", "scope_id": "nope"})

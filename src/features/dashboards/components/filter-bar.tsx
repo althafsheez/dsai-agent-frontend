@@ -10,6 +10,8 @@ interface FilterBarProps {
   onSlicersChange: (slicers: string[]) => void;
   filters: Filters;
   onFiltersChange: (filters: Filters) => void;
+  /** Viewing (not editing): filters can still be used, but the slicer list cannot be changed. */
+  readOnlySlicers?: boolean;
 }
 
 export function toggleFilter(filters: Filters, column: string, value: string): Filters {
@@ -20,8 +22,8 @@ export function toggleFilter(filters: Filters, column: string, value: string): F
 }
 
 /** Power BI-style slicers plus chips for every active filter (including ones set by clicking a chart). */
-export function FilterBar({ datasets, slicers, onSlicersChange, filters, onFiltersChange }: FilterBarProps) {
-  const candidates = slicerCandidates(datasets).filter((column) => !slicers.includes(column));
+export function FilterBar({ datasets, slicers, onSlicersChange, filters, onFiltersChange, readOnlySlicers }: FilterBarProps) {
+  const candidates = readOnlySlicers ? [] : slicerCandidates(datasets).filter((column) => !slicers.includes(column));
   const active = Object.entries(filters).flatMap(([column, values]) => values.map((value) => ({ column, value })));
   if (!datasets.length) return null;
   return (
@@ -43,7 +45,7 @@ export function FilterBar({ datasets, slicers, onSlicersChange, filters, onFilte
                     <span className="truncate">{value}</span>
                   </label>
                 ))}
-                <button type="button" onClick={() => onSlicersChange(slicers.filter((item) => item !== column))} className="mt-1 w-full rounded px-2 py-1 text-left text-[11px] text-muted-foreground hover:bg-raised hover:text-red-300">Remove slicer</button>
+                {readOnlySlicers ? null : <button type="button" onClick={() => onSlicersChange(slicers.filter((item) => item !== column))} className="mt-1 w-full rounded px-2 py-1 text-left text-[11px] text-muted-foreground hover:bg-raised hover:text-red-300">Remove slicer</button>}
               </div>
             </details>
           );

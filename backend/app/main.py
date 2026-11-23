@@ -19,7 +19,7 @@ from .db import make_engine, make_session_factory
 from . import snapshot
 from .migrations import upgrade_schema
 from .errors import APIError, api_error_handler
-from .routes import chats, connectors, dashboards, meta, quick_assistant, resources, runs, workspaces
+from .routes import chats, connectors, dashboards, meta, quick_assistant, resources, runs, workflow_store, workspaces
 from .services.agent_adapter import AgentToolAdapter
 from .services.identity import seed_demo_users
 from .services.runs import RunCoordinator, reconcile_stale_runs
@@ -91,8 +91,10 @@ def create_app(
     app.include_router(runs.router)
     app.include_router(quick_assistant.router)
     app.include_router(connectors.router)
+    app.include_router(connectors.sync_router)
     app.include_router(dashboards.router)
     app.include_router(dashboards.store_router)
+    app.include_router(workflow_store.router)
     return app
 
 

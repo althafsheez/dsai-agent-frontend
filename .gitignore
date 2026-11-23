@@ -63,3 +63,4 @@ backend/.env
 # local assistant instructions
 CLAUDE.md
 PROGRESS.md
+info.md

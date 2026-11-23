@@ -8,6 +8,7 @@ import {
   BrainCircuit,
   Calculator,
   ChevronRight,
+  Link2,
   CornerDownRight,
   Database,
   FileSearch,
@@ -159,8 +160,8 @@ const chatFileExtensions = ".csv,.xls,.xlsx,.parquet,.png,.jpg,.jpeg,.pdf,.txt,.
 
 type ConnectorCategory = "all" | "skills" | "data" | "apps";
 
-const connectorItems: Array<{ name: string; description: string; category: Exclude<ConnectorCategory, "all">; icon: typeof Database; action?: "drive" }> = [
-  { name: "Google Drive", description: "Import files from your Google Drive", category: "data", icon: HardDrive, action: "drive" },
+const connectorItems: Array<{ name: string; description: string; category: Exclude<ConnectorCategory, "all">; icon: typeof Database; action?: "connectors" }> = [
+  { name: "Connectors", description: "Google Drive and other data sources", category: "data", icon: Link2, action: "connectors" },
   { name: "Data Cleaning", description: "Clean, validate, and prepare data for analysis", category: "skills" as const, icon: Sparkles },
   { name: "Data Visualization", description: "Create charts, plots, and interactive visuals", category: "skills" as const, icon: BarChart3 },
   { name: "PostgreSQL", description: "Connect to a PostgreSQL database", category: "data" as const, icon: Database },
@@ -174,7 +175,6 @@ const connectorItems: Array<{ name: string; description: string; category: Exclu
   { name: "MySQL", description: "Connect to a MySQL database", category: "data" as const, icon: Database },
   { name: "Google Sheets", description: "Import data from a Google spreadsheet", category: "data" as const, icon: FileSpreadsheet },
   { name: "Microsoft Excel", description: "Import data from an Excel workbook", category: "data" as const, icon: FileSpreadsheet },
-  { name: "Google Drive", description: "Browse and import files from Google Drive", category: "data" as const, icon: HardDrive },
   { name: "Gmail", description: "Find relevant emails and attachments", category: "apps" as const, icon: Mail },
   { name: "Slack", description: "Find messages and shared files", category: "apps" as const, icon: MessageSquare },
   { name: "Notion", description: "Bring in pages and database content", category: "apps" as const, icon: NotebookTabs },
@@ -252,6 +252,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [driveDialogOpen, setDriveDialogOpen] = useState(false);
   const [connectorCategory, setConnectorCategory] = useState<ConnectorCategory>("all");
   const [connectorQuery, setConnectorQuery] = useState("");
+  const [connectorsExpanded, setConnectorsExpanded] = useState(false);
   const [modelId, setModelId] = useState("");
   const [effort, setEffort] = useState("");
   const [running, setRunning] = useState(false);
@@ -1562,15 +1563,27 @@ export function ChatPage({ chatId }: { chatId: string }) {
                       </div>
                     </div>
                     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 sm:px-3">
-                      {visibleConnectors.map(({ name, description, icon: Icon, action }) => action === "drive" ? (
-                        <button key={name} type="button" data-attachment-action onClick={() => { setAttachmentMenuOpen(false); setDriveDialogOpen(true); }} className="flex w-full items-center gap-3 border-b px-2 py-2 text-left last:border-b-0 hover:bg-raised sm:px-3">
-                          <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-xs font-medium">{name}</span>
-                            <span className="block truncate text-[11px] text-muted-foreground">{description}</span>
-                          </span>
-                          <span className="shrink-0 rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-0.5 text-[9px] uppercase tracking-wide text-emerald-300">Import</span>
-                        </button>
+                      {visibleConnectors.map(({ name, description, icon: Icon, action }) => action === "connectors" ? (
+                        <div key={name} className="border-b last:border-b-0">
+                          <button type="button" data-attachment-action aria-expanded={connectorsExpanded} onClick={() => setConnectorsExpanded((open) => !open)} className="flex w-full items-center gap-3 px-2 py-2 text-left hover:bg-raised sm:px-3">
+                            <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-xs font-medium">{name}</span>
+                              <span className="block truncate text-[11px] text-muted-foreground">{description}</span>
+                            </span>
+                            <ChevronRight aria-hidden="true" className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${connectorsExpanded ? "rotate-90" : ""}`} />
+                          </button>
+                          {connectorsExpanded ? (
+                            <button type="button" data-attachment-action onClick={() => { setAttachmentMenuOpen(false); setDriveDialogOpen(true); }} className="flex w-full items-center gap-3 border-t py-2 pl-8 pr-2 text-left hover:bg-raised sm:pl-10 sm:pr-3">
+                              <HardDrive aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-xs font-medium">Google Drive</span>
+                                <span className="block truncate text-[11px] text-muted-foreground">Import files from your Google Drive</span>
+                              </span>
+                              <span className="shrink-0 rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-0.5 text-[9px] uppercase tracking-wide text-emerald-300">Import</span>
+                            </button>
+                          ) : null}
+                        </div>
                       ) : (
                         <div key={name} aria-disabled="true" className="flex items-center gap-3 border-b px-2 py-2 last:border-b-0 sm:px-3">
                           <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
@@ -1736,7 +1749,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
             void queryClient.invalidateQueries({ queryKey: ["chat", chatId] });
             setAttachments((current) => [...current, ...result.imported
               .filter((item) => !current.some((attachment) => attachment.resourceId === item.resource.id))
-              .map<DraftAttachment>((item) => ({ id: `drive-${item.resource.id}-${crypto.randomUUID()}`, resourceId: item.resource.id, name: item.resource.name, size: 0, previewUrl: null }))]);
+              .map<DraftAttachment>((item) => ({ id: `drive-${item.resource.id}-${crypto.randomUUID()}`, resourceId: item.resource.id, name: item.resource.name, size: item.resource.size_bytes ?? 0, previewUrl: null }))]);
           }}
         />
         <LibraryImportDialog

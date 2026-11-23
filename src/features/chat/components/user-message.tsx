@@ -31,7 +31,7 @@ function EditForm({ message, onEdit, onDone }: { message: UserMessageType; onEdi
     }
   }
   return (
-    <form onSubmit={(event) => { event.preventDefault(); void save(); }} className="rounded-2xl border border-border-strong bg-surface p-2.5">
+    <form onSubmit={(event) => { event.preventDefault(); void save(); }} className="rounded-2xl border border-border-strong bg-surface px-2.5 pb-1.5 pt-2.5">
       <textarea
         autoFocus
         value={text}
@@ -44,8 +44,7 @@ function EditForm({ message, onEdit, onDone }: { message: UserMessageType; onEdi
         rows={Math.min(8, Math.max(2, text.split("\n").length))}
         className="w-full resize-none bg-transparent text-[13px] leading-relaxed text-foreground outline-none"
       />
-      <p className="mt-1 text-[10px] text-muted-foreground">Saving replaces everything after this question and answers it again.</p>
-      <div className="mt-2 flex justify-end gap-2">
+      <div className="mt-1 flex justify-end gap-2">
         <button type="button" onClick={onDone} className="h-7 rounded-md px-3 text-xs text-muted-foreground hover:text-foreground">Cancel</button>
         <button type="submit" disabled={!text.trim() || !changed || saving} className="h-7 rounded-md bg-foreground px-3 text-xs text-background hover:opacity-90 disabled:opacity-40">{saving ? "Saving…" : "Save & retry"}</button>
       </div>

@@ -1,9 +1,9 @@
 "use client";
 
-import { ArrowUp, Database, Expand, FileText, LoaderCircle, Maximize2, Minimize2, Minus, Plus, Shrink, Sparkles, X } from "lucide-react";
+import { ArrowUp, Expand, LoaderCircle, Maximize2, Minimize2, Minus, Plus, Shrink, Sparkles, X } from "lucide-react";
 import { FormEvent, useEffect, useId, useRef, useState } from "react";
 import { useFloatingFrame } from "./use-floating-frame";
-import { getModels, getQuickAssistantMessages, streamQuickAssistantMessage, type ExecutionEvent } from "@/lib/api";
+import { deleteQuickAssistantThread, getModels, getQuickAssistantMessages, streamQuickAssistantMessage, type ExecutionEvent } from "@/lib/api";
 import type { ContextFile } from "@/features/context-sidebar";
 
 interface QuickAssistantPopupProps {
@@ -37,7 +37,7 @@ function compactText(content: string) {
     : part.startsWith("`") && part.endsWith("`") ? <code key={index} className="rounded bg-raised px-1 font-mono text-[11px]">{part.slice(1, -1)}</code> : part);
 }
 
-export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFileSelect, minimized, onMinimize, onRestore, onClose, autoAsk, quote, rightInset = 0, onSplitChange }: QuickAssistantPopupProps) {
+export function QuickAssistantPopup({ chatId, snapshotMessageId, minimized, onMinimize, onRestore, onClose, autoAsk, quote, rightInset = 0, onSplitChange }: QuickAssistantPopupProps) {
   const inputId = useId();
   const titleId = useId();
   const [draft, setDraft] = useState("");
@@ -63,9 +63,12 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
     setLoadingHistory(true);
     void Promise.all([getQuickAssistantMessages("chat", chatId), getModels()]).then(([history, modelData]) => {
       if (!active) return;
-      const threads = ["main", ...new Set(history.items.map((message) => message.thread_id).filter((id) => id !== "main"))];
+      const threads = [...new Set(history.items.map((message) => message.thread_id))];
+      if (!threads.length) threads.push("main");
+      const first = threads[0];
       setTabs(threads);
-      setMessages(history.items.filter((message) => message.thread_id === "main").map((message) => ({ id: message.id, role: message.role, content: message.content, status: message.status })));
+      setActiveTab(first);
+      setMessages(history.items.filter((message) => message.thread_id === first).map((message) => ({ id: message.id, role: message.role, content: message.content, status: message.status })));
       const models = modelData.models;
       setSelectedModel(models.find((model) => model.id === modelData.default_model_id) ?? models[0] ?? null);
     }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Quick Assistant is unavailable."); }).finally(() => { if (active) setLoadingHistory(false); });
@@ -118,6 +121,18 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
     const threadId = `tab-${crypto.randomUUID().slice(0, 8)}`;
     setTabs((current) => [...current, threadId]);
     void switchTab(threadId, true);
+  }
+
+  async function closeTab(threadId: string) {
+    if (running) return;
+    const remaining = tabs.filter((id) => id !== threadId);
+    try { await deleteQuickAssistantThread("chat", chatId, threadId); } catch { /* unsaved tabs have nothing to delete */ }
+    setTabs(remaining.length ? remaining : ["main"]);
+    if (threadId !== activeTab) return;
+    const next = remaining[0] ?? "main";
+    setActiveTab("");
+    if (remaining.length) await switchTab(next);
+    else { setActiveTab("main"); setMessages([]); setDraft(""); setError(null); }
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -197,16 +212,21 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
       aria-hidden={minimized || undefined}
       inert={minimized || undefined}
       style={split ? undefined : frame.style}
-      className={`${split ? "relative col-start-1 row-start-2 flex min-h-0 min-w-[360px] flex-col overflow-hidden border-r border-border-strong bg-sidebar " : "absolute z-[70] flex origin-top-left animate-pop-in flex-col overflow-hidden rounded-xl border border-border-strong bg-sidebar shadow-2xl "}${frame.interacting ? "" : "transition-[left,top,width,height,opacity,transform,visibility] duration-300 ease-spring"} ${minimized ? "invisible translate-y-2 scale-95 opacity-0" : "visible opacity-100"}`}
+      className={`${split ? "relative col-start-1 row-span-2 row-start-2 flex min-h-0 min-w-[360px] flex-col overflow-hidden border-r border-border-strong bg-sidebar " : "absolute z-[70] flex origin-top-left animate-pop-in flex-col overflow-hidden rounded-xl border border-border-strong bg-sidebar shadow-2xl "}${frame.interacting ? "" : "transition-[left,top,width,height,opacity,transform,visibility] duration-300 ease-spring"} ${minimized ? "invisible translate-y-2 scale-95 opacity-0" : "visible opacity-100"}`}
     >
       <header {...frame.dragProps} className={`flex shrink-0 touch-none select-none items-center gap-2 border-b px-3 py-1.5 ${frame.fullscreen ? "" : "cursor-grab active:cursor-grabbing"}`}>
         <Sparkles className="size-4 shrink-0 text-sage" />
         <h2 id={titleId} title="Side questions about this chat so far. Not added to the main chat." className="sr-only">Quick Assistant</h2>
         <div role="tablist" aria-label="Quick Assistant conversations" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]">
           {tabs.map((threadId, index) => (
-            <button key={threadId} type="button" role="tab" aria-selected={threadId === activeTab} disabled={running && threadId !== activeTab} onClick={() => void switchTab(threadId)} className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50 ${threadId === activeTab ? "bg-raised text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-              Chat {index + 1}
-            </button>
+            <span key={threadId} className={`group flex shrink-0 items-center rounded-md transition-colors ${threadId === activeTab ? "bg-raised text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+              <button type="button" role="tab" aria-selected={threadId === activeTab} disabled={running && threadId !== activeTab} onClick={() => void switchTab(threadId)} className="rounded-md py-1 pl-2.5 pr-1 text-[11px] font-medium disabled:opacity-50">
+                Chat {index + 1}
+              </button>
+              <button type="button" onClick={() => void closeTab(threadId)} disabled={running} aria-label={`Close Chat ${index + 1}`} title="Close this chat" className="mr-1 grid size-4 place-items-center rounded text-muted-foreground hover:bg-background/60 hover:text-foreground disabled:opacity-40">
+                <X className="size-3" />
+              </button>
+            </span>
           ))}
           <button type="button" onClick={addTab} disabled={running} aria-label="New Quick Assistant conversation" title="New conversation" className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40">
             <Plus className="size-3.5" />
@@ -238,16 +258,6 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
           <X className="size-4" />
         </button>
       </header>
-      {resources.length ? (
-        <div className="flex shrink-0 gap-1.5 overflow-x-auto px-4 pt-2 [scrollbar-width:none]" aria-label="Available context files">
-          {resources.slice(0, 4).map((resource) => (
-            <button key={resource.id} type="button" onClick={() => onFileSelect(resource)} className="inline-flex max-w-36 shrink-0 items-center gap-1 rounded border bg-surface px-1.5 py-1 text-[11px] text-muted-foreground hover:border-border-strong hover:text-foreground" title={`Open ${resource.name}`}>
-              {"scope_type" in resource ? <Database className="size-3 text-sage" /> : <FileText className="size-3 text-slate" />}
-              <span className="truncate">{resource.name}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-4 py-3" aria-live="polite">
         {loadingHistory ? <p className="text-[13px] text-muted-foreground">Loading saved questions…</p> : null}
         {!loadingHistory && messages.length === 0 ? <p className="text-[13px] text-muted-foreground">Ask a quick question about this analysis, dataset, or artifact.</p> : null}

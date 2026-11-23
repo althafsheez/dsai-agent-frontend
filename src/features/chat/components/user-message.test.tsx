@@ -21,7 +21,6 @@ describe("UserMessage", () => {
     const onEdit = vi.fn().mockResolvedValue(undefined);
     render(<UserMessage message={question} onEdit={onEdit} />);
     await user.click(screen.getByRole("button", { name: "Edit question" }));
-    expect(screen.getByText(/replaces everything after this question/)).toBeVisible();
     const save = screen.getByRole("button", { name: "Save & retry" });
     expect(save).toBeDisabled();
     const box = screen.getByRole("textbox", { name: "Edit your question" });

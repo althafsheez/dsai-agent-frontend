@@ -3,6 +3,8 @@ from __future__ import annotations
 from urllib.parse import urlencode
 
 import httpx
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
@@ -11,10 +13,11 @@ from sqlalchemy.orm import Session
 
 from ..dependencies import get_current_user, get_db
 from ..errors import APIError
-from ..models import ResourceLink, Resource, User
+from ..models import LibraryEntry, ResourceLink, Resource, User
 from ..services import google_drive as drive
 from ..services.records import require_chat, require_workspace
-from ..services.resource_uploads import register_upload
+from ..services.dataset_preview import inspect_dataset
+from ..services.resource_uploads import register_upload, store_file_object
 from .resources import _summary
 
 router = APIRouter(prefix="/api/connectors", tags=["connectors"])
@@ -100,8 +103,10 @@ async def import_drive_files(
         require_chat(session, user, payload.scope_id)
     elif payload.scope_type == "workspace":
         require_workspace(session, user, payload.scope_id)
+    elif payload.scope_type == "library":
+        payload.scope_id = user.id
     else:
-        raise APIError(422, "invalid_scope", "Resource scope must be chat or workspace.")
+        raise APIError(422, "invalid_scope", "Resource scope must be chat, workspace or library.")
     settings = request.app.state.settings
     client = _http(request)
     connection = drive.require_connection(session, user.id)
@@ -125,6 +130,8 @@ async def import_drive_files(
                 message_id=None, client_upload_id=upload_id,
             )
             resource.metadata_json = {**resource.metadata_json, "source_connector": drive.PROVIDER, **extra}
+            if payload.scope_type == "library":
+                session.add(LibraryEntry(user_id=user.id, resource_id=resource.id))
             session.commit()
             session.refresh(resource)
             imported.append({"file_id": file_id, "resource": _summary(resource), "already_imported": False})
@@ -134,3 +141,29 @@ async def import_drive_files(
                 raise
             failed.append({"file_id": file_id, "code": exc.code, "message": exc.message})
     return {"imported": imported, "failed": failed}
+
+
+sync_router = APIRouter(prefix="/api/datasets", tags=["connectors"])
+
+
+@sync_router.post("/{resource_id}/sync")
+async def sync_dataset_from_drive(
+    resource_id: str, request: Request,
+    session: Session = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict:
+    """Re-download a Google Drive dataset. The resource id stays the same, so dashboards built on it show the new data."""
+    resource = session.scalar(select(Resource).where(Resource.id == resource_id, Resource.created_by == user.id))
+    metadata = dict(resource.metadata_json or {}) if resource else {}
+    if resource is None or resource.resource_type != "dataset" or metadata.get("source_connector") != drive.PROVIDER or not metadata.get("drive_file_id"):
+        raise APIError(422, "not_syncable", "Only datasets imported from Google Drive can be re-synced.")
+    connection = drive.require_connection(session, user.id)
+    token = await drive.access_token(session, request.app.state.settings, _http(request), connection)
+    filename, content_type, content, extra = await drive.download_file(_http(request), token, metadata["drive_file_id"])
+    file_object = store_file_object(session, request.app.state.storage, filename, content_type, content)
+    changed = file_object.id != resource.file_object_id
+    if changed:
+        resource.file_object_id = file_object.id
+        resource.metadata_json = {**metadata, "size_bytes": len(content), **inspect_dataset(filename, content), **extra}
+    resource.metadata_json = {**resource.metadata_json, "refreshed_at": datetime.now(timezone.utc).isoformat()}
+    session.commit()
+    return {"status": "updated" if changed else "unchanged", "refreshed_at": resource.metadata_json["refreshed_at"]}

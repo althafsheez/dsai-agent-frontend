@@ -41,7 +41,9 @@ export async function getDashboard(id: string): Promise<Dashboard | null> {
   }
 }
 
-export type DashboardInput = Pick<Dashboard, "name" | "description" | "dataset_ids" | "widgets"> & { id?: string; slicers?: string[]; status?: Dashboard["status"]; pinned?: boolean };
+export type DashboardInput = Pick<Dashboard, "name" | "description" | "dataset_ids" | "widgets"> & {
+  id?: string; slicers?: string[]; status?: Dashboard["status"]; pinned?: boolean; refresh_minutes?: number; shares?: Array<{ user_id: string; role: "viewer" | "editor" }>;
+};
 
 export async function saveDashboard(input: DashboardInput): Promise<Dashboard> {
   const existing = input.id ? await getDashboard(input.id) : null;
@@ -54,6 +56,8 @@ export async function saveDashboard(input: DashboardInput): Promise<Dashboard> {
     slicers: input.slicers ?? existing?.slicers ?? [],
     dataset_ids: input.dataset_ids,
     widgets: input.widgets,
+    refresh_minutes: input.refresh_minutes ?? existing?.refresh_minutes ?? 0,
+    shares: input.shares ?? existing?.shares?.map(({ user_id, role }) => ({ user_id, role })),
   });
   return fromRecord(saved);
 }

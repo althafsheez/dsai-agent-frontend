@@ -124,6 +124,26 @@ def sanitize_widgets(raw: Any, datasets: list[dict[str, Any]]) -> tuple[list[dic
     return cleaned, notes
 
 
+def clean_slicers(raw: Any, datasets: list[dict[str, Any]], widgets: list[dict[str, Any]]) -> list[str]:
+    """Keep slicer columns that exist in a dataset some widget actually uses (case-insensitive), at most 4."""
+    if not isinstance(raw, list):
+        return []
+    used = {widget["dataset_id"] for widget in widgets}
+    known = {column["name"].lower().strip(): column["name"] for dataset in datasets if dataset["id"] in used for column in dataset.get("columns", [])}
+    result: list[str] = []
+    for item in raw:
+        name = known.get(item.lower().strip()) if isinstance(item, str) else None
+        if name and name not in result:
+            result.append(name)
+    return result[:4]
+
+
+def clean_suggestions(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return [item.strip()[:90] for item in raw if isinstance(item, str) and item.strip()][:3]
+
+
 def _schema_text(datasets: list[dict[str, Any]]) -> str:
     lines = []
     for dataset in datasets:
@@ -160,8 +180,10 @@ async def _ask(provider: LLMProvider, prompt: str, model_id: str, effort: str | 
 async def generate(provider: LLMProvider, prompt: str, datasets: list[dict[str, Any]], model_id: str, effort: str | None) -> dict[str, Any]:
     request = (
         "You design BI dashboards (like Power BI). Reply with ONLY a JSON object: "
-        '{"name": str, "description": str, "widgets": [widget, ...]}. '
-        f"Build 5 to 9 widgets: KPIs first, then charts that answer the request, then a table if useful. {SPEC}\n\n"
+        '{"name": str, "description": str, "widgets": [widget, ...], "slicers": [column, ...], "suggestions": [str, ...]}. '
+        f"Build 5 to 9 widgets: KPIs first, then charts that answer the request, then a table if useful. {SPEC} "
+        "slicers: 2 to 3 category columns people would filter by. "
+        "suggestions: 3 short follow-up requests the user could ask next to improve this dashboard.\n\n"
         f"Datasets:\n{_schema_text(datasets)}\n\nUser request: {prompt}"
     )
     try:
@@ -171,7 +193,38 @@ async def generate(provider: LLMProvider, prompt: str, datasets: list[dict[str, 
     widgets, notes = sanitize_widgets(data.get("widgets"), datasets)
     if not widgets:
         return {"ok": False, "error": "The AI did not produce any drawable widgets. Try rephrasing the request.", "widgets": [], "notes": notes}
-    return {"ok": True, "name": str(data.get("name") or "")[:80], "description": str(data.get("description") or "")[:300], "widgets": widgets, "notes": notes}
+    return {"ok": True, "name": str(data.get("name") or "")[:80], "description": str(data.get("description") or "")[:300], "widgets": widgets, "notes": notes,
+            "slicers": clean_slicers(data.get("slicers"), datasets, widgets), "suggestions": clean_suggestions(data.get("suggestions"))}
+
+
+async def tune(
+    provider: LLMProvider, instruction: str, widgets: list[dict[str, Any]], slicers: list[str], name: str,
+    datasets: list[dict[str, Any]], model_id: str, effort: str | None,
+) -> dict[str, Any]:
+    """Apply a plain-language change to an existing dashboard. Everything returned is repaired against the real columns."""
+    current, _ = sanitize_widgets(widgets, datasets)
+    request = (
+        "You edit an existing BI dashboard exactly as the user asks. The user may ask for anything: add, remove or replace charts, "
+        "change chart types, aggregations, titles, widths (span 1 to 3 of a 3-column grid) or order, add or remove filters (slicers), "
+        "rename the dashboard. Change only what was asked and keep every other widget and its id unchanged. "
+        'Reply with ONLY a JSON object: {"name": str, "widgets": [widget, ...], "slicers": [column, ...], '
+        '"notes": [short strings describing each change you made], "suggestions": [3 short follow-up requests]}. '
+        f"{SPEC}\n\nDatasets:\n{_schema_text(datasets)}\n\nDashboard name: {name}\n"
+        f"Current widgets:\n{json.dumps(current)}\nCurrent slicers: {json.dumps(slicers)}\n\nUser request: {instruction}"
+    )
+    try:
+        data = await _ask(provider, request, model_id, effort)
+    except (ProviderError, ValueError) as exc:
+        return {"ok": False, "error": f"The AI could not change the dashboard: {exc}", "widgets": [], "notes": []}
+    changed, repairs = sanitize_widgets(data.get("widgets"), datasets)
+    if not changed:
+        return {"ok": False, "error": "The AI did not return any drawable widgets. Try rephrasing the request.", "widgets": [], "notes": repairs}
+    ai_notes = [str(note)[:200] for note in data["notes"] if isinstance(note, str)][:8] if isinstance(data.get("notes"), list) else []
+    slicer_raw = data["slicers"] if isinstance(data.get("slicers"), list) else slicers
+    return {
+        "ok": True, "name": str(data.get("name") or name)[:80], "widgets": changed, "notes": ai_notes + repairs,
+        "slicers": clean_slicers(slicer_raw, datasets, changed), "suggestions": clean_suggestions(data.get("suggestions")),
+    }
 
 
 async def review(provider: LLMProvider, widgets: list[dict[str, Any]], datasets: list[dict[str, Any]], model_id: str, effort: str | None) -> dict[str, Any]:

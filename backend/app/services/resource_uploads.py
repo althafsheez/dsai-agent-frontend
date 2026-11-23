@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..errors import APIError
-from ..models import FileObject, LibraryEntry, Resource, ResourceLink
+from ..models import FileObject, Resource, ResourceLink
 from ..storage import LocalFileStorage
 from .dataset_preview import inspect_dataset
 
@@ -30,12 +30,8 @@ async def read_upload(file: UploadFile) -> tuple[str, str | None, bytes]:
     return filename, file.content_type, content
 
 
-def register_upload(
-    session: Session, storage: LocalFileStorage, upload: tuple[str, str | None, bytes], *,
-    user_id: str, scope_type: str, scope_id: str, message_id: str | None, client_upload_id: str | None,
-) -> tuple[Resource, ResourceLink]:
-    filename, content_type, content = upload
-    extension = Path(filename).suffix.lower()
+def store_file_object(session: Session, storage: LocalFileStorage, filename: str, content_type: str | None, content: bytes) -> FileObject:
+    """The stored blob for these bytes: reused when identical content already exists."""
     digest = hashlib.sha256(content).hexdigest()
     file_object = session.scalar(select(FileObject).where(FileObject.content_hash == digest))
     if file_object is None:
@@ -48,6 +44,16 @@ def register_upload(
         )
         session.add(file_object)
         session.flush()
+    return file_object
+
+
+def register_upload(
+    session: Session, storage: LocalFileStorage, upload: tuple[str, str | None, bytes], *,
+    user_id: str, scope_type: str, scope_id: str, message_id: str | None, client_upload_id: str | None,
+) -> tuple[Resource, ResourceLink]:
+    filename, content_type, content = upload
+    extension = Path(filename).suffix.lower()
+    file_object = store_file_object(session, storage, filename, content_type, content)
     resource = Resource(
         resource_type="dataset" if extension in DATASET_EXTENSIONS else "artifact",
         file_object_id=file_object.id,
@@ -73,12 +79,12 @@ def register_upload(
 def attach_library_resources(session: Session, user_id: str, message_id: str, resource_ids: list[str]) -> None:
     if not resource_ids:
         return
+    # Files the user owns: saved to the Library, or imported straight into a chat (for example from Google Drive).
     available = set(session.scalars(
-        select(Resource.id).join(LibraryEntry, LibraryEntry.resource_id == Resource.id)
-        .where(Resource.id.in_(resource_ids), Resource.created_by == user_id, LibraryEntry.user_id == user_id)
+        select(Resource.id).where(Resource.id.in_(resource_ids), Resource.created_by == user_id)
     ))
     if set(resource_ids) != available:
-        raise APIError(404, "resource_not_found", "A selected Library file is no longer available.")
+        raise APIError(404, "resource_not_found", "A selected file is no longer available.")
     session.add_all(
         ResourceLink(resource_id=resource_id, scope_type="message", scope_id=message_id, message_id=message_id)
         for resource_id in dict.fromkeys(resource_ids)

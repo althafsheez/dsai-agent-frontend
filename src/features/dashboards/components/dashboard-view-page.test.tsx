@@ -6,7 +6,7 @@ import { DashboardViewPage } from "./dashboard-view-page";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 const { offline } = vi.hoisted(() => ({ offline: async () => { throw new Error("offline"); } }));
-vi.mock("@/lib/api", () => ({ ApiError: class extends Error { status = 0 }, listDashboardRecords: offline, getDashboardRecord: offline, saveDashboardRecord: offline, deleteDashboardRecord: offline, getLibrary: async () => ({ items: [] }), getModels: async () => ({ default_model_id: "m", models: [], configuration_status: "ok" }), generateDashboardWithAi: vi.fn(), reviewDashboardWithAi: vi.fn() }));
+vi.mock("@/lib/api", () => ({ ApiError: class extends Error { status = 0 }, listDashboardRecords: offline, getDashboardRecord: offline, saveDashboardRecord: offline, deleteDashboardRecord: offline, getLibrary: async () => ({ items: [] }), getModels: async () => ({ default_model_id: "m", models: [], configuration_status: "ok" }), generateDashboardWithAi: vi.fn(), reviewDashboardWithAi: vi.fn(), tuneDashboardWithAi: vi.fn(), listDashboardPeople: async () => [{ id: "user-shared", name: "Shared Demo", initials: "SD" }], syncDatasetFromDrive: vi.fn(), getDatasetRows: vi.fn() }));
 
 function renderPage(id: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -16,20 +16,33 @@ function renderPage(id: string) {
 describe("dashboard view page", () => {
   beforeEach(() => { try { window.localStorage.clear(); } catch { /* ignore */ } });
 
-  it("shows an owned dashboard with edit and publish controls, and enters edit mode", async () => {
+  it("shows an owned dashboard with share, edit and AI controls, and enters edit mode", async () => {
     const user = userEvent.setup();
     renderPage("customer-health");
     expect(await screen.findByRole("heading", { name: "Customer Health" })).toBeVisible();
-    expect(screen.getByRole("button", { name: /Publish/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Share/ })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Ask AI to change this dashboard" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Edit" }));
     expect(screen.getByRole("textbox", { name: "Dashboard name" })).toBeVisible();
     expect(screen.getByRole("button", { name: /Save changes/ })).toBeDisabled();
   });
 
-  it("hides edit controls on shared dashboards", async () => {
+  it("is read-only for viewers: no edit, share, delete or AI change box", async () => {
     renderPage("sales-performance");
     expect(await screen.findByRole("heading", { name: "Sales Performance" })).toBeVisible();
+    expect(screen.getByText("View only")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Share/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Delete dashboard")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Ask AI to change this dashboard" })).not.toBeInTheDocument();
+  });
+
+  it("lets the owner open the share dialog", async () => {
+    const user = userEvent.setup();
+    renderPage("customer-health");
+    await user.click(await screen.findByRole("button", { name: /Share/ }));
+    expect(await screen.findByRole("combobox", { name: "General access" })).toHaveValue("draft");
+    expect(screen.getByRole("combobox", { name: "Add person" })).toBeVisible();
   });
 
   it("reports a missing dashboard", async () => {

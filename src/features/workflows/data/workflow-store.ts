@@ -1,9 +1,9 @@
-import { readMockEnvelope, updateMockEnvelope } from "@/lib/mock/mock-store";
+import { ApiError, cancelWorkflowRunRecord, deleteWorkflowRecord, getWorkflowRecord, getWorkflowRunRecord, listWorkflowRecords, listWorkflowRunRecords, saveWorkflowRecord, setWorkflowRecordState, startWorkflowRunRecord } from "@/lib/api";
 import type { RunStepPlan, StepKind, TriggerKind, Workflow, WorkflowRun, WorkflowState, WorkflowStep } from "../types";
 import { newStep } from "../logic/generate-workflow";
 
-// Demo store: workflows and runs live in the shared mock envelope until a workflow API exists.
-interface WorkflowEnvelope { workflows: Workflow[]; runs: WorkflowRun[] }
+// Workflows and runs are stored by the backend (shared by the team, part of the shared-data snapshot).
+// The three built-in demos below show until someone saves over them.
 
 const STEP_DURATION: Record<StepKind | "trigger", number> = { trigger: 600, query: 2600, analyze: 4200, chart: 2200, report: 3200, notify: 1200, condition: 700, custom: 1800 };
 const STEP_LOGS: Record<StepKind | "trigger", (title: string) => string[]> = {
@@ -52,77 +52,82 @@ function seedRuns(workflows: Workflow[]): WorkflowRun[] {
   ];
 }
 
-function read(): WorkflowEnvelope {
-  const stored = readMockEnvelope().workflowDemo as WorkflowEnvelope | undefined;
-  if (stored && Array.isArray(stored.workflows) && Array.isArray(stored.runs)) return stored;
-  const workflows = seedWorkflows();
-  const seeded = { workflows, runs: seedRuns(workflows) };
-  write(seeded);
-  return seeded;
-}
-
-function write(value: WorkflowEnvelope) {
-  try { updateMockEnvelope((current) => ({ ...current, workflowDemo: value })); } catch { /* storage unavailable: the demo keeps working per session */ }
-}
-
-const sleep = <T,>(value: T) => Promise.resolve(value);
+const asWorkflow = (record: unknown) => record as Workflow;
+const asRun = (record: unknown) => record as WorkflowRun;
+const SEED_IDS = new Set(["weekly-revenue", "customer-churn", "sales-refresh"]);
 
 export async function listWorkflows(): Promise<Workflow[]> {
-  return sleep([...read().workflows].sort((left, right) => right.updated_at.localeCompare(left.updated_at)));
+  let stored: Workflow[] = [];
+  try { stored = (await listWorkflowRecords()).map(asWorkflow); } catch { /* API unreachable: built-in demos only */ }
+  const known = new Set(stored.map((item) => item.id));
+  return [...stored, ...seedWorkflows().filter((item) => !known.has(item.id))].sort((left, right) => right.updated_at.localeCompare(left.updated_at));
 }
 
 export async function getWorkflow(id: string): Promise<Workflow | null> {
-  return sleep(read().workflows.find((workflow) => workflow.id === id) ?? null);
+  try {
+    return asWorkflow(await getWorkflowRecord(id));
+  } catch (error) {
+    if (error instanceof ApiError && error.status !== 404) throw error;
+    return seedWorkflows().find((item) => item.id === id) ?? null;
+  }
 }
 
 export interface WorkflowInput { id?: string; name: string; description: string; trigger: Workflow["trigger"]; steps: WorkflowStep[]; state?: WorkflowState }
 
 export async function saveWorkflow(input: WorkflowInput): Promise<Workflow> {
-  const data = read();
-  const now = new Date().toISOString();
-  const existing = input.id ? data.workflows.find((workflow) => workflow.id === input.id) : undefined;
-  const saved: Workflow = {
-    id: existing?.id ?? `wf-${Date.now().toString(36)}`,
+  const existing = input.id ? await getWorkflow(input.id) : null;
+  return asWorkflow(await saveWorkflowRecord({
+    id: existing?.id ?? input.id ?? `wf-${Date.now().toString(36)}`,
     name: input.name.trim() || "Untitled workflow",
     description: input.description.trim(),
     trigger: input.trigger,
     steps: input.steps,
     state: input.state ?? existing?.state ?? "draft",
-    created_at: existing?.created_at ?? now,
-    updated_at: now,
-  };
-  write({ ...data, workflows: existing ? data.workflows.map((workflow) => (workflow.id === saved.id ? saved : workflow)) : [saved, ...data.workflows] });
-  return sleep(saved);
+  }));
+}
+
+/** Built-in demos are not in the database yet: store them on first change. */
+async function ensureStored(id: string): Promise<Workflow | null> {
+  const workflow = await getWorkflow(id);
+  if (workflow && SEED_IDS.has(id)) {
+    try { await getWorkflowRecord(id); } catch { return saveWorkflow(workflow); }
+  }
+  return workflow;
 }
 
 export async function setWorkflowState(id: string, state: WorkflowState): Promise<void> {
-  const data = read();
-  write({ ...data, workflows: data.workflows.map((workflow) => (workflow.id === id ? { ...workflow, state, updated_at: new Date().toISOString() } : workflow)) });
+  if (!(await ensureStored(id))) return;
+  await setWorkflowRecordState(id, state);
 }
 
 export async function deleteWorkflow(id: string): Promise<void> {
-  const data = read();
-  write({ workflows: data.workflows.filter((workflow) => workflow.id !== id), runs: data.runs.filter((item) => item.workflow_id !== id) });
+  await deleteWorkflowRecord(id);
 }
 
 export async function listRuns(workflowId?: string): Promise<WorkflowRun[]> {
-  return sleep(read().runs.filter((item) => !workflowId || item.workflow_id === workflowId).sort((left, right) => right.started_at.localeCompare(left.started_at)));
+  let stored: WorkflowRun[] = [];
+  try { stored = (await listWorkflowRunRecords(workflowId)).map(asRun); } catch { /* API unreachable */ }
+  const workflows = seedWorkflows();
+  const known = new Set(stored.map((item) => item.id));
+  const seeded = seedRuns(workflows).filter((item) => !known.has(item.id) && (!workflowId || item.workflow_id === workflowId));
+  return [...stored, ...seeded].sort((left, right) => right.started_at.localeCompare(left.started_at));
 }
 
 export async function getRun(runId: string): Promise<WorkflowRun | null> {
-  return sleep(read().runs.find((item) => item.id === runId) ?? null);
+  try {
+    return asRun(await getWorkflowRunRecord(runId));
+  } catch (error) {
+    if (error instanceof ApiError && error.status !== 404) throw error;
+    return seedRuns(seedWorkflows()).find((item) => item.id === runId) ?? null;
+  }
 }
 
 export async function startRun(workflowId: string, trigger: TriggerKind = "manual"): Promise<WorkflowRun> {
-  const data = read();
-  const workflow = data.workflows.find((item) => item.id === workflowId);
+  const workflow = await ensureStored(workflowId);
   if (!workflow) throw new Error("Workflow not found.");
-  const created: WorkflowRun = { id: `run-${Date.now().toString(36)}`, workflow_id: workflow.id, workflow_name: workflow.name, started_at: new Date().toISOString(), trigger, plan: buildPlan(workflow, undefined, trigger) };
-  write({ ...data, runs: [created, ...data.runs] });
-  return sleep(created);
+  return asRun(await startWorkflowRunRecord({ workflow_id: workflow.id, trigger, plan: buildPlan(workflow, undefined, trigger) }));
 }
 
 export async function cancelRun(runId: string): Promise<void> {
-  const data = read();
-  write({ ...data, runs: data.runs.map((item) => (item.id === runId ? { ...item, cancelled_at: new Date().toISOString() } : item)) });
+  await cancelWorkflowRunRecord(runId);
 }
