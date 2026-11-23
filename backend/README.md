@@ -1,6 +1,8 @@
 # DSAI backend
 
-This is the minimal functional modular monolith for the DSAI frontend. It persists demo users, workspaces, chats, ordered messages, agent runs, public execution events, and future file/resource associations. Gemini is accessed only through a provider adapter. Main chat runs use the shared ReAct loop in `agentic/agent/react_loop.py`. FastAPI provides chat history, run controls, scoped E2B tools and the frontend SSE event format. The default budget is eight tool turns followed by a tool-free synthesis when needed. Set `DSAI_MAX_AGENT_STEPS` to override that budget.
+FastAPI owns authentication, chat and workspace records, Library, Quick Assistant, file storage, run coordination, and persistent SSE events. Main chat uses the in-process `AgentExecution` interface in `agentic/runtime/contracts.py`. The runner in `agentic/` uses the shared ReAct loop, Gemini provider, tool registry, and E2B. It receives conversation history and run controls from FastAPI and yields public execution events. The backend adapter in `app/services/agent_adapter.py` supplies scoped inputs and workspace context, registers generated files, and persists per-user memory through the `ToolHost` interface.
+
+The default budget is eight tool turns followed by a tool-free synthesis when needed. Set `DSAI_MAX_AGENT_STEPS` to override that budget. Both modules run in the FastAPI process. The existing `agentic/app.py` benchmark entry point is separate from the chat startup path.
 
 ## Run locally
 

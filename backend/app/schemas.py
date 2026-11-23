@@ -145,6 +145,13 @@ class ChatPresence(BaseModel):
     viewing: bool
 
 
+class MessageAttachment(APIModel):
+    resource_type: Literal["dataset", "artifact"]
+    resource_id: str
+    name: str
+    size_bytes: int
+
+
 class MessageResponse(APIModel):
     id: str
     chat_id: str
@@ -154,12 +161,13 @@ class MessageResponse(APIModel):
     status: str
     created_at: datetime
     updated_at: datetime
-    attachment_refs: list[dict[str, str]] = Field(default_factory=list)
+    attachment_refs: list[MessageAttachment] = Field(default_factory=list)
 
 
 class MessageCreate(BaseModel):
     content: str = Field(min_length=1, max_length=100_000)
     client_request_id: str = Field(min_length=1, max_length=100)
+    resource_ids: list[str] = Field(default_factory=list)
 
 
 class QuickMessageCreate(BaseModel):
@@ -225,6 +233,16 @@ class QueueStart(BaseModel):
     model_id: str
     effort: str | None = None
     client_request_id: str = Field(min_length=1, max_length=100)
+    resource_ids: list[str] = Field(default_factory=list)
+
+
+class QueueUpdate(BaseModel):
+    content: str = Field(min_length=1, max_length=100_000)
+    remove_resource_ids: list[str] = Field(default_factory=list)
+
+
+class QueueOrder(BaseModel):
+    run_ids: list[str] = Field(min_length=1)
 
 
 class SteerStart(BaseModel):

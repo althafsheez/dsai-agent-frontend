@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+import logging
 import os
 import time
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
 
 from agentic.agent.prompts import SYSTEM_PROMPT
 
+logger = logging.getLogger("agentic.performance")
 
 GEMINI_TOOLS = [
     types.Tool(
@@ -256,6 +258,7 @@ class ReActAgent:
         """Run tool turns followed by a tool-free synthesis if the budget is exhausted."""
         final_answer = []
         start = time.perf_counter()
+        first_response = True
         for turn in range(1, max_turns + 2):
             if is_cancelled and is_cancelled():
                 return
@@ -280,6 +283,9 @@ class ReActAgent:
                     model=model, contents=contents, config=turn_config,
                 )
                 async for chunk in stream:
+                    if first_response:
+                        logger.info("gemini_first_response duration_ms=%.1f", (time.perf_counter() - start) * 1000)
+                        first_response = False
                     if is_cancelled and is_cancelled():
                         return
                     if not chunk.candidates or not chunk.candidates[0].content:
@@ -294,6 +300,8 @@ class ReActAgent:
                             calls.append(call)
                         model_parts.append(part)
                         if part.text and not part.thought:
+                            if not final_answer:
+                                logger.info("gemini_first_text duration_ms=%.1f", (time.perf_counter() - start) * 1000)
                             final_answer.append(part.text)
                             yield {"type": "delta", "content": part.text}
             except Exception:

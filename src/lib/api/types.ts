@@ -84,7 +84,7 @@ export interface MessageDto {
   status: string;
   created_at: string;
   updated_at: string;
-  attachment_refs: Array<{ resource_type: "dataset" | "artifact"; resource_id: string }>;
+  attachment_refs: Array<{ resource_type: "dataset" | "artifact"; resource_id: string; name?: string; size_bytes?: number }>;
 }
 
 export interface QuickMessageDto {
@@ -141,6 +141,7 @@ export interface QueueRunInput {
   model_id: string;
   effort?: string;
   client_request_id: string;
+  resource_ids?: string[];
 }
 
 export interface QueueRunResponse {

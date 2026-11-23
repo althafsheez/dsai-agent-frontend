@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.providers import ProviderError
+from agentic.runtime.contracts import ProviderError
 from conftest import FakeProvider, create_chat
 
 

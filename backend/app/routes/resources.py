@@ -4,28 +4,24 @@ import re
 import subprocess
 from tempfile import TemporaryFile
 from zipfile import ZipFile, ZIP_DEFLATED
-import mimetypes
-import hashlib
 from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile, status
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_current_user, get_db
 from ..errors import APIError
 from ..models import Chat, FileObject, LibraryEntry, Message, Resource, ResourceLink, User, Workspace
 from ..services.records import require_chat, require_workspace
-from ..services.dataset_preview import MAX_PREVIEW_ROWS, inspect_dataset
+from ..services.dataset_preview import MAX_PREVIEW_ROWS
+from ..services.resource_uploads import CODE_EXTENSIONS, read_upload, register_upload
 from ..storage import LocalFileStorage
 router = APIRouter(prefix="/api/resources", tags=["resources"])
 catalog_router = APIRouter(prefix="/api", tags=["resources"])
-DATASET_EXTENSIONS = {".csv", ".parquet", ".xlsx", ".xls"}
-CODE_EXTENSIONS = {".py", ".js", ".ts", ".tsx", ".jsx", ".sql", ".html", ".css", ".yaml", ".yml", ".sh", ".r"}
-ALLOWED_EXTENSIONS = DATASET_EXTENSIONS | CODE_EXTENSIONS | {".png", ".jpg", ".jpeg", ".pdf", ".txt", ".md", ".json"}
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
@@ -60,45 +56,11 @@ async def upload_resource(
         resource = session.get(Resource, existing.resource_id)
         if resource is not None:
             return {"resource": _summary(resource), "link_id": existing.id}
-    filename = Path(file.filename or "upload.bin").name
-    extension = Path(filename).suffix.lower()
-    if extension not in ALLOWED_EXTENSIONS:
-        raise APIError(415, "unsupported_file", "This file type is not supported.")
-    content = await file.read(25 * 1024 * 1024 + 1)
-    if len(content) > 25 * 1024 * 1024:
-        raise APIError(413, "file_too_large", "Files are limited to 25 MB.")
-    storage: LocalFileStorage = request.app.state.storage
-    digest = hashlib.sha256(content).hexdigest()
-    file_object = session.scalar(select(FileObject).where(FileObject.content_hash == digest))
-    if file_object is None:
-        stored = storage.store_bytes(content)
-        file_object = FileObject(
-            content_hash=stored.content_hash,
-            relative_storage_path=stored.relative_path,
-            mime_type=file.content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream",
-            size_bytes=stored.size_bytes,
-        )
-        session.add(file_object)
-        session.flush()
-    resource = Resource(
-        resource_type="dataset" if extension in DATASET_EXTENSIONS else "artifact",
-        file_object_id=file_object.id,
-        name=filename,
-        origin="uploaded",
-        source="input",
-        created_by=user.id,
-        metadata_json={"size_bytes": len(content), **inspect_dataset(filename, content)},
-    )
-    session.add(resource)
-    session.flush()
-    link = ResourceLink(
-        resource_id=resource.id,
-        scope_type=scope_type,
-        scope_id=scope_id,
-        message_id=message_id,
+    resource, link = register_upload(
+        session, request.app.state.storage, await read_upload(file),
+        user_id=user.id, scope_type=scope_type, scope_id=scope_id, message_id=message_id,
         client_upload_id=client_upload_id,
     )
-    session.add(link)
     session.commit()
     session.refresh(resource)
     return {"resource": _summary(resource), "link_id": link.id}
@@ -175,17 +137,19 @@ def _catalog_item(
 
 def _chat_catalog(session: Session, user: User, chat_id: str) -> list[tuple[Resource, FileObject, str]]:
     chat = require_chat(session, user, chat_id)
-    scope_filters = [(ResourceLink.scope_type == "chat") & (ResourceLink.scope_id == chat.id)]
+    scope_filters = [
+        (ResourceLink.scope_type == "chat") & (ResourceLink.scope_id == chat.id),
+        (ResourceLink.scope_type == "message") & (Message.chat_id == chat.id),
+    ]
     if chat.workspace_id is not None:
         scope_filters.append(
             (ResourceLink.scope_type == "workspace") & (ResourceLink.scope_id == chat.workspace_id)
         )
-    from sqlalchemy import or_
-
     rows = list(session.execute(
-        select(Resource, FileObject, ResourceLink.scope_type)
+        select(Resource, FileObject, case((ResourceLink.scope_type == "message", "chat"), else_=ResourceLink.scope_type))
         .join(ResourceLink, ResourceLink.resource_id == Resource.id)
         .join(FileObject, FileObject.id == Resource.file_object_id)
+        .outerjoin(Message, Message.id == ResourceLink.message_id)
         .where(or_(*scope_filters))
         .order_by(Resource.created_at.desc(), Resource.id.desc())
     ).all())

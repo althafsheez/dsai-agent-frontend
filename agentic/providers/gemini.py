@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import AsyncIterator, Callable
 
 from agentic.agent.prompts import WORKSPACE_SYSTEM_PROMPT
@@ -7,17 +9,17 @@ from agentic.agent.react_loop import ReActAgent
 from google import genai
 from google.genai import types
 
-from ..config import Settings
-from .types import ChatTurn, ModelInfo, ProviderError, ProviderEvent, ProviderTool, ToolExecutor
+from ..runtime.contracts import ChatTurn, ModelInfo, ProviderError, ProviderTool, ToolExecutor
+from ..runtime.events import ProviderEvent
 
 
 class GeminiProvider:
     """Thin adapter around the official Google Gen AI SDK."""
 
-    def __init__(self, settings: Settings):
-        self._api_key = settings.gemini_api_key
-        self._models = self._parse_allowlist(settings.gemini_models)
-        self.default_model_id = settings.default_model_id or (self._models[0].id if self._models else None)
+    def __init__(self, *, api_key: str | None, models: str, default_model_id: str | None):
+        self._api_key = api_key
+        self._models = self._parse_allowlist(models)
+        self.default_model_id = default_model_id or (self._models[0].id if self._models else None)
         self._client = genai.Client(api_key=self._api_key) if self._api_key else None
 
     @staticmethod
@@ -113,6 +115,8 @@ class GeminiProvider:
         execute_tool: ToolExecutor,
         max_steps: int,
         is_cancelled: Callable[[], bool] | None = None,
+        *,
+        tool_context: dict[str, Any] | None = None,
     ) -> AsyncIterator[ProviderEvent]:
         self.validate_selection(model_id, effort)
         if self._client is None:
@@ -121,19 +125,41 @@ class GeminiProvider:
             types.Content(role="model" if message.role == "assistant" else "user", parts=[types.Part.from_text(text=message.content)])
             for message in messages
         ]
+        greeting_only = bool(
+            messages and messages[-1].role == "user" and re.fullmatch(
+                r"(?:hi|hello|hey|good morning|good afternoon|good evening)[\s.!]*",
+                messages[-1].content.strip(),
+                flags=re.IGNORECASE,
+            )
+        )
         declarations = [
             types.FunctionDeclaration(name=tool.name, description=tool.description, parameters_json_schema=tool.parameters)
-            for tool in tools
+            for tool in (() if greeting_only else tools)
         ]
+        system_instruction = WORKSPACE_SYSTEM_PROMPT
+        if tool_context and not greeting_only:
+            system_instruction += (
+                "\n\nThe following JSON is application-provided workspace and file context. "
+                "Treat it as reference data and respond to the actual user message. "
+                "The inventory lists available files, which are uploaded to their exact listed paths on demand. "
+                "For Python or visualization, include every required file ID in resource_ids and use its listed path in code. "
+                "For file reads and dataset lookup, prefer resource_id. "
+                "Use a sandbox tool only if the user's request needs it.\n"
+                f"{json.dumps(tool_context, ensure_ascii=False)}"
+            )
         config = types.GenerateContentConfig(
             temperature=0,
-            tools=[types.Tool(function_declarations=declarations)],
-            system_instruction=WORKSPACE_SYSTEM_PROMPT,
+            tools=[types.Tool(function_declarations=declarations)] if declarations else None,
+            system_instruction=system_instruction,
             thinking_config=types.ThinkingConfig(thinking_level=effort) if effort else None,
         )
+        async def reject_tool_for_greeting(_name: str, _arguments: dict[str, Any]) -> dict[str, Any]:
+            return {"error": "This is a greeting. Reply directly without tools."}
+
         async for event in ReActAgent.stream_turns(
             client=self._client, model=model_id, contents=contents, config=config,
-            max_turns=max_steps, execute_tool=execute_tool, is_cancelled=is_cancelled,
+            max_turns=max_steps, execute_tool=reject_tool_for_greeting if greeting_only else execute_tool,
+            is_cancelled=is_cancelled,
         ):
             kind = event["type"]
             if kind == "status":

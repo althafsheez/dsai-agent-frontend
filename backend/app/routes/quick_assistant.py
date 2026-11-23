@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from ..dependencies import get_current_user, get_db
 from ..errors import APIError
 from ..models import Chat, Message, QuickMessage, Resource, ResourceLink, User, utc_now
-from ..providers import ChatTurn, LLMProvider, ProviderError
+from agentic.runtime.contracts import ChatTurn, LLMProvider, ProviderError
 from ..schemas import QuickMessageCreate, QuickMessageResponse
 from ..services.records import require_chat, require_workspace
 

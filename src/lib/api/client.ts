@@ -314,6 +314,7 @@ export function getRunEvents(runId: string, afterSequence = 0): Promise<ApiList<
 export function createMessage(chatId: string, input: {
   content: string;
   client_request_id: string;
+  resource_ids?: string[];
 }): Promise<MessageDto> {
   return requestJson<MessageDto>(`/chats/${encodeURIComponent(chatId)}/messages`, {
     method: "POST",
@@ -321,11 +322,60 @@ export function createMessage(chatId: string, input: {
   });
 }
 
-export function queueRun(runId: string, input: QueueRunInput): Promise<QueueRunResponse> {
+export async function queueRun(runId: string, input: QueueRunInput, files: File[] = []): Promise<QueueRunResponse> {
+  if (files.length) {
+    const body = new FormData();
+    body.set("content", input.content);
+    body.set("model_id", input.model_id);
+    body.set("client_request_id", input.client_request_id);
+    if (input.effort) body.set("effort", input.effort);
+    input.resource_ids?.forEach((id) => body.append("resource_ids", id));
+    files.forEach((file) => body.append("files", file));
+    const response = await fetch(`${API_ROOT}/runs/${encodeURIComponent(runId)}/queue/with-files`, {
+      method: "POST", headers: requestHeaders(), body,
+    });
+    if (!response.ok) throw await apiError(response);
+    return response.json();
+  }
   return requestJson<QueueRunResponse>(`/runs/${encodeURIComponent(runId)}/queue`, {
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+export async function editQueuedRun(
+  runId: string,
+  content: string,
+  removedResourceIds: string[],
+  files: { id: string; file: File }[],
+): Promise<MessageDto> {
+  const path = `/runs/${encodeURIComponent(runId)}/queue`;
+  if (files.length) {
+    const body = new FormData();
+    body.set("content", content);
+    removedResourceIds.forEach((id) => body.append("remove_resource_ids", id));
+    files.forEach(({ id, file }) => {
+      body.append("client_upload_ids", id);
+      body.append("files", file);
+    });
+    const response = await fetch(`${API_ROOT}${path}/with-files`, {
+      method: "PATCH", headers: requestHeaders(), body,
+    });
+    if (!response.ok) throw await apiError(response);
+    return response.json();
+  }
+  return requestJson<MessageDto>(path, {
+    method: "PATCH", body: JSON.stringify({ content, remove_resource_ids: removedResourceIds }),
+  });
+}
+
+export async function reorderChatQueue(chatId: string, runIds: string[]): Promise<void> {
+  const response = await fetch(`${API_ROOT}/chats/${encodeURIComponent(chatId)}/queue/order`, {
+    method: "PATCH",
+    headers: requestHeaders(true),
+    body: JSON.stringify({ run_ids: runIds }),
+  });
+  if (!response.ok) throw await apiError(response);
 }
 
 export function steerRun(runId: string, input: {

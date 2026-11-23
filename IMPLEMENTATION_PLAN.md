@@ -46,6 +46,7 @@ Updated 2026-11-09 from final user decisions. Implement and verify sequentially.
 
 ## Phase 5 — E2B and output rendering — PENDING
 - Verified one live Gemini → E2B Python run through the main chat endpoint, including registration and download of the resulting CSV. The full chart-plus-table gate remains open.
+- Verified selective E2B staging with 43 authorized files. A live greeting created no sandbox. A separate live Gemini analysis staged only the requested CSV, reused it across tool calls, and generated a PNG and PDF that were downloaded and saved to Library.
 - Inspect multiple dataset inputs, execute Python in per-run E2B, sync outputs after tool checkpoints.
 - Preserve/dedup intermediate versions; CSV/Excel/Parquet -> Dataset, images/charts/reports -> Artifact.
 - Inline image/chart/file renderers, validated Recharts specification, expand, preview, download, Library.

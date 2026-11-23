@@ -251,8 +251,8 @@ async def test_chat_resource_upload_is_classified_and_idempotent(
         f"/api/chats/{created['chat']['id']}/messages", headers=demo_headers
     )).json()["items"][0]
     assert message["attachment_refs"] == [
-        {"resource_type": "dataset", "resource_id": first.json()["resource"]["id"]},
-        {"resource_type": "artifact", "resource_id": artifact.json()["resource"]["id"]},
+        {"resource_type": "dataset", "resource_id": first.json()["resource"]["id"], "name": "sales.csv", "size_bytes": 21},
+        {"resource_type": "artifact", "resource_id": artifact.json()["resource"]["id"], "name": "summary.pdf", "size_bytes": 15},
     ]
 
     preview = await client.get(

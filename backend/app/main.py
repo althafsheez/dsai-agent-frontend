@@ -1,20 +1,24 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .agent import AgentRunner
-from .agent.default_tools import build_tool_registry
-from .agent.sandbox import E2BSandboxPool
+from agentic.execution.e2b import E2BSandboxPool
+from agentic.providers.gemini import GeminiProvider
+from agentic.runtime.contracts import LLMProvider
+from agentic.runtime.runner import AgentRunner
+from agentic.tools.defaults import build_tool_registry
+
 from .config import Settings, get_settings
 from .db import make_engine, make_session_factory
 from .migrations import upgrade_schema
 from .errors import APIError, api_error_handler
-from .providers import GeminiProvider, LLMProvider
 from .routes import chats, meta, quick_assistant, resources, runs, workspaces
+from .services.agent_adapter import AgentToolAdapter
 from .services.identity import seed_demo_users
 from .services.runs import RunCoordinator, reconcile_stale_runs
 from .storage import LocalFileStorage
@@ -24,15 +28,27 @@ def create_app(settings: Settings | None = None, provider: LLMProvider | None = 
     settings = settings or get_settings()
     engine = make_engine(settings.database_url)
     session_factory = make_session_factory(engine)
-    llm_provider = provider or GeminiProvider(settings)
+    llm_provider = provider or GeminiProvider(
+        api_key=settings.gemini_api_key,
+        models=settings.gemini_models,
+        default_model_id=settings.default_model_id,
+    )
     sandbox_pool = E2BSandboxPool(settings.e2b_api_key)
     storage = LocalFileStorage(settings.storage_root)
-    tool_registry = build_tool_registry(settings, session_factory, sandbox_pool, storage)
+    tool_registry = build_tool_registry(
+        sandbox_pool, AgentToolAdapter(session_factory, storage),
+        tavily_api_key=settings.tavily_api_key,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if settings.auto_create_schema:
             upgrade_schema(engine)
+        performance_logger = logging.getLogger("agentic.performance")
+        if not performance_logger.hasHandlers():
+            performance_logger.addHandler(logging.StreamHandler())
+        performance_logger.disabled = False
+        performance_logger.setLevel(logging.INFO)
         settings.storage_root.mkdir(parents=True, exist_ok=True)
         with session_factory() as session:
             seed_demo_users(session)

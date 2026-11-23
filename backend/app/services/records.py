@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from ..errors import APIError
-from ..models import Chat, Message, User, Workspace, WorkspaceContextFile, utc_now
-from ..schemas import ChatCreate, ChatUpdate, WorkspaceCreate, WorkspaceUpdate
+from ..models import AgentRun, Chat, FileObject, Message, Resource, ResourceLink, User, Workspace, WorkspaceContextFile, utc_now
+from ..schemas import ChatCreate, ChatUpdate, MessageAttachment, MessageResponse, WorkspaceCreate, WorkspaceUpdate
+from .resource_uploads import attach_library_resources
 
 
 def _keep_updated_at(record: Chat | Workspace) -> None:
@@ -177,16 +178,49 @@ def require_chat(session: Session, user: User, chat_id: str) -> Chat:
     return chat
 
 
+def message_response(session: Session, message: Message) -> MessageResponse:
+    """Resolve attachment details for the response from their stable resource references."""
+    references = session.execute(
+        select(Resource.resource_type, ResourceLink.resource_id, Resource.name, FileObject.size_bytes)
+        .join(ResourceLink, ResourceLink.resource_id == Resource.id)
+        .join(FileObject, FileObject.id == Resource.file_object_id)
+        .outerjoin(AgentRun, AgentRun.id == Resource.run_id)
+        .where(or_(ResourceLink.message_id == message.id, AgentRun.assistant_message_id == message.id))
+        .order_by(ResourceLink.created_at, ResourceLink.id)
+    ).unique().all()
+    return MessageResponse.model_validate(message).model_copy(
+        update={
+            "attachment_refs": [
+                MessageAttachment(resource_type=resource_type, resource_id=resource_id, name=name, size_bytes=size)
+                for resource_type, resource_id, name, size in references
+            ]
+        }
+    )
+
+
 def list_messages(session: Session, user: User, chat_id: str) -> list[Message]:
     require_chat(session, user, chat_id)
+    removed_from_queue = (
+        select(AgentRun.id)
+        .where(
+            AgentRun.chat_id == chat_id,
+            AgentRun.status == "cancelled",
+            AgentRun.started_at.is_(None),
+            or_(AgentRun.user_message_id == Message.id, AgentRun.assistant_message_id == Message.id),
+        )
+        .exists()
+    )
     return list(
         session.scalars(
-            select(Message).where(Message.chat_id == chat_id).order_by(Message.position, Message.id)
+            select(Message).where(Message.chat_id == chat_id, ~removed_from_queue).order_by(Message.position, Message.id)
         )
     )
 
 
-def create_message(session: Session, user: User, chat_id: str, content: str, request_id: str) -> Message:
+def create_message(
+    session: Session, user: User, chat_id: str, content: str, request_id: str,
+    resource_ids: list[str] | None = None,
+) -> Message:
     chat = require_chat(session, user, chat_id)
     existing = session.scalar(
         select(Message).where(Message.chat_id == chat_id, Message.client_request_id == request_id)
@@ -206,6 +240,9 @@ def create_message(session: Session, user: User, chat_id: str, content: str, req
         client_request_id=request_id,
     )
     session.add(message)
+    if resource_ids:
+        session.flush()
+        attach_library_resources(session, user.id, message.id, resource_ids)
     chat.updated_at = utc_now()
     session.commit()
     session.refresh(message)

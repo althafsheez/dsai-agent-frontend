@@ -5,7 +5,7 @@ from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_current_user, get_db
-from ..models import AgentRun, Chat, Message, Resource, ResourceLink, User
+from ..models import AgentRun, Chat, User
 from ..schemas import (
     ChatCreate,
     ChatCreateResponse,
@@ -21,6 +21,7 @@ from ..services.records import (
     delete_chat,
     list_chats,
     list_messages,
+    message_response,
     require_chat,
     update_chat,
 )
@@ -37,24 +38,6 @@ def _chat_response(session: Session, chat) -> ChatResponse:
     )
     return ChatResponse.model_validate(chat).model_copy(update={"active_run_status": active_status})
 
-
-def _message_response(session: Session, message: Message) -> MessageResponse:
-    """Attach stable resource references without copying resource metadata into messages."""
-    references = session.execute(
-        select(Resource.resource_type, ResourceLink.resource_id)
-        .join(ResourceLink, ResourceLink.resource_id == Resource.id)
-        .outerjoin(AgentRun, AgentRun.id == Resource.run_id)
-        .where(or_(ResourceLink.message_id == message.id, AgentRun.assistant_message_id == message.id))
-        .order_by(ResourceLink.created_at, ResourceLink.id)
-    ).all()
-    return MessageResponse.model_validate(message).model_copy(
-        update={
-            "attachment_refs": [
-                {"resource_type": resource_type, "resource_id": resource_id}
-                for resource_type, resource_id in references
-            ]
-        }
-    )
 
 
 @router.get("")
@@ -74,7 +57,7 @@ async def post_chat(
     chat, message = create_chat(session, user, data)
     return ChatCreateResponse(
         chat=_chat_response(session, chat),
-        message=_message_response(session, message),
+        message=message_response(session, message),
     )
 
 
@@ -152,7 +135,7 @@ async def get_messages(
     user: User = Depends(get_current_user),
 ) -> dict:
     return {
-        "items": [_message_response(session, item) for item in list_messages(session, user, chat_id)],
+        "items": [message_response(session, item) for item in list_messages(session, user, chat_id)],
         "next_cursor": None,
     }
 
@@ -164,5 +147,5 @@ async def post_message(
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> MessageResponse:
-    message = create_message(session, user, chat_id, data.content, data.client_request_id)
-    return _message_response(session, message)
+    message = create_message(session, user, chat_id, data.content, data.client_request_id, data.resource_ids)
+    return message_response(session, message)

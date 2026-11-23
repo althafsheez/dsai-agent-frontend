@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
+import time
 from pathlib import PurePosixPath
 from threading import RLock
 from typing import Any
+
+logger = logging.getLogger("agentic.performance")
 
 
 class SandboxUnavailable(RuntimeError):
@@ -52,17 +56,24 @@ class E2BSandboxPool:
                     from e2b_code_interpreter import Sandbox
                 except ImportError as exc:
                     raise SandboxUnavailable("E2B Code Interpreter is not installed.") from exc
+                sandbox = None
                 try:
+                    started = time.perf_counter()
                     sandbox = Sandbox.create(timeout=self._timeout_seconds, api_key=self._api_key)
+                    logger.info("e2b_sandbox_init duration_ms=%.1f", (time.perf_counter() - started) * 1000)
                     # E2B returns False when these standard directories already
                     # exist, which is safe and expected for a fresh template.
                     sandbox.files.make_dir("/home/user/outputs")
                     sandbox.files.make_dir("/home/user/inputs")
                     # Each E2B sandbox has its own Python environment.
-                    sandbox.commands.run(
-                        "python -c 'import reportlab' || python -m pip install --disable-pip-version-check reportlab==4.4.10",
-                        timeout=120,
-                    )
+                    started = time.perf_counter()
+                    try:
+                        sandbox.commands.run(
+                            "python -c 'import reportlab' || python -m pip install --disable-pip-version-check reportlab==4.4.10",
+                            timeout=120,
+                        )
+                    finally:
+                        logger.info("e2b_dependency_prep duration_ms=%.1f", (time.perf_counter() - started) * 1000)
                 except Exception as exc:
                     if sandbox is not None:
                         try:
@@ -80,9 +91,12 @@ class E2BSandboxPool:
         if not self._api_key:
             return {"success": False, "error": "E2B_API_KEY is not configured."}
         bounded_timeout = max(1, min(timeout_seconds, 60))
+        try:
+            sandbox = await self._start(run_id)
+        except SandboxUnavailable as exc:
+            return {"success": False, "error": str(exc)}
 
         def run() -> dict[str, Any]:
-            sandbox = self._start_sync(run_id)
             try:
                 execution = sandbox.run_code(code, timeout=bounded_timeout)
                 generated = self._scan_outputs_sync(run_id, sandbox)
@@ -111,14 +125,11 @@ class E2BSandboxPool:
                 suffix = f": {detail}" if detail else ""
                 return {"success": False, "error": f"Sandbox execution failed ({type(exc).__name__}){suffix}."}
 
-        try:
-            return await asyncio.to_thread(run)
-        except SandboxUnavailable as exc:
-            return {"success": False, "error": str(exc)}
+        return await asyncio.to_thread(run)
 
     def _scan_outputs_sync(self, run_id: str, sandbox: Any) -> list[dict[str, Any]]:
         generated: list[dict[str, Any]] = []
-        known = self._output_hashes.setdefault(run_id, {})
+        known = self._output_hashes.get(run_id, {})
         for entry in sandbox.files.list("/home/user/outputs"):
             entry_type_value = getattr(entry, "type", None)
             entry_type = str(getattr(entry_type_value, "value", entry_type_value)).lower()
@@ -143,7 +154,7 @@ class E2BSandboxPool:
     async def list_files(self, run_id: str, directory: str) -> dict[str, Any]:
         try:
             safe = self._safe_path(directory)
-            sandbox = await asyncio.to_thread(self._start_sync, run_id)
+            sandbox = await self._start(run_id)
             entries = await asyncio.to_thread(sandbox.files.list, safe)
             return {"directory": safe, "files": sorted(str(entry.name) for entry in entries if not str(entry.name).startswith("."))}
         except (SandboxUnavailable, ValueError) as exc:
@@ -152,7 +163,7 @@ class E2BSandboxPool:
     async def read_text(self, run_id: str, path: str) -> dict[str, Any]:
         try:
             safe = self._safe_path(path)
-            sandbox = await asyncio.to_thread(self._start_sync, run_id)
+            sandbox = await self._start(run_id)
             content = await asyncio.to_thread(sandbox.files.read, safe)
             text = str(content)
             return {"path": safe, "content": text[:12_000], "truncated": len(text) > 12_000}
@@ -166,7 +177,7 @@ class E2BSandboxPool:
             safe = self._safe_path(path, writable=True)
             if len(content.encode("utf-8")) > 1_000_000:
                 return {"error": "Text output exceeds the 1 MB limit."}
-            sandbox = await asyncio.to_thread(self._start_sync, run_id)
+            sandbox = await self._start(run_id)
             await asyncio.to_thread(sandbox.files.write, safe, content)
             return {"success": True, "path": safe, "bytes_written": len(content.encode("utf-8"))}
         except (SandboxUnavailable, ValueError) as exc:
@@ -176,20 +187,46 @@ class E2BSandboxPool:
 
     async def read_output_bytes(self, run_id: str, path: str) -> bytes:
         safe = self._safe_path(path, writable=True)
-        sandbox = await asyncio.to_thread(self._start_sync, run_id)
+        sandbox = await self._start(run_id)
         return await asyncio.to_thread(sandbox.files.read, safe, format="bytes")
 
     async def collect_outputs(self, run_id: str) -> list[dict[str, Any]]:
         """Discover unacknowledged output files without executing more code."""
-        sandbox = await asyncio.to_thread(self._start_sync, run_id)
+        sandbox = await self._start(run_id)
         return await asyncio.to_thread(self._scan_outputs_sync, run_id, sandbox)
 
-    async def upload_input(self, run_id: str, filename: str, content: bytes) -> str:
+    @staticmethod
+    def input_path(filename: str) -> str:
         safe_name = "".join(character for character in filename if character.isalnum() or character in "._-")[:160] or "input.bin"
-        path = f"/home/user/inputs/{safe_name}"
-        sandbox = await asyncio.to_thread(self._start_sync, run_id)
-        await asyncio.to_thread(sandbox.files.write, path, content)
+        return f"/home/user/inputs/{safe_name}"
+
+    async def upload_input(self, run_id: str, filename: str, content: bytes) -> str:
+        path = self.input_path(filename)
+        def upload() -> None:
+            sandbox = self._start_sync(run_id)
+            started = time.perf_counter()
+            try:
+                sandbox.files.write(path, content)
+            except Exception as exc:
+                raise SandboxUnavailable("Could not upload a requested file to the sandbox.") from exc
+            finally:
+                logger.info("e2b_input_upload bytes=%d duration_ms=%.1f", len(content), (time.perf_counter() - started) * 1000)
+
+        await self._finish_on_cancel(upload)
         return path
+
+    async def _start(self, run_id: str) -> Any:
+        return await self._finish_on_cancel(self._start_sync, run_id)
+
+    @staticmethod
+    async def _finish_on_cancel(operation, *args):
+        task = asyncio.create_task(asyncio.to_thread(operation, *args))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # Let the in-flight startup or upload finish before closing the sandbox.
+            await asyncio.gather(task, return_exceptions=True)
+            raise
 
     def _close_sync(self, run_id: str) -> None:
         with self._lock:
