@@ -44,7 +44,7 @@ export function generateFromDescription(prompt: string): GeneratedWorkflow {
   const notes: string[] = [];
   const trigger = classifyTrigger(text);
   notes.push(trigger.kind === "manual" ? "No schedule or event found, so the workflow runs manually." : `Trigger read as ${trigger.kind}: ${trigger.label}.`);
-  const clauses = text.split(/,|;|\bthen\b|\band then\b|\bafter that\b|\bfinally\b|\.(?=\s|$)/i).map((part) => part.trim()).filter(Boolean);
+  const clauses = text.split(/,|;|\bthen\b|\band then\b|\band\b(?=\s+(?:email|mail|slack|notify|alert|send|share|post|build|create|write|analy|chart|report))|\bafter that\b|\bfinally\b|\.(?=\s|$)/i).map((part) => part.trim()).filter(Boolean);
   const steps: WorkflowStep[] = [];
   for (const clause of clauses) {
     const kind = classifyStep(clause);

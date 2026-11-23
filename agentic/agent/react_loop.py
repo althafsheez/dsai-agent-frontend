@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 import logging
 import os
@@ -16,6 +17,11 @@ if TYPE_CHECKING:
 from agentic.agent.prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger("agentic.performance")
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Google's 'high demand' (503), rate limit (429) and brief 500s succeed when repeated."""
+    return getattr(exc, "code", None) in (429, 500, 502, 503, 504)
 
 GEMINI_TOOLS = [
     types.Tool(
@@ -278,35 +284,45 @@ class ReActAgent:
             calls = []
             seen_ids = set()
             model_parts = []
-            try:
-                stream = await client.aio.models.generate_content_stream(
-                    model=model, contents=contents, config=turn_config,
-                )
-                async for chunk in stream:
-                    if first_response:
-                        logger.info("gemini_first_response duration_ms=%.1f", (time.perf_counter() - start) * 1000)
-                        first_response = False
-                    if is_cancelled and is_cancelled():
-                        return
-                    if not chunk.candidates or not chunk.candidates[0].content:
+            attempt = 0
+            while True:
+                try:
+                    stream = await client.aio.models.generate_content_stream(
+                        model=model, contents=contents, config=turn_config,
+                    )
+                    async for chunk in stream:
+                        if first_response:
+                            logger.info("gemini_first_response duration_ms=%.1f", (time.perf_counter() - start) * 1000)
+                            first_response = False
+                        if is_cancelled and is_cancelled():
+                            return
+                        if not chunk.candidates or not chunk.candidates[0].content:
+                            continue
+                        for part in chunk.candidates[0].content.parts or []:
+                            call = part.function_call
+                            if call is not None:
+                                if call.id and call.id in seen_ids:
+                                    continue
+                                if call.id:
+                                    seen_ids.add(call.id)
+                                calls.append(call)
+                            model_parts.append(part)
+                            if part.text and not part.thought:
+                                if not final_answer:
+                                    logger.info("gemini_first_text duration_ms=%.1f", (time.perf_counter() - start) * 1000)
+                                final_answer.append(part.text)
+                                yield {"type": "delta", "content": part.text}
+                    break
+                except Exception as exc:
+                    if attempt < 2 and not model_parts and _is_transient(exc):
+                        attempt += 1
+                        logger.warning("gemini_retry attempt=%d model=%s", attempt, model)
+                        calls, seen_ids = [], set()
+                        await asyncio.sleep(2.0 * attempt)
                         continue
-                    for part in chunk.candidates[0].content.parts or []:
-                        call = part.function_call
-                        if call is not None:
-                            if call.id and call.id in seen_ids:
-                                continue
-                            if call.id:
-                                seen_ids.add(call.id)
-                            calls.append(call)
-                        model_parts.append(part)
-                        if part.text and not part.thought:
-                            if not final_answer:
-                                logger.info("gemini_first_text duration_ms=%.1f", (time.perf_counter() - start) * 1000)
-                            final_answer.append(part.text)
-                            yield {"type": "delta", "content": part.text}
-            except Exception:
-                yield {"type": "error", "content": "Gemini generation failed."}
-                return
+                    logger.exception("gemini_stream_failed model=%s", model)
+                    yield {"type": "error", "content": "Gemini generation failed."}
+                    return
             if not calls:
                 if not any(part.text and not part.thought for part in model_parts):
                     yield {"type": "error", "content": "Gemini returned no public answer."}

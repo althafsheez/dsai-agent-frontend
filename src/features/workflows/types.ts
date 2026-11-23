@@ -2,8 +2,9 @@ export type StepKind = "query" | "analyze" | "chart" | "report" | "notify" | "co
 export type TriggerKind = "manual" | "schedule" | "event";
 export type WorkflowState = "active" | "inactive" | "draft";
 
-export interface WorkflowStep { id: string; kind: StepKind; title: string; detail: string }
-export interface WorkflowTrigger { kind: TriggerKind; label: string }
+/** `config` holds the per-kind settings (dataset, channel, recipient, condition...) as plain strings. */
+export interface WorkflowStep { id: string; kind: StepKind; title: string; detail: string; config?: Record<string, string> }
+export interface WorkflowTrigger { kind: TriggerKind; label: string; config?: Record<string, string> }
 
 /** A workflow is always linear: one trigger, then its steps in order. */
 export interface Workflow {

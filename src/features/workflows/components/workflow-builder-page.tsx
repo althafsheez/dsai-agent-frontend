@@ -3,18 +3,16 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, GripVertical, Plus, Save, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowLeft, FlaskConical, GripVertical, Plus, Save, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { generateFromDescription, generateFromSketch, newStep, type SketchBox } from "../logic/generate-workflow";
+import { generateFromDescription, generateFromSketch, type SketchBox } from "../logic/generate-workflow";
 import { useSaveWorkflow, useWorkflow } from "../use-workflows";
-import type { GeneratedWorkflow, StepKind, TriggerKind, Workflow, WorkflowStep, WorkflowTrigger } from "../types";
-import { WorkflowDiagram } from "./workflow-parts";
+import { stepProblem, testRun } from "../logic/step-config";
+import type { GeneratedWorkflow, RunView, Workflow, WorkflowStep, WorkflowTrigger } from "../types";
+import { StatusBadge } from "./workflow-parts";
+import { ConfigPanel, insertStep, WorkflowCanvas, type Selection } from "./workflow-canvas";
 
-const KINDS: Array<{ value: StepKind; label: string }> = [
-  { value: "query", label: "Query data" }, { value: "analyze", label: "Analyze with AI" }, { value: "chart", label: "Build charts" },
-  { value: "report", label: "Create report" }, { value: "notify", label: "Send notification" }, { value: "condition", label: "Check a condition" }, { value: "custom", label: "Custom step" },
-];
 const field = "h-9 rounded-md border bg-surface px-2.5 text-xs outline-none placeholder:text-muted-foreground focus:border-border-strong";
 
 function SketchCanvas({ boxes, onChange }: { boxes: SketchBox[]; onChange: (boxes: SketchBox[]) => void }) {
@@ -61,10 +59,13 @@ function BuilderForm({ initial }: BuilderFormProps) {
   const [description, setDescription] = useState(initial?.description ?? "");
   const [trigger, setTrigger] = useState<WorkflowTrigger>(initial?.trigger ?? { kind: "manual", label: "Run manually" });
   const [steps, setSteps] = useState<WorkflowStep[]>(initial?.steps ?? []);
+  const [enabled, setEnabled] = useState(initial?.state === "active");
+  const [selected, setSelected] = useState<Selection>("trigger");
   const [mode, setMode] = useState<"describe" | "sketch">("describe");
   const [prompt, setPrompt] = useState("");
   const [boxes, setBoxes] = useState<SketchBox[]>([]);
   const [notes, setNotes] = useState<string[]>([]);
+  const [test, setTest] = useState<RunView | null>(null);
 
   function apply(result: GeneratedWorkflow) {
     setName((current) => current || result.name);
@@ -72,19 +73,25 @@ function BuilderForm({ initial }: BuilderFormProps) {
     setTrigger(result.trigger);
     setSteps(result.steps);
     setNotes(result.notes);
+    setSelected("trigger");
+    setTest(null);
   }
-  const move = (index: number, delta: number) => setSteps((current) => {
+  const edited = () => setTest(null);
+  const move = (id: string, delta: number) => { edited(); setSteps((current) => {
+    const index = current.findIndex((step) => step.id === id);
     const target = index + delta;
-    if (target < 0 || target >= current.length) return current;
+    if (index < 0 || target < 0 || target >= current.length) return current;
     const next = [...current];
     [next[index], next[target]] = [next[target], next[index]];
     return next;
-  });
-  const update = (id: string, patch: Partial<WorkflowStep>) => setSteps((current) => current.map((step) => (step.id === id ? { ...step, ...patch } : step)));
+  }); };
+  const update = (id: string, patch: Partial<WorkflowStep>) => { edited(); setSteps((current) => current.map((step) => (step.id === id ? { ...step, ...patch } : step))); };
+  const incomplete = steps.filter((step) => stepProblem(step));
   const canSave = name.trim().length > 0 && steps.length > 0 && steps.every((step) => step.title.trim());
+  const canEnable = steps.length > 0 && incomplete.length === 0;
 
   function submit() {
-    save.mutate({ id: initial?.id, name, description, trigger, steps }, { onSuccess: (saved) => router.push(`/workflows/${saved.id}`) });
+    save.mutate({ id: initial?.id, name, description, trigger, steps, state: enabled && canEnable ? "active" : initial?.state === "inactive" && !enabled ? "inactive" : "draft" }, { onSuccess: (saved) => router.push(`/workflows/${saved.id}`) });
   }
 
   return (
@@ -95,13 +102,26 @@ function BuilderForm({ initial }: BuilderFormProps) {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold tracking-tight">{initial ? "Edit workflow" : "Create workflow"}</h1>
-          <p className="mt-1 text-xs text-muted-foreground">Describe it or sketch it, then check the linear steps before saving.</p>
+          <p className="mt-1 text-xs text-muted-foreground">Pick a trigger, add steps with the + buttons, and click any card to set it up.</p>
         </div>
-        <Button onClick={submit} disabled={!canSave || save.isPending} title={canSave ? undefined : "Add a name and at least one step"}><Save />{save.isPending ? "Saving…" : "Save workflow"}</Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" role="switch" aria-checked={enabled} aria-label="Workflow enabled" disabled={!canEnable} title={canEnable ? undefined : "Finish every step to turn it on"} onClick={() => setEnabled(!enabled)} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-xs disabled:opacity-50">
+            <span className={cn("relative h-4 w-7 rounded-full transition-colors", enabled ? "bg-sage" : "bg-border-strong")}><span className={cn("absolute top-0.5 size-3 rounded-full bg-background transition-all", enabled ? "left-3.5" : "left-0.5")} /></span>
+            {enabled ? "On" : "Off"}
+          </button>
+          <Button type="button" variant="outline" disabled={!steps.length} onClick={() => setTest(testRun({ trigger, steps }))}><FlaskConical />Test workflow</Button>
+          <Button onClick={submit} disabled={!canSave || save.isPending} title={canSave ? undefined : "Add a name and at least one step"}><Save />{save.isPending ? "Saving…" : "Save workflow"}</Button>
+        </div>
       </header>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
-        <div className="min-w-0 space-y-4">
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        <label className="block min-w-0 text-xs font-medium">Name<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Weekly revenue report" className={cn(field, "mt-1.5 w-full")} /></label>
+        <label className="block min-w-0 text-xs font-medium">Description<input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What it is for" className={cn(field, "mt-1.5 w-full")} /></label>
+      </div>
+
+      <details className="mt-4 rounded-lg border bg-surface/40 p-3" open={steps.length === 0}>
+        <summary className="cursor-pointer text-xs font-medium"><Sparkles className="mr-1.5 inline size-3.5" />Start from a description or sketch</summary>
+        <div className="mt-3 space-y-3">
           <div role="tablist" aria-label="How to start" className="flex w-fit rounded-lg border bg-surface p-1">
             {([["describe", "Describe"], ["sketch", "Sketch"]] as const).map(([value, label]) => (
               <button key={value} type="button" role="tab" aria-selected={mode === value} onClick={() => setMode(value)} className={cn("h-8 rounded-md px-3 text-xs font-medium text-muted-foreground hover:text-foreground", mode === value && "bg-raised text-foreground shadow-sm")}>{label}</button>
@@ -110,7 +130,7 @@ function BuilderForm({ initial }: BuilderFormProps) {
           {mode === "describe" ? (
             <div>
               <label htmlFor="workflow-prompt" className="text-xs font-medium">What should this workflow do?</label>
-              <textarea id="workflow-prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={6} placeholder="Every Monday at 9am, pull last week's revenue, analyze trends, build a chart and email the team." className="mt-2 w-full resize-y rounded-lg border bg-surface p-3 text-xs leading-5 outline-none placeholder:text-muted-foreground focus:border-border-strong" />
+              <textarea id="workflow-prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={4} placeholder="Every Monday at 9am, pull last week's revenue, analyze trends, build a chart and email the team." className="mt-2 w-full resize-y rounded-lg border bg-surface p-3 text-xs leading-5 outline-none placeholder:text-muted-foreground focus:border-border-strong" />
               <Button type="button" className="mt-2" disabled={!prompt.trim()} onClick={() => apply(generateFromDescription(prompt))}><Sparkles />Generate workflow</Button>
             </div>
           ) : (
@@ -125,49 +145,28 @@ function BuilderForm({ initial }: BuilderFormProps) {
               <ul className="mt-1.5 list-disc space-y-1 pl-4 text-muted-foreground">{notes.map((note) => <li key={note}>{note}</li>)}</ul>
             </aside>
           ) : null}
-          <p className="text-[11px] text-muted-foreground">Demo builder: a rule-based reader turns your text or sketch into steps. It does not call a model yet.</p>
+          <p className="text-[11px] text-muted-foreground">A rule-based reader turns your text or sketch into steps; it does not call a model yet.</p>
         </div>
+      </details>
 
-        <div className="min-w-0 space-y-5">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block min-w-0 text-xs font-medium">Name<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Weekly revenue report" className={cn(field, "mt-1.5 w-full")} /></label>
-            <label className="block min-w-0 text-xs font-medium">Description<input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What it is for" className={cn(field, "mt-1.5 w-full")} /></label>
+      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="min-w-0">
+          <WorkflowCanvas trigger={trigger} steps={steps} selected={selected} statuses={test ? Object.fromEntries(test.steps.map((item) => [item.step_id, item.status])) : undefined}
+            onSelect={setSelected} onInsert={(index, kind) => { edited(); const result = insertStep(steps, index, kind); setSteps(result.steps); setSelected(result.added.id); }} />
+          {incomplete.length ? <p className="mt-3 text-center text-[11px] text-amber-200">{incomplete.length} step{incomplete.length > 1 ? "s need" : " needs"} setup before the workflow can be turned on.</p> : null}
+        </div>
+        <div className="min-w-0 space-y-4">
+          <div className="rounded-xl border bg-surface/40 p-4">
+            <ConfigPanel trigger={trigger} steps={steps} selected={selected} onTrigger={(next) => { edited(); setTrigger(next); }} onStep={update} onMove={move}
+              onDelete={(id) => { edited(); setSteps((current) => current.filter((step) => step.id !== id)); setSelected("trigger"); }} />
           </div>
-          <fieldset className="rounded-lg border p-3">
-            <legend className="px-1 text-xs font-medium">Trigger</legend>
-            <div className="flex flex-wrap gap-2">
-              <select aria-label="Trigger type" value={trigger.kind} onChange={(event) => { const kind = event.target.value as TriggerKind; setTrigger({ kind, label: kind === "manual" ? "Run manually" : kind === "schedule" ? "Every day at 9:00 AM" : "When new data is uploaded" }); }} className={field}>
-                <option value="manual">Manual</option><option value="schedule">On a schedule</option><option value="event">When something happens</option>
-              </select>
-              {trigger.kind !== "manual" ? <input aria-label="Trigger details" value={trigger.label} onChange={(event) => setTrigger({ ...trigger, label: event.target.value })} className={cn(field, "min-w-0 flex-1")} /> : null}
-            </div>
-          </fieldset>
-
-          <div>
-            <h2 className="mb-2 text-xs font-medium">Steps <span className="font-normal text-muted-foreground">(run top to bottom)</span></h2>
-            {steps.length ? (
-              <ol className="space-y-2">
-                {steps.map((step, index) => (
-                  <li key={step.id} className="flex flex-wrap items-center gap-2 rounded-lg border bg-surface/40 p-2">
-                    <span className="grid size-6 shrink-0 place-items-center rounded-full bg-raised text-[10px] text-muted-foreground">{index + 1}</span>
-                    <input aria-label={`Step ${index + 1} title`} value={step.title} onChange={(event) => update(step.id, { title: event.target.value })} className={cn(field, "min-w-[120px] flex-1")} />
-                    <select aria-label={`Step ${index + 1} type`} value={step.kind} onChange={(event) => update(step.id, { kind: event.target.value as StepKind })} className={field}>{KINDS.map((kind) => <option key={kind.value} value={kind.value}>{kind.label}</option>)}</select>
-                    <span className="ml-auto flex">
-                      <button type="button" aria-label={`Move step ${index + 1} up`} disabled={index === 0} onClick={() => move(index, -1)} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-raised disabled:opacity-30"><ArrowUp className="size-3.5" /></button>
-                      <button type="button" aria-label={`Move step ${index + 1} down`} disabled={index === steps.length - 1} onClick={() => move(index, 1)} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-raised disabled:opacity-30"><ArrowDown className="size-3.5" /></button>
-                      <button type="button" aria-label={`Delete step ${index + 1}`} onClick={() => setSteps((current) => current.filter((item) => item.id !== step.id))} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-raised hover:text-red-300"><Trash2 className="size-3.5" /></button>
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            ) : <p className="rounded-lg border border-dashed px-4 py-6 text-center text-xs text-muted-foreground">No steps yet. Generate them from your description or sketch, or add one below.</p>}
-            <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => setSteps((current) => [...current, newStep("custom")])}><Plus />Add step</Button>
-          </div>
-
-          <div>
-            <h2 className="mb-2 text-xs font-medium">Preview</h2>
-            <div className="rounded-lg border bg-surface/40 p-3"><WorkflowDiagram workflow={{ trigger, steps }} /></div>
-          </div>
+          {test ? (
+            <section aria-label="Test results" className="rounded-xl border bg-surface/40 p-4">
+              <h2 className="flex items-center gap-2 text-sm font-semibold">Test result <StatusBadge status={test.status} /></h2>
+              <pre className="mt-2 max-h-56 overflow-auto font-mono text-[11px] leading-5 text-muted-foreground">{test.steps.flatMap((item) => item.log.map((line) => `[${item.title}] ${line}`)).join("\n")}</pre>
+              <p className="mt-2 text-[11px] text-muted-foreground">Simulated test: no data is read and nothing is sent.</p>
+            </section>
+          ) : null}
         </div>
       </div>
     </section>

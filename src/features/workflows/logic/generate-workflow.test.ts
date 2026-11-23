@@ -25,3 +25,10 @@ describe("generateFromSketch", () => {
     expect(result.steps.map((step) => step.kind)).toEqual(["query", "notify"]);
   });
 });
+
+describe("generateFromDescription conjunctions", () => {
+  it("splits 'build a chart and email the team' into two steps", () => {
+    const result = generateFromDescription("Every Monday at 9am, pull the orders dataset, analyze revenue trends, build a chart and email the team");
+    expect(result.steps.map((step) => step.kind)).toEqual(["query", "analyze", "chart", "notify"]);
+  });
+});

@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DashboardsPage } from "./dashboards-page";
+
+// Keep the test offline: never reach a real backend.
+vi.mock("@/lib/api", () => ({ ApiError: class extends Error { status = 0 }, listDashboardRecords: async () => [], getDashboardRecord: async () => { throw new Error("offline"); }, saveDashboardRecord: async () => { throw new Error("offline"); }, deleteDashboardRecord: async () => undefined }));
 
 describe("dashboards page", () => {
   it("renders preview dashboards as a card grid with pinned items first", () => {
