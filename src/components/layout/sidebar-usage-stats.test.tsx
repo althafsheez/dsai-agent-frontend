@@ -7,18 +7,22 @@ describe("SidebarUsageStats", () => {
     render(<SidebarUsageStats compact={false} />);
 
     expect(screen.getByTestId("sidebar-usage-stats")).toBeInTheDocument();
-    expect(screen.getByText("Usage Statistics")).toBeInTheDocument();
-    expect(screen.getByText("Free Tier")).toBeInTheDocument();
-    expect(screen.getByText("19 / 50")).toBeInTheDocument();
-    expect(screen.getByText(/40\.4 KB \/ 100 MB/)).toBeInTheDocument();
+    expect(screen.getByText("Usage Stats")).toBeInTheDocument();
+    expect(screen.getByText("65% used")).toBeInTheDocument();
+    expect(screen.getByText("AI Credits")).toBeInTheDocument();
+    expect(screen.getByText("3,250 / 5,000")).toBeInTheDocument();
+    expect(screen.getByText("Disk Space")).toBeInTheDocument();
+    expect(screen.getByText("0 MB / 100 MB")).toBeInTheDocument();
+    expect(screen.getByText("Compute Time")).toBeInTheDocument();
+    expect(screen.getByText("42h / 100h")).toBeInTheDocument();
+    expect(screen.getByText("AI can make mistakes. Always verify important results.")).toBeInTheDocument();
   });
 
   it("renders compact mode icon link with title", () => {
     render(<SidebarUsageStats compact={true} />);
 
     const link = screen.getByRole("link", { name: "View usage statistics" });
-    expect(link).toBeInTheDocument();
     expect(link).toHaveAttribute("href", "/settings");
-    expect(link).toHaveAttribute("title", expect.stringContaining("Usage: 19/50 runs"));
+    expect(link).toHaveAttribute("title", expect.stringContaining("65% used"));
   });
 });
