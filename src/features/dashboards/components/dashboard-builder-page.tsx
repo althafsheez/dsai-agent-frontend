@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -10,7 +11,8 @@ import { useDashboardDatasets, useSaveDashboard } from "../use-dashboards";
 import type { DashboardWidget } from "../types";
 import { AddWidget } from "./add-widget";
 import { DatasetPicker } from "./dataset-picker";
-import { WidgetCard } from "./widget-card";
+
+const WidgetCard = dynamic(() => import("./widget-card").then((m) => m.WidgetCard), { ssr: false });
 
 const field = "h-9 w-full rounded-md border bg-surface px-2.5 text-xs outline-none placeholder:text-muted-foreground focus:border-border-strong";
 

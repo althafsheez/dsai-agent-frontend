@@ -20,7 +20,7 @@ describe("settings page", () => {
     render(<SettingsPage />);
     await user.click(screen.getByRole("button", { name: /Usage analytics/ }));
     expect(screen.getByRole("heading", { name: "Usage analytics" })).toBeVisible();
-    for (const label of ["AI credits", "Disk space", "Compute time"]) expect(screen.getByRole("region", { name: label })).toBeVisible();
+    for (const label of ["AI credits", "Disk space", "Compute time"]) expect(await screen.findByRole("region", { name: label })).toBeVisible();
   });
 
   it("opens the plan and returns to the overview", async () => {

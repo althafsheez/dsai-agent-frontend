@@ -1,8 +1,8 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { UsageAnalytics } from "@/features/usage/usage-analytics";
 import {
   ArrowLeft,
   BarChart3,
@@ -27,6 +27,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth";
 import { cn } from "@/lib/utils";
+
+const UsageAnalytics = dynamic(() => import("@/features/usage/usage-analytics").then((m) => m.UsageAnalytics), { ssr: false });
 
 type Detail = "profile" | "api" | "authentication" | "plan" | "usage";
 

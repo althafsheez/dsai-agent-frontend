@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -9,7 +10,8 @@ import { cn } from "@/lib/utils";
 import { useDashboard, useDashboardDatasets, useDeleteDashboard, useSaveDashboard } from "../use-dashboards";
 import type { Dashboard, DashboardWidget } from "../types";
 import { AddWidget } from "./add-widget";
-import { WidgetCard } from "./widget-card";
+
+const WidgetCard = dynamic(() => import("./widget-card").then((m) => m.WidgetCard), { ssr: false });
 
 type Mode = "view" | "edit";
 

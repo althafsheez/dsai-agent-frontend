@@ -1,5 +1,7 @@
 "use client";
 
+import "@univerjs/preset-sheets-core/lib/index.css";
+
 import { AlertCircle, LoaderCircle, RotateCcw, Save } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getResourcePreview, uploadResource } from "@/lib/api";
