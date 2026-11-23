@@ -39,6 +39,7 @@ class Workspace(TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pinned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     context_files: Mapped[list["WorkspaceContextFile"]] = relationship(
@@ -57,6 +58,7 @@ class Chat(TimestampMixin, Base):
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     client_request_id: Mapped[str] = mapped_column(String(100))
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pinned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     first_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_unread: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
@@ -79,6 +81,19 @@ class WorkspaceContextFile(TimestampMixin, Base):
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
 
     workspace: Mapped[Workspace] = relationship(back_populates="context_files")
+
+
+class WorkspaceInvite(TimestampMixin, Base):
+    """A person invited to a workspace by email. No mail is sent; demo auth cannot sign them in yet."""
+
+    __tablename__ = "workspace_invites"
+    __table_args__ = (UniqueConstraint("workspace_id", "email", name="uq_workspace_invite_email"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    email: Mapped[str] = mapped_column(String(320))
+    role: Mapped[str] = mapped_column(String(16))
+    invited_by: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
 
 
 class Workflow(TimestampMixin, Base):

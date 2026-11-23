@@ -1,6 +1,8 @@
 import React, { useMemo } from "react";
 import { AlertTriangle, RotateCcw, Sparkles } from "lucide-react";
 import Image from "next/image";
+import type { AgentRunDto } from "@/lib/api";
+import type { ContextFile } from "@/features/context-sidebar";
 import { Button } from "@/components/ui/button";
 import type { AssistantMessage as AssistantMessageType, MessageBlock } from "../types";
 import { AgentTrace } from "./agent-trace";
@@ -169,12 +171,16 @@ function Markdown({
 
 function MessageRenderer({
   block,
+  resources,
+  onLibraryToggle,
   isStreaming,
   availableResources,
   onFileSelect,
   onFileDownload,
 }: {
   block: MessageBlock;
+  resources?: Map<string, ContextFile>;
+  onLibraryToggle?: (file: ContextFile) => Promise<void>;
   isStreaming?: boolean;
   availableResources?: DataReferenceResource[];
   onFileSelect?: (id: string) => void;
@@ -215,18 +221,24 @@ function MessageRenderer({
         </figure>
       );
     case "file":
-      return <FileBlock {...block} onPreview={onFileSelect} onDownload={onFileDownload} />;
+      return <FileBlock {...block} file={resources?.get(block.id)} onLibraryToggle={onLibraryToggle} onPreview={onFileSelect} onDownload={onFileDownload} />;
   }
 }
 
 export function AssistantMessage({
   message,
+  resources,
+  onLibraryToggle,
+  run,
   availableResources,
   onRetry,
   onFileSelect,
   onFileDownload,
 }: {
   message: AssistantMessageType;
+  resources?: Map<string, ContextFile>;
+  onLibraryToggle?: (file: ContextFile) => Promise<void>;
+  run?: AgentRunDto;
   availableResources?: DataReferenceResource[];
   onRetry?: (message: AssistantMessageType) => void;
   onFileSelect?: (id: string) => void;
@@ -264,7 +276,7 @@ export function AssistantMessage({
       </div>
       <div className="min-w-0 max-w-3xl flex-1">
         {message.trace?.length ? (
-          <AgentTrace steps={message.trace} onResourceSelect={onFileSelect} />
+          <AgentTrace steps={message.trace} run={run} isStreaming={isRunning} onResourceSelect={onFileSelect} />
         ) : null}
 
         <div aria-live={isRunning ? "polite" : undefined} className="space-y-3">
@@ -274,6 +286,8 @@ export function AssistantMessage({
               <MessageRenderer
                 key={`${message.id}-${index}`}
                 block={block}
+                resources={resources}
+                onLibraryToggle={onLibraryToggle}
                 isStreaming={isRunning && isLastBlock}
                 availableResources={resolvedResources}
                 onFileSelect={onFileSelect}

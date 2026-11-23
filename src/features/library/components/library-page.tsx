@@ -1,16 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3,
+  ArrowRight,
   Bookmark,
+  Check,
+  ChevronDown,
+  ChevronLeft,
   Code2,
   Database,
   Download,
   Eye,
   FileImage,
   FileText,
+  Folder,
   Grid2X2,
   Layers3,
   List,
@@ -21,6 +26,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FilePreviewSidebar, type ContextFile } from "@/features/context-sidebar";
+import { ShareWorkspaceDialog } from "@/features/workspaces/components/share-workspace-dialog";
 import { formatBytes } from "@/features/context-sidebar/resource-utils";
 import {
   downloadResource,
@@ -31,12 +37,17 @@ import {
   type LibraryResource,
 } from "@/lib/api";
 
+const categoryStyle = {
+  dataset: { icon: Database, color: "text-sage", tint: "from-emerald-300/[0.085]" },
+  code: { icon: Code2, color: "text-violet-400", tint: "from-violet-300/[0.12]" },
+  report: { icon: FileText, color: "text-yellow-400", tint: "from-yellow-300/[0.095]" },
+  visual: { icon: FileImage, color: "text-blue-400", tint: "from-blue-300/[0.16]" },
+  other: { icon: FileText, color: "text-muted-foreground", tint: "from-white/[0.045]" },
+} satisfies Record<LibraryResource["library_category"], { icon: typeof Database; color: string; tint: string }>;
+
 function ResourceIcon({ item }: { item: LibraryResource }) {
-  if (item.resource_type === "dataset") return <Database className="size-5 text-sage" />;
-  if ("kind" in item && (item.kind === "image" || item.kind === "chart"))
-    return <FileImage className="size-5 text-sky-400" />;
-  if (item.library_category === "code") return <Code2 className="size-5 text-violet-400" />;
-  return <FileText className="size-5 text-amber-400" />;
+  const { icon: Icon, color } = categoryStyle[item.library_category];
+  return <Icon className={`size-5 ${color}`} />;
 }
 
 type LibraryView = "grid" | "list";
@@ -86,28 +97,30 @@ function categoryLabel(category: LibraryResource["library_category"]) {
           : "File";
 }
 
-function LibraryThumbnail({ item }: { item: LibraryResource }) {
-  const isImage = item.resource_type === "artifact" && "kind" in item && (item.kind === "image" || item.kind === "chart");
+function LibraryThumbnail({ item, compact }: { item: LibraryResource; compact: boolean }) {
+  const isImage = item.resource_type === "artifact" && (item.kind === "image" || item.kind === "chart");
+  const isPdf = item.mime_type === "application/pdf";
   const isCode = item.library_category === "code";
+  const previewUrl = isPdf && item.preview_url ? `${item.preview_url}?thumbnail=true` : item.preview_url;
+  const { data: blob } = useQuery({
+    queryKey: ["library-thumbnail", previewUrl],
+    queryFn: () => getResourcePreview(previewUrl!),
+    enabled: Boolean(previewUrl && (isPdf || isImage)),
+    staleTime: 60_000,
+    retry: false,
+  });
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [codePreview, setCodePreview] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isImage || !item.preview_url) return;
-    let active = true;
-    let objectUrl: string | null = null;
-    void getResourcePreview(item.preview_url)
-      .then((blob) => {
-        if (!active) return;
-        objectUrl = URL.createObjectURL(blob);
-        setImageUrl(objectUrl);
-      })
-      .catch(() => setImageUrl(null));
-    return () => {
-      active = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [isImage, item.preview_url]);
+    if (!blob) {
+      setImageUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    setImageUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [blob]);
 
   useEffect(() => {
     if (!isCode || !item.preview_url) return;
@@ -115,7 +128,7 @@ function LibraryThumbnail({ item }: { item: LibraryResource }) {
     setCodePreview(null);
     void getResourcePreviewText(item.preview_url)
       .then((text) => {
-        if (active) setCodePreview(text.split("\n").slice(0, 9).join("\n"));
+        if (active) setCodePreview(text.slice(0, 2000).split("\n").slice(0, 9).join("\n"));
       })
       .catch(() => {
         if (active) setCodePreview(null);
@@ -126,43 +139,41 @@ function LibraryThumbnail({ item }: { item: LibraryResource }) {
   }, [isCode, item.preview_url]);
 
   // eslint-disable-next-line @next/next/no-img-element
-  if (isImage && imageUrl) return <img src={imageUrl} alt="" className="size-full object-cover" />;
+  if ((isImage || isPdf) && imageUrl) return <img src={imageUrl} alt="" className="size-full object-cover object-top" />;
   if (item.resource_type === "dataset") {
     const columns = item.columns?.slice(0, 3) ?? [];
-    const rows = item.preview_rows?.slice(0, 4) ?? [];
+    const rowCount = compact ? 2 : 4;
+    const gridStyle = { gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` };
     return (
-      <div className="size-full overflow-hidden bg-[linear-gradient(145deg,oklch(0.23_0.025_155),oklch(0.16_0.01_260))] p-3 text-[9px] text-foreground/75">
-        <div className="mb-2 flex items-center gap-1.5 text-sage">
-          <Database className="size-3.5" />
-          <span className="font-medium tracking-wide">DATASET</span>
-        </div>
+      <div className={`flex size-full flex-col items-start overflow-hidden text-foreground/80 ${compact ? "justify-center p-1.5" : "p-3"}`}>
+        {!compact && <div className="mb-2 flex items-center gap-1.5 text-[9px] uppercase text-sage"><Database className="size-3.5" /> Dataset</div>}
         {columns.length ? (
-          <div className="overflow-hidden rounded border border-white/10">
-            <div className="grid grid-cols-3 bg-black/20 text-[8px] font-medium text-foreground/80">
+          <div className="w-full overflow-hidden rounded-md border border-white/10 bg-background/60">
+            <div style={gridStyle} className={`grid bg-white/[0.035] font-medium ${compact ? "text-[8px]" : "text-[10px]"}`}>
               {columns.map((column, index) => (
                 <span
                   key={`${column.name}-${index}`}
-                  className="truncate border-r border-white/10 px-1 py-1 last:border-r-0"
+                  className="truncate px-2 py-1"
                 >
                   {column.name}
                 </span>
               ))}
             </div>
-            {rows.map((row, rowIndex) => (
-              <div key={rowIndex} className="grid grid-cols-3 border-t border-white/10">
+            {Array.from({ length: rowCount }, (_, rowIndex) => (
+              <div key={rowIndex} style={gridStyle} className={`grid border-t border-white/[0.06] ${compact ? "text-[8px]" : "text-[10px]"}`}>
                 {columns.map((column, columnIndex) => (
                   <span
                     key={`${column.name}-${columnIndex}`}
-                    className="truncate border-r border-white/10 px-1 py-1 last:border-r-0"
+                    className="truncate px-2 py-1"
                   >
-                    {row[columnIndex] == null ? "—" : String(row[columnIndex])}
+                    {item.preview_rows?.[rowIndex] ? String(item.preview_rows[rowIndex][columnIndex] ?? "—") : "\u00a0"}
                   </span>
                 ))}
               </div>
             ))}
           </div>
         ) : (
-          <div className="grid h-[calc(100%-1.25rem)] place-items-center">
+          <div className="grid min-h-20 w-full place-items-center">
             <Database className="size-9 text-sage/70" />
           </div>
         )}
@@ -171,17 +182,19 @@ function LibraryThumbnail({ item }: { item: LibraryResource }) {
   }
   if (isCode && codePreview) {
     return (
-      <div className="size-full overflow-hidden bg-[linear-gradient(145deg,oklch(0.18_0.015_260),oklch(0.12_0.005_260))] p-3 font-mono text-[10px] leading-5 text-slate">
-        <div className="mb-2 flex items-center gap-1.5 font-sans text-[9px] font-medium uppercase tracking-[0.12em] text-violet-300">
-          <Code2 className="size-3.5" />
+      <div className="size-full overflow-hidden p-3 font-mono text-[10px] leading-5 text-slate">
+        <div className="mb-2 flex items-center gap-1.5 font-sans text-[9px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+          <Code2 className={`size-3.5 ${categoryStyle.code.color}`} />
           Code preview
         </div>
-        <pre className="whitespace-pre-wrap break-words text-foreground/75">{codePreview}</pre>
+        <pre className="whitespace-pre-wrap break-words">
+          <SyntaxHighlightedCode code={codePreview} language={item.name.split(".").pop() || "text"} />
+        </pre>
       </div>
     );
   }
   return (
-    <div className="grid size-full place-items-center bg-[linear-gradient(145deg,oklch(0.2_0.015_260),oklch(0.14_0.005_260))] text-muted-foreground">
+    <div className="grid size-full place-items-center text-muted-foreground">
       <div className="grid size-14 place-items-center rounded-xl border bg-background/60">
         <ResourceIcon item={item} />
       </div>
@@ -193,6 +206,7 @@ export function LibraryPage() {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [ownership, setOwnership] = useState<Ownership>("all");
   const [view, setView] = useState<LibraryView>("grid");
   const [preview, setPreview] = useState<ContextFile | null>(null);
   const [favorites, setFavorites] = useState<Set<string>>(() => getStoredFavorites());
@@ -223,6 +237,8 @@ export function LibraryPage() {
 
   const items = useMemo(() => {
     const search = query.trim().toLowerCase();
+    // The Library only holds the signed-in user's own saves; nothing is shared into it yet.
+    if (ownership === "shared") return [];
     return (libraryQuery.data?.items ?? []).filter((item) => {
       const matchesSearch = !search || item.name.toLowerCase().includes(search);
       const isFav = favorites.has(item.id) || Boolean((item as { saved?: boolean }).saved);
@@ -238,22 +254,15 @@ export function LibraryPage() {
 
   return (
     <>
-      <section className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
+      <section className="mx-auto w-full max-w-[1280px] px-4 py-8 sm:px-6 lg:px-8 lg:py-9">
         <header className="mb-6 flex items-start justify-between gap-5">
           <div className="flex items-start gap-3.5">
             <div className="grid size-11 shrink-0 place-items-center rounded-xl border bg-raised text-slate">
-              <Bookmark className="size-5" strokeWidth={1.5} />
+              <Layers3 className="size-6" strokeWidth={1.5} />
             </div>
             <div>
-              <div className="flex items-center gap-2.5">
-                <h1 className="text-xl font-semibold tracking-tight">Library</h1>
-                <span className="rounded border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-muted-foreground">
-                  Saved Assets
-                </span>
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Datasets, charts, and reports saved across your analyses
-              </p>
+              <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
+              <p className="mt-1 text-sm text-muted-foreground">Files saved from your analyses.</p>
             </div>
           </div>
         </header>
@@ -270,7 +279,7 @@ export function LibraryPage() {
                 type="button"
                 role="tab"
                 aria-selected={filter === id}
-                onClick={() => setFilter(id)}
+                onClick={() => { setFilter(id); setOpenFolderId(null); }}
                 className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors ${
                   filter === id
                     ? "bg-raised text-foreground shadow-sm"
@@ -293,15 +302,16 @@ export function LibraryPage() {
             ))}
           </div>
 
-          <div className="flex items-center gap-2">
-            <label className="relative block w-full sm:w-72">
+          <div className="flex min-w-0 items-center gap-2">
+            <OwnershipFilter value={ownership} onChange={setOwnership} />
+            <label className="relative block min-w-0 w-full sm:w-72">
               <span className="sr-only">Search library</span>
               <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search library..."
-                className="h-9 w-full rounded-md border bg-surface pl-9 pr-9 text-xs outline-none placeholder:text-muted-foreground focus:border-border-strong"
+                className="h-10 w-full rounded-md border bg-surface pl-9 pr-9 text-xs outline-none placeholder:text-muted-foreground focus:border-border-strong"
               />
               {query && (
                 <button
@@ -348,7 +358,7 @@ export function LibraryPage() {
             className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
           >
             {[0, 1, 2, 3, 4, 5].map((key) => (
-              <div key={key} className="aspect-[5/4] animate-pulse rounded-xl border bg-surface" />
+              <div key={key} className="aspect-[20/21] animate-pulse rounded-xl border bg-surface" />
             ))}
           </div>
         ) : items.length ? (
@@ -492,6 +502,15 @@ export function LibraryPage() {
           </p>
         )}
       </section>
+      {sharingFolder ? (
+        <ShareWorkspaceDialog
+          open
+          onOpenChange={(open) => { if (!open) setSharingFolder(null); }}
+          workspaceId={sharingFolder.id}
+          workspaceName={sharingFolder.name}
+          subject="folder"
+        />
+      ) : null}
       {preview && (
         <div
           className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs"

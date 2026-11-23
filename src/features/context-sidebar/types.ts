@@ -59,7 +59,6 @@ export function isDatasetResource(file: ContextFile): file is DatasetResource {
 }
 
 export interface ContextSidebarProps {
-  chatId: string;
   workspaceId: string | null;
   datasets: DatasetResource[];
   artifacts: ArtifactResource[];

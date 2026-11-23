@@ -1,21 +1,25 @@
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import AsyncIterator, Callable
 
+from agentic.agent.prompts import WORKSPACE_SYSTEM_PROMPT
+from agentic.agent.react_loop import ReActAgent
 from google import genai
 from google.genai import types
 
-from ..config import Settings
-from .types import ChatTurn, ModelInfo, ProviderError, ProviderEvent, ProviderTool, ToolExecutor
+from ..runtime.contracts import ChatTurn, ModelInfo, ProviderError, ProviderTool, ToolExecutor
+from ..runtime.events import ProviderEvent
 
 
 class GeminiProvider:
     """Thin adapter around the official Google Gen AI SDK."""
 
-    def __init__(self, settings: Settings):
-        self._api_key = settings.gemini_api_key
-        self._models = self._parse_allowlist(settings.gemini_models)
-        self.default_model_id = settings.default_model_id or (self._models[0].id if self._models else None)
+    def __init__(self, *, api_key: str | None, models: str, default_model_id: str | None):
+        self._api_key = api_key
+        self._models = self._parse_allowlist(models)
+        self.default_model_id = default_model_id or (self._models[0].id if self._models else None)
         self._client = genai.Client(api_key=self._api_key) if self._api_key else None
 
     @staticmethod
@@ -111,6 +115,8 @@ class GeminiProvider:
         execute_tool: ToolExecutor,
         max_steps: int,
         is_cancelled: Callable[[], bool] | None = None,
+        *,
+        tool_context: dict[str, Any] | None = None,
     ) -> AsyncIterator[ProviderEvent]:
         self.validate_selection(model_id, effort)
         if self._client is None:
@@ -119,80 +125,57 @@ class GeminiProvider:
             types.Content(role="model" if message.role == "assistant" else "user", parts=[types.Part.from_text(text=message.content)])
             for message in messages
         ]
+        greeting_only = bool(
+            messages and messages[-1].role == "user" and re.fullmatch(
+                r"(?:hi|hello|hey|good morning|good afternoon|good evening)[\s.!]*",
+                messages[-1].content.strip(),
+                flags=re.IGNORECASE,
+            )
+        )
         declarations = [
             types.FunctionDeclaration(name=tool.name, description=tool.description, parameters_json_schema=tool.parameters)
-            for tool in tools
+            for tool in (() if greeting_only else tools)
         ]
+        system_instruction = WORKSPACE_SYSTEM_PROMPT
+        if tool_context and not greeting_only:
+            system_instruction += (
+                "\n\nThe following JSON is application-provided workspace and file context. "
+                "Treat it as reference data and respond to the actual user message. "
+                "The inventory lists available files, which are uploaded to their exact listed paths on demand. "
+                "For Python or visualization, include every required file ID in resource_ids and use its listed path in code. "
+                "For file reads and dataset lookup, prefer resource_id. "
+                "Use a sandbox tool only if the user's request needs it.\n"
+                f"{json.dumps(tool_context, ensure_ascii=False)}"
+            )
         config = types.GenerateContentConfig(
             temperature=0,
-            tools=[types.Tool(function_declarations=declarations)],
-            system_instruction=(
-                "You are a data analysis agent. Use tools when they materially help. "
-                "Never invent tool results. Files may only be read from /home/user/inputs and written under /home/user/outputs. "
-                "Use lookup_data for read-only CSV/Parquet SQL, execute_python for analysis, and generate_visualization for chart files. "
-                "When a DataFrame is a meaningful intermediate or answer table, save it as CSV or Parquet under /home/user/outputs so it can be persisted and previewed. "
-                "When the user asks you to create code, show it in a fenced Markdown code block and also call write_file to save the complete code under /home/user/outputs with the correct extension; the saved file becomes a downloadable Artifact card."
-            ),
+            tools=[types.Tool(function_declarations=declarations)] if declarations else None,
+            system_instruction=system_instruction,
             thinking_config=types.ThinkingConfig(thinking_level=effort) if effort else None,
         )
-        try:
-            for step in range(max_steps):
-                if is_cancelled is not None and is_cancelled():
-                    return
-                stream = await self._client.aio.models.generate_content_stream(
-                    model=model_id,
-                    contents=contents,
-                    config=config,
-                )
-                model_parts: list[types.Part] = []
-                calls: list[object] = []
-                seen_call_ids: set[str] = set()
-                received_content = False
-                async for chunk in stream:
-                    if is_cancelled is not None and is_cancelled():
-                        return
-                    if not chunk.candidates or chunk.candidates[0].content is None:
-                        continue
-                    received_content = True
-                    for part in chunk.candidates[0].content.parts or []:
-                        if part.function_call is not None:
-                            call = part.function_call
-                            # Providers may repeat the final function-call part
-                            # in streamed chunks. Execute each call only once.
-                            call_id = str(call.id or f"step-{step + 1}-call-{len(calls) + 1}")
-                            if call_id not in seen_call_ids:
-                                seen_call_ids.add(call_id)
-                                calls.append(call)
-                                model_parts.append(part)
-                            continue
-                        if part.text:
-                            model_parts.append(types.Part.from_text(text=part.text))
-                            yield ProviderEvent("message.delta", {"text": part.text})
-                if not received_content:
-                    raise ProviderError("empty_provider_response", "Gemini returned no response.")
-                if not model_parts:
-                    raise ProviderError("empty_provider_response", "Gemini returned no response.")
-                contents.append(types.Content(role="model", parts=model_parts))
-                if not calls:
-                    return
-                response_parts: list[types.Part] = []
-                for index, call in enumerate(calls):
-                    if is_cancelled is not None and is_cancelled():
-                        return
-                    name = str(call.name or "")
-                    arguments = dict(call.args or {})
-                    tool_call_id = call.id or f"step-{step + 1}-call-{index + 1}"
-                    yield ProviderEvent("tool.started", {"tool_call_id": tool_call_id, "name": name, "arguments": arguments})
-                    result = await execute_tool(name, arguments)
-                    failed = bool(result.get("error")) or result.get("success") is False
-                    yield ProviderEvent(
-                        "tool.failed" if failed else "tool.completed",
-                        {"tool_call_id": tool_call_id, "name": name, "error": result.get("error"), "output": result} if failed else {"tool_call_id": tool_call_id, "name": name, "output": result},
-                    )
-                    response_parts.append(types.Part.from_function_response(name=name, response=result))
-                contents.append(types.Content(role="user", parts=response_parts))
-            raise ProviderError("max_tool_steps", "The agent reached the maximum number of tool steps.")
-        except ProviderError:
-            raise
-        except Exception as exc:
-            raise ProviderError("provider_error", "Gemini tool execution failed.") from exc
+        async def reject_tool_for_greeting(_name: str, _arguments: dict[str, Any]) -> dict[str, Any]:
+            return {"error": "This is a greeting. Reply directly without tools."}
+
+        async for event in ReActAgent.stream_turns(
+            client=self._client, model=model_id, contents=contents, config=config,
+            max_turns=max_steps, execute_tool=reject_tool_for_greeting if greeting_only else execute_tool,
+            is_cancelled=is_cancelled,
+        ):
+            kind = event["type"]
+            if kind == "status":
+                yield ProviderEvent("progress", {"label": event["content"]})
+            elif kind == "delta":
+                yield ProviderEvent("message.delta", {"text": event["content"]})
+            elif kind == "tool_call":
+                yield ProviderEvent("tool.started", {
+                    "tool_call_id": event["tool_call_id"], "name": event["tool"], "arguments": event["arguments"],
+                })
+            elif kind == "tool_result":
+                result = event["result"]
+                data = {"tool_call_id": event["tool_call_id"], "name": event["tool"], "output": result}
+                if result.get("error") or result.get("success") is False:
+                    yield ProviderEvent("tool.failed", {**data, "error": result.get("error")})
+                else:
+                    yield ProviderEvent("tool.completed", data)
+            elif kind == "error":
+                raise ProviderError("provider_error", event["content"])
