@@ -1175,9 +1175,22 @@
     "pinned": false,
     "pinned_by": [],
     "preview": {
-     "charts": [
+     "tiles": [
       {
-       "kind": "line",
+       "span": 1,
+       "title": "Countries and years",
+       "type": "kpi",
+       "value": "139"
+      },
+      {
+       "max": "70.9",
+       "ratio": 0.827,
+       "span": 1,
+       "title": "Average colorectal survival %",
+       "type": "gauge",
+       "value": "58.66"
+      },
+      {
        "labels": [
         "1995",
         "1996",
@@ -1206,10 +1219,11 @@
         12.54,
         12.91
        ],
-       "title": "Lung cancer survival by year"
+       "span": 3,
+       "title": "Lung cancer survival by year",
+       "type": "line"
       },
       {
-       "kind": "area",
        "labels": [
         "1995",
         "1996",
@@ -1238,25 +1252,70 @@
         58.66,
         59.57
        ],
-       "title": "Colorectal survival by year"
-      }
-     ],
-     "kpis": [
-      {
-       "label": "Countries and years",
-       "value": "139"
+       "span": 2,
+       "title": "Colorectal survival by year",
+       "type": "area"
       },
       {
-       "label": "Average colorectal survival %",
-       "value": "58.66"
+       "labels": [
+        "Australia",
+        "Canada",
+        "New Zealand",
+        "Norway",
+        "Denmark",
+        "Ireland",
+        "United Kingdom"
+       ],
+       "series": [
+        64.67,
+        62.27,
+        60.8,
+        60.47,
+        55.38,
+        54.0,
+        52.77
+       ],
+       "span": 1,
+       "title": "Colorectal survival by country",
+       "type": "hbar"
+      },
+      {
+       "labels": [
+        "44.2\u201346.87",
+        "46.87\u201349.54",
+        "49.54\u201352.21",
+        "52.21\u201354.88",
+        "54.88\u201357.55",
+        "57.55\u201360.22",
+        "60.22\u201362.89",
+        "62.89\u201365.56",
+        "65.56\u201368.23",
+        "68.23\u201370.9"
+       ],
+       "series": [
+        3.0,
+        9.0,
+        14.0,
+        8.0,
+        17.0,
+        28.0,
+        26.0,
+        18.0,
+        9.0,
+        7.0
+       ],
+       "span": 3,
+       "title": "Spread of colorectal survival",
+       "type": "histogram"
       }
-     ]
+     ],
+     "total": 6
     },
     "refresh_minutes": 0,
     "shares": [],
     "slicers": [],
     "status": "published",
-    "updated_at": "2026-11-23T20:16:52.220626",
+    "updated_at": "2026-11-23T20:23:39.888141",
     "widgets": [
      {
       "agg": "count",
@@ -1272,7 +1331,7 @@
       "id": "w-2",
       "span": 1,
       "title": "Average colorectal survival %",
-      "type": "kpi",
+      "type": "gauge",
       "y": "Net survival rates of patients with colorectal cancer after five years"
      },
      {
@@ -1289,7 +1348,7 @@
       "agg": "avg",
       "dataset_id": "d0c7dc6b-c894-490e-8ef0-928d8004aae9",
       "id": "w-5",
-      "span": 3,
+      "span": 2,
       "title": "Colorectal survival by year",
       "type": "area",
       "x": "Year",
@@ -1299,11 +1358,20 @@
       "agg": "avg",
       "dataset_id": "d0c7dc6b-c894-490e-8ef0-928d8004aae9",
       "id": "w-3",
-      "span": 2,
+      "span": 1,
       "title": "Colorectal survival by country",
-      "type": "bar",
+      "type": "hbar",
       "x": "Entity",
       "y": "Net survival rates of patients with colorectal cancer after five years"
+     },
+     {
+      "agg": "count",
+      "dataset_id": "d0c7dc6b-c894-490e-8ef0-928d8004aae9",
+      "id": "w-6",
+      "span": 3,
+      "title": "Spread of colorectal survival",
+      "type": "histogram",
+      "x": "Net survival rates of patients with colorectal cancer after five years"
      }
     ]
    },
@@ -1319,23 +1387,28 @@
     "pinned": false,
     "pinned_by": [],
     "preview": {
-     "charts": [
+     "tiles": [
       {
-       "kind": "donut",
-       "labels": [
-        "Enterprise",
-        "SMB",
-        "Startup"
-       ],
-       "series": [
-        2.0,
-        2.0,
-        1.0
-       ],
-       "title": "Customers by segment"
+       "span": 1,
+       "title": "Customers",
+       "type": "kpi",
+       "value": "5"
       },
       {
-       "kind": "bar",
+       "span": 1,
+       "title": "Total spend",
+       "type": "kpi",
+       "value": "16,850"
+      },
+      {
+       "max": "21",
+       "ratio": 0.505,
+       "span": 1,
+       "title": "Average orders",
+       "type": "gauge",
+       "value": "10.6"
+      },
+      {
        "labels": [
         "Delta",
         "Acme",
@@ -1350,19 +1423,46 @@
         900.0,
         450.0
        ],
-       "title": "Spend by customer"
-      }
-     ],
-     "kpis": [
-      {
-       "label": "Customers",
-       "value": "5"
+       "span": 2,
+       "title": "Spend by customer",
+       "type": "hbar"
       },
       {
-       "label": "Total spend",
-       "value": "16,850"
+       "labels": [
+        "Enterprise",
+        "SMB",
+        "Startup"
+       ],
+       "series": [
+        2.0,
+        2.0,
+        1.0
+       ],
+       "span": 1,
+       "title": "Customers by segment",
+       "type": "pie"
+      },
+      {
+       "labels": [
+        "Delta",
+        "Acme",
+        "Gamma",
+        "Beta",
+        "Epsilon"
+       ],
+       "series": [
+        21.0,
+        14.0,
+        9.0,
+        6.0,
+        3.0
+       ],
+       "span": 3,
+       "title": "Orders by customer",
+       "type": "radar"
       }
-     ]
+     ],
+     "total": 6
     },
     "refresh_minutes": 0,
     "shares": [
@@ -1375,7 +1475,7 @@
      "segment"
     ],
     "status": "draft",
-    "updated_at": "2026-11-23T20:16:52.232656",
+    "updated_at": "2026-11-23T20:23:39.903603",
     "widgets": [
      {
       "agg": "count",
@@ -1395,6 +1495,25 @@
       "y": "spend"
      },
      {
+      "agg": "avg",
+      "dataset_id": "2cdb89b5-bbb6-4a17-a02d-aad624a8ac61",
+      "id": "w-5",
+      "span": 1,
+      "title": "Average orders",
+      "type": "gauge",
+      "y": "orders"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "2cdb89b5-bbb6-4a17-a02d-aad624a8ac61",
+      "id": "w-3",
+      "span": 2,
+      "title": "Spend by customer",
+      "type": "hbar",
+      "x": "customer",
+      "y": "spend"
+     },
+     {
       "agg": "count",
       "dataset_id": "2cdb89b5-bbb6-4a17-a02d-aad624a8ac61",
       "id": "w-4",
@@ -1406,12 +1525,12 @@
      {
       "agg": "sum",
       "dataset_id": "2cdb89b5-bbb6-4a17-a02d-aad624a8ac61",
-      "id": "w-3",
-      "span": 2,
-      "title": "Spend by customer",
-      "type": "bar",
+      "id": "w-6",
+      "span": 3,
+      "title": "Orders by customer",
+      "type": "radar",
       "x": "customer",
-      "y": "spend"
+      "y": "orders"
      }
     ]
    },
@@ -1427,9 +1546,28 @@
     "pinned": false,
     "pinned_by": [],
     "preview": {
-     "charts": [
+     "tiles": [
       {
-       "kind": "line",
+       "span": 1,
+       "title": "Patients",
+       "type": "kpi",
+       "value": "1,025"
+      },
+      {
+       "max": "564",
+       "ratio": 0.436,
+       "span": 1,
+       "title": "Average cholesterol",
+       "type": "gauge",
+       "value": "246"
+      },
+      {
+       "span": 1,
+       "title": "Average resting BP",
+       "type": "kpi",
+       "value": "131.61"
+      },
+      {
        "labels": [
         "52",
         "53",
@@ -1458,10 +1596,11 @@
         152.81,
         183.0
        ],
-       "title": "Max heart rate by age"
+       "span": 3,
+       "title": "Max heart rate by age",
+       "type": "line"
       },
       {
-       "kind": "bar",
        "labels": [
         "0",
         "1",
@@ -1474,23 +1613,41 @@
         242.2,
         237.06
        ],
-       "title": "Cholesterol by chest pain type"
+       "span": 1,
+       "title": "Cholesterol by chest pain type",
+       "type": "radar"
+      },
+      {
+       "labels": [
+        "29\u201333.8",
+        "33.8\u201338.6",
+        "38.6\u201343.4",
+        "43.4\u201348.2",
+        "48.2\u201353",
+        "53\u201357.8",
+        "57.8\u201362.6",
+        "62.6\u201367.4",
+        "67.4\u201372.2",
+        "72.2\u201377"
+       ],
+       "series": [
+        4.0,
+        39.0,
+        109.0,
+        125.0,
+        120.0,
+        205.0,
+        219.0,
+        149.0,
+        46.0,
+        9.0
+       ],
+       "span": 2,
+       "title": "Age spread",
+       "type": "histogram"
       }
      ],
-     "kpis": [
-      {
-       "label": "Patients",
-       "value": "1,025"
-      },
-      {
-       "label": "Average cholesterol",
-       "value": "246"
-      },
-      {
-       "label": "Average resting BP",
-       "value": "131.61"
-      }
-     ]
+     "total": 8
     },
     "refresh_minutes": 0,
     "shares": [],
@@ -1498,7 +1655,7 @@
      "sex"
     ],
     "status": "draft",
-    "updated_at": "2026-11-23T20:16:52.212567",
+    "updated_at": "2026-11-23T20:23:39.880028",
     "widgets": [
      {
       "agg": "count",
@@ -1514,7 +1671,7 @@
       "id": "w-2",
       "span": 1,
       "title": "Average cholesterol",
-      "type": "kpi",
+      "type": "gauge",
       "y": "chol"
      },
      {
@@ -1529,7 +1686,7 @@
      {
       "agg": "avg",
       "dataset_id": "ab717cbe-8289-4965-b36e-85439876624f",
-      "id": "w-6",
+      "id": "w-4",
       "span": 3,
       "title": "Max heart rate by age",
       "type": "line",
@@ -1539,17 +1696,36 @@
      {
       "agg": "avg",
       "dataset_id": "ab717cbe-8289-4965-b36e-85439876624f",
-      "id": "w-4",
-      "span": 2,
+      "id": "w-5",
+      "span": 1,
       "title": "Cholesterol by chest pain type",
-      "type": "bar",
+      "type": "radar",
       "x": "cp",
       "y": "chol"
      },
      {
       "agg": "count",
       "dataset_id": "ab717cbe-8289-4965-b36e-85439876624f",
-      "id": "w-5",
+      "id": "w-6",
+      "span": 2,
+      "title": "Age spread",
+      "type": "histogram",
+      "x": "age"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "ab717cbe-8289-4965-b36e-85439876624f",
+      "id": "w-7",
+      "span": 3,
+      "title": "Age vs max heart rate",
+      "type": "scatter",
+      "x": "age",
+      "y": "thalach"
+     },
+     {
+      "agg": "count",
+      "dataset_id": "ab717cbe-8289-4965-b36e-85439876624f",
+      "id": "w-8",
       "span": 1,
       "title": "Patients by sex",
       "type": "pie",
@@ -1558,327 +1734,39 @@
     ]
    },
    {
-    "created_at": "2026-11-23T20:04:19.991254",
+    "created_at": "2026-11-23T20:26:04.061290",
     "dataset_ids": [
-     "f9dcfa8e-9085-4d28-98df-1bb9c289c04b"
+     "f972714d-4069-4796-8dd0-213268bfd577"
     ],
-    "description": "Revenue, units and order counts across regions and categories.",
-    "id": "db-orders-revenue",
-    "name": "Orders & Revenue",
-    "owner_id": "user-you",
-    "pinned": false,
-    "pinned_by": [
-     "user-you"
-    ],
-    "preview": {
-     "charts": [
-      {
-       "kind": "donut",
-       "labels": [
-        "Support",
-        "Software",
-        "Hardware",
-        "Services"
-       ],
-       "series": [
-        1534.0,
-        1505.0,
-        1489.0,
-        1472.0
-       ],
-       "title": "Orders by category"
-      },
-      {
-       "kind": "bar",
-       "labels": [
-        "North",
-        "South",
-        "East",
-        "West"
-       ],
-       "series": [
-        2752864.0,
-        2736948.0,
-        2603180.0,
-        2590474.0
-       ],
-       "title": "Revenue by region"
-      }
-     ],
-     "kpis": [
-      {
-       "label": "Total orders",
-       "value": "6,000"
-      },
-      {
-       "label": "Revenue",
-       "value": "10.7M"
-      },
-      {
-       "label": "Units sold",
-       "value": "152,097"
-      }
-     ]
-    },
-    "refresh_minutes": 0,
-    "shares": [],
-    "slicers": [
-     "region",
-     "category"
-    ],
-    "status": "published",
-    "updated_at": "2026-11-23T20:16:52.184059",
-    "widgets": [
-     {
-      "agg": "count",
-      "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
-      "id": "w-1",
-      "span": 1,
-      "title": "Total orders",
-      "type": "kpi"
-     },
-     {
-      "agg": "sum",
-      "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
-      "id": "w-2",
-      "span": 1,
-      "title": "Revenue",
-      "type": "kpi",
-      "y": "revenue"
-     },
-     {
-      "agg": "sum",
-      "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
-      "id": "w-3",
-      "span": 1,
-      "title": "Units sold",
-      "type": "kpi",
-      "y": "units"
-     },
-     {
-      "agg": "count",
-      "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
-      "id": "w-5",
-      "span": 1,
-      "title": "Orders by category",
-      "type": "pie",
-      "x": "category"
-     },
-     {
-      "agg": "sum",
-      "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
-      "id": "w-4",
-      "span": 2,
-      "title": "Revenue by region",
-      "type": "bar",
-      "x": "region",
-      "y": "revenue"
-     },
-     {
-      "agg": "sum",
-      "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
-      "id": "w-6",
-      "span": 2,
-      "title": "Units by category",
-      "type": "bar",
-      "x": "category",
-      "y": "units"
-     },
-     {
-      "agg": "sum",
-      "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
-      "id": "w-7",
-      "span": 1,
-      "title": "Revenue by category",
-      "type": "pie",
-      "x": "category",
-      "y": "revenue"
-     }
-    ]
-   },
-   {
-    "created_at": "2026-11-23T20:04:20.013974",
-    "dataset_ids": [
-     "70e919d6-23b3-42b9-be96-eb8c1d29801d"
-    ],
-    "description": "Who is affected: age, glucose, work type and smoking status.",
-    "id": "db-stroke-risk",
-    "name": "Stroke Risk Overview",
+    "description": "Fed from fake_employees.csv in Google Drive. The server checks the file every 5 minutes and updates this dashboard when it changes.",
+    "id": "db-live-drive-workforce",
+    "name": "Live: Workforce (Google Drive)",
     "owner_id": "user-you",
     "pinned": false,
     "pinned_by": [],
     "preview": {
-     "charts": [
+     "tiles": [
       {
-       "kind": "donut",
-       "labels": [
-        "never smoked",
-        "Unknown",
-        "formerly smoked",
-        "smokes"
-       ],
-       "series": [
-        1892.0,
-        1544.0,
-        885.0,
-        789.0
-       ],
-       "title": "Smoking status"
+       "span": 1,
+       "title": "Employees",
+       "type": "kpi",
+       "value": "12"
       },
       {
-       "kind": "bar",
-       "labels": [
-        "Private",
-        "Self-employed",
-        "children",
-        "Govt_job",
-        "Never_worked"
-       ],
-       "series": [
-        2925.0,
-        819.0,
-        687.0,
-        657.0,
-        22.0
-       ],
-       "title": "Patients by work type"
-      }
-     ],
-     "kpis": [
-      {
-       "label": "Patients",
-       "value": "5,110"
+       "span": 1,
+       "title": "Average salary",
+       "type": "kpi",
+       "value": "72,000"
       },
       {
-       "label": "Average glucose",
-       "value": "106.15"
+       "max": "10",
+       "ratio": 0.525,
+       "span": 1,
+       "title": "Average experience (yrs)",
+       "type": "gauge",
+       "value": "5.25"
       },
       {
-       "label": "Stroke cases",
-       "value": "249"
-      }
-     ]
-    },
-    "refresh_minutes": 0,
-    "shares": [],
-    "slicers": [
-     "gender",
-     "work_type"
-    ],
-    "status": "published",
-    "updated_at": "2026-11-23T20:16:52.201761",
-    "widgets": [
-     {
-      "agg": "count",
-      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
-      "id": "w-1",
-      "span": 1,
-      "title": "Patients",
-      "type": "kpi"
-     },
-     {
-      "agg": "avg",
-      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
-      "id": "w-2",
-      "span": 1,
-      "title": "Average glucose",
-      "type": "kpi",
-      "y": "avg_glucose_level"
-     },
-     {
-      "agg": "sum",
-      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
-      "id": "w-3",
-      "span": 1,
-      "title": "Stroke cases",
-      "type": "kpi",
-      "y": "stroke"
-     },
-     {
-      "agg": "count",
-      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
-      "id": "w-5",
-      "span": 1,
-      "title": "Smoking status",
-      "type": "pie",
-      "x": "smoking_status"
-     },
-     {
-      "agg": "count",
-      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
-      "id": "w-4",
-      "span": 2,
-      "title": "Patients by work type",
-      "type": "bar",
-      "x": "work_type"
-     },
-     {
-      "agg": "avg",
-      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
-      "id": "w-6",
-      "span": 2,
-      "title": "Average glucose by work type",
-      "type": "bar",
-      "x": "work_type",
-      "y": "avg_glucose_level"
-     },
-     {
-      "agg": "sum",
-      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
-      "id": "w-7",
-      "span": 1,
-      "title": "Stroke cases by gender",
-      "type": "pie",
-      "x": "gender",
-      "y": "stroke"
-     }
-    ]
-   },
-   {
-    "created_at": "2026-11-23T20:04:20.041088",
-    "dataset_ids": [
-     "f972714d-4069-4796-8dd0-213268bfd577"
-    ],
-    "description": "Headcount, salary and experience by department.",
-    "id": "db-workforce",
-    "name": "Workforce Overview",
-    "owner_id": "user-shared",
-    "pinned": false,
-    "pinned_by": [
-     "user-you"
-    ],
-    "preview": {
-     "charts": [
-      {
-       "kind": "area",
-       "labels": [
-        "6",
-        "4",
-        "3",
-        "9",
-        "7",
-        "2",
-        "5",
-        "8",
-        "10",
-        "1"
-       ],
-       "series": [
-        92000.0,
-        64000.0,
-        58500.0,
-        105000.0,
-        71000.0,
-        45000.0,
-        74500.0,
-        98000.0,
-        76000.0,
-        47000.0
-       ],
-       "title": "Average salary by experience"
-      },
-      {
-       "kind": "bar",
        "labels": [
         "Engineering",
         "Finance",
@@ -1893,31 +1781,96 @@
         60000.0,
         46000.0
        ],
-       "title": "Average salary by department"
+       "span": 2,
+       "title": "Average salary by department",
+       "type": "hbar"
+      },
+      {
+       "labels": [
+        "Bengaluru",
+        "Mumbai",
+        "Delhi",
+        "Pune",
+        "Chennai",
+        "Hyderabad"
+       ],
+       "series": [
+        3.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        1.0
+       ],
+       "span": 1,
+       "title": "Headcount by location",
+       "type": "pie"
+      },
+      {
+       "points": [
+        [
+         6.0,
+         92000.0
+        ],
+        [
+         4.0,
+         64000.0
+        ],
+        [
+         3.0,
+         58000.0
+        ],
+        [
+         9.0,
+         105000.0
+        ],
+        [
+         7.0,
+         71000.0
+        ],
+        [
+         2.0,
+         45000.0
+        ],
+        [
+         5.0,
+         62000.0
+        ],
+        [
+         8.0,
+         98000.0
+        ],
+        [
+         3.0,
+         59000.0
+        ],
+        [
+         10.0,
+         76000.0
+        ],
+        [
+         1.0,
+         47000.0
+        ],
+        [
+         5.0,
+         87000.0
+        ]
+       ],
+       "span": 2,
+       "title": "Experience vs salary",
+       "type": "scatter"
       }
      ],
-     "kpis": [
-      {
-       "label": "Employees",
-       "value": "12"
-      },
-      {
-       "label": "Average salary",
-       "value": "72,000"
-      },
-      {
-       "label": "Average experience (yrs)",
-       "value": "5.25"
-      }
-     ]
+     "total": 8
     },
-    "refresh_minutes": 0,
+    "refresh_minutes": 5,
     "shares": [],
     "slicers": [
      "department"
     ],
     "status": "published",
-    "updated_at": "2026-11-23T20:16:52.226877",
+    "updated_at": "2026-11-23T20:26:04.061296",
     "widgets": [
      {
       "agg": "count",
@@ -1942,7 +1895,566 @@
       "id": "w-3",
       "span": 1,
       "title": "Average experience (yrs)",
+      "type": "gauge",
+      "y": "years_experience"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "f972714d-4069-4796-8dd0-213268bfd577",
+      "id": "w-4",
+      "span": 2,
+      "title": "Average salary by department",
+      "type": "hbar",
+      "x": "department",
+      "y": "salary"
+     },
+     {
+      "agg": "count",
+      "dataset_id": "f972714d-4069-4796-8dd0-213268bfd577",
+      "id": "w-5",
+      "span": 1,
+      "title": "Headcount by location",
+      "type": "pie",
+      "x": "location"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "f972714d-4069-4796-8dd0-213268bfd577",
+      "id": "w-6",
+      "span": 2,
+      "title": "Experience vs salary",
+      "type": "scatter",
+      "x": "years_experience",
+      "y": "salary"
+     },
+     {
+      "agg": "count",
+      "dataset_id": "f972714d-4069-4796-8dd0-213268bfd577",
+      "id": "w-7",
+      "span": 1,
+      "title": "Headcount by department",
+      "type": "funnel",
+      "x": "department"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "f972714d-4069-4796-8dd0-213268bfd577",
+      "id": "w-8",
+      "span": 1,
+      "title": "Employees",
+      "type": "table"
+     }
+    ]
+   },
+   {
+    "created_at": "2026-11-23T20:04:19.991254",
+    "dataset_ids": [
+     "f9dcfa8e-9085-4d28-98df-1bb9c289c04b"
+    ],
+    "description": "Revenue, units and order counts across regions and categories.",
+    "id": "db-orders-revenue",
+    "name": "Orders & Revenue",
+    "owner_id": "user-you",
+    "pinned": false,
+    "pinned_by": [
+     "user-you"
+    ],
+    "preview": {
+     "tiles": [
+      {
+       "span": 1,
+       "title": "Total orders",
+       "type": "kpi",
+       "value": "6,000"
+      },
+      {
+       "span": 1,
+       "title": "Revenue",
+       "type": "kpi",
+       "value": "10.7M"
+      },
+      {
+       "max": "50",
+       "ratio": 0.507,
+       "span": 1,
+       "title": "Average units per order",
+       "type": "gauge",
+       "value": "25.35"
+      },
+      {
+       "labels": [
+        "North",
+        "South",
+        "East",
+        "West"
+       ],
+       "series": [
+        2752864.0,
+        2736948.0,
+        2603180.0,
+        2590474.0
+       ],
+       "span": 2,
+       "title": "Revenue by region",
+       "type": "hbar"
+      },
+      {
+       "labels": [
+        "Support",
+        "Software",
+        "Hardware",
+        "Services"
+       ],
+       "series": [
+        1534.0,
+        1505.0,
+        1489.0,
+        1472.0
+       ],
+       "span": 1,
+       "title": "Orders by category",
+       "type": "pie"
+      },
+      {
+       "labels": [
+        "Support",
+        "Hardware",
+        "Software",
+        "Services"
+       ],
+       "series": [
+        38439.0,
+        38384.0,
+        37938.0,
+        37336.0
+       ],
+       "span": 2,
+       "title": "Units by category",
+       "type": "treemap"
+      }
+     ],
+     "total": 8
+    },
+    "refresh_minutes": 0,
+    "shares": [],
+    "slicers": [
+     "region",
+     "category"
+    ],
+    "status": "published",
+    "updated_at": "2026-11-23T20:23:39.842721",
+    "widgets": [
+     {
+      "agg": "count",
+      "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
+      "id": "w-1",
+      "span": 1,
+      "title": "Total orders",
+      "type": "kpi"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
+      "id": "w-2",
+      "span": 1,
+      "title": "Revenue",
       "type": "kpi",
+      "y": "revenue"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
+      "id": "w-3",
+      "span": 1,
+      "title": "Average units per order",
+      "type": "gauge",
+      "y": "units"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
+      "id": "w-4",
+      "span": 2,
+      "title": "Revenue by region",
+      "type": "hbar",
+      "x": "region",
+      "y": "revenue"
+     },
+     {
+      "agg": "count",
+      "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
+      "id": "w-5",
+      "span": 1,
+      "title": "Orders by category",
+      "type": "pie",
+      "x": "category"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
+      "id": "w-6",
+      "span": 2,
+      "title": "Units by category",
+      "type": "treemap",
+      "x": "category",
+      "y": "units"
+     },
+     {
+      "agg": "count",
+      "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
+      "id": "w-7",
+      "span": 1,
+      "title": "Spread of order revenue",
+      "type": "histogram",
+      "x": "revenue"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "f9dcfa8e-9085-4d28-98df-1bb9c289c04b",
+      "id": "w-8",
+      "span": 3,
+      "title": "Units vs revenue",
+      "type": "scatter",
+      "x": "units",
+      "y": "revenue"
+     }
+    ]
+   },
+   {
+    "created_at": "2026-11-23T20:04:20.013974",
+    "dataset_ids": [
+     "70e919d6-23b3-42b9-be96-eb8c1d29801d",
+     "f972714d-4069-4796-8dd0-213268bfd577"
+    ],
+    "description": "Who is affected: age, glucose, work type and smoking status.",
+    "id": "db-stroke-risk",
+    "name": "Stroke Risk Overview",
+    "owner_id": "user-you",
+    "pinned": false,
+    "pinned_by": [],
+    "preview": {
+     "tiles": [
+      {
+       "span": 1,
+       "title": "Patients",
+       "type": "kpi",
+       "value": "5,110"
+      },
+      {
+       "span": 1,
+       "title": "Stroke cases",
+       "type": "kpi",
+       "value": "249"
+      },
+      {
+       "max": "271.74",
+       "ratio": 0.391,
+       "span": 1,
+       "title": "Average glucose",
+       "type": "gauge",
+       "value": "106.15"
+      },
+      {
+       "labels": [
+        "Private",
+        "Self-employed",
+        "children",
+        "Govt_job",
+        "Never_worked"
+       ],
+       "series": [
+        2925.0,
+        819.0,
+        687.0,
+        657.0,
+        22.0
+       ],
+       "span": 2,
+       "title": "Patients by work type",
+       "type": "funnel"
+      },
+      {
+       "labels": [
+        "never smoked",
+        "Unknown",
+        "formerly smoked",
+        "smokes"
+       ],
+       "series": [
+        1892.0,
+        1544.0,
+        885.0,
+        789.0
+       ],
+       "span": 1,
+       "title": "Smoking status",
+       "type": "pie"
+      },
+      {
+       "labels": [
+        "0.08\u20138.27",
+        "8.27\u201316.46",
+        "16.46\u201324.66",
+        "24.66\u201332.85",
+        "32.85\u201341.04",
+        "41.04\u201349.23",
+        "49.23\u201357.42",
+        "57.42\u201365.62",
+        "65.62\u201373.81",
+        "73.81\u201382"
+       ],
+       "series": [
+        434.0,
+        362.0,
+        440.0,
+        484.0,
+        597.0,
+        583.0,
+        686.0,
+        559.0,
+        407.0,
+        558.0
+       ],
+       "span": 2,
+       "title": "Age distribution",
+       "type": "histogram"
+      }
+     ],
+     "total": 9
+    },
+    "refresh_minutes": 0,
+    "shares": [],
+    "slicers": [
+     "gender",
+     "work_type"
+    ],
+    "status": "published",
+    "updated_at": "2026-11-23T20:26:34.970047",
+    "widgets": [
+     {
+      "agg": "count",
+      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
+      "id": "w-1",
+      "span": 1,
+      "title": "Patients",
+      "type": "kpi"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
+      "id": "w-2",
+      "span": 1,
+      "title": "Stroke cases",
+      "type": "kpi",
+      "y": "stroke"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
+      "id": "w-3",
+      "span": 1,
+      "title": "Average glucose",
+      "type": "gauge",
+      "y": "avg_glucose_level"
+     },
+     {
+      "agg": "count",
+      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
+      "id": "w-4",
+      "span": 2,
+      "title": "Patients by work type",
+      "type": "funnel",
+      "x": "work_type"
+     },
+     {
+      "agg": "count",
+      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
+      "id": "w-5",
+      "span": 1,
+      "title": "Smoking status",
+      "type": "pie",
+      "x": "smoking_status"
+     },
+     {
+      "agg": "count",
+      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
+      "id": "w-6",
+      "span": 2,
+      "title": "Age distribution",
+      "type": "histogram",
+      "x": "age"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
+      "id": "w-7",
+      "span": 1,
+      "title": "Average glucose by work type",
+      "type": "radar",
+      "x": "work_type",
+      "y": "avg_glucose_level"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "70e919d6-23b3-42b9-be96-eb8c1d29801d",
+      "id": "w-8",
+      "span": 3,
+      "title": "Age vs glucose",
+      "type": "scatter",
+      "x": "age",
+      "y": "avg_glucose_level"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "f972714d-4069-4796-8dd0-213268bfd577",
+      "id": "w-mwtpsyy5-0",
+      "span": 2,
+      "title": "By name",
+      "type": "bar",
+      "x": "department",
+      "y": "department"
+     }
+    ]
+   },
+   {
+    "created_at": "2026-11-23T20:04:20.041088",
+    "dataset_ids": [
+     "f972714d-4069-4796-8dd0-213268bfd577"
+    ],
+    "description": "Headcount, salary and experience by department.",
+    "id": "db-workforce",
+    "name": "Workforce Overview",
+    "owner_id": "user-shared",
+    "pinned": false,
+    "pinned_by": [
+     "user-you"
+    ],
+    "preview": {
+     "tiles": [
+      {
+       "span": 1,
+       "title": "Employees",
+       "type": "kpi",
+       "value": "12"
+      },
+      {
+       "span": 1,
+       "title": "Average salary",
+       "type": "kpi",
+       "value": "72,000"
+      },
+      {
+       "max": "10",
+       "ratio": 0.525,
+       "span": 1,
+       "title": "Average experience (yrs)",
+       "type": "gauge",
+       "value": "5.25"
+      },
+      {
+       "labels": [
+        "6",
+        "4",
+        "3",
+        "9",
+        "7",
+        "2",
+        "5",
+        "8",
+        "10",
+        "1"
+       ],
+       "series": [
+        92000.0,
+        64000.0,
+        58500.0,
+        105000.0,
+        71000.0,
+        45000.0,
+        74500.0,
+        98000.0,
+        76000.0,
+        47000.0
+       ],
+       "span": 3,
+       "title": "Average salary by experience",
+       "type": "area"
+      },
+      {
+       "labels": [
+        "Engineering",
+        "Finance",
+        "Marketing",
+        "Sales",
+        "Support"
+       ],
+       "series": [
+        382000.0,
+        147000.0,
+        123000.0,
+        120000.0,
+        92000.0
+       ],
+       "span": 2,
+       "title": "Payroll by department",
+       "type": "treemap"
+      },
+      {
+       "labels": [
+        "Bengaluru",
+        "Mumbai",
+        "Delhi",
+        "Pune",
+        "Chennai",
+        "Hyderabad"
+       ],
+       "series": [
+        3.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        1.0
+       ],
+       "span": 1,
+       "title": "Headcount by location",
+       "type": "pie"
+      }
+     ],
+     "total": 8
+    },
+    "refresh_minutes": 0,
+    "shares": [],
+    "slicers": [
+     "department"
+    ],
+    "status": "published",
+    "updated_at": "2026-11-23T20:23:39.894604",
+    "widgets": [
+     {
+      "agg": "count",
+      "dataset_id": "f972714d-4069-4796-8dd0-213268bfd577",
+      "id": "w-1",
+      "span": 1,
+      "title": "Employees",
+      "type": "kpi"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "f972714d-4069-4796-8dd0-213268bfd577",
+      "id": "w-2",
+      "span": 1,
+      "title": "Average salary",
+      "type": "kpi",
+      "y": "salary"
+     },
+     {
+      "agg": "avg",
+      "dataset_id": "f972714d-4069-4796-8dd0-213268bfd577",
+      "id": "w-3",
+      "span": 1,
+      "title": "Average experience (yrs)",
+      "type": "gauge",
       "y": "years_experience"
      },
      {
@@ -1956,12 +2468,12 @@
       "y": "salary"
      },
      {
-      "agg": "avg",
+      "agg": "sum",
       "dataset_id": "f972714d-4069-4796-8dd0-213268bfd577",
       "id": "w-4",
       "span": 2,
-      "title": "Average salary by department",
-      "type": "bar",
+      "title": "Payroll by department",
+      "type": "treemap",
       "x": "department",
       "y": "salary"
      },
@@ -1973,6 +2485,24 @@
       "title": "Headcount by location",
       "type": "pie",
       "x": "location"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "f972714d-4069-4796-8dd0-213268bfd577",
+      "id": "w-7",
+      "span": 2,
+      "title": "Experience vs salary",
+      "type": "scatter",
+      "x": "years_experience",
+      "y": "salary"
+     },
+     {
+      "agg": "sum",
+      "dataset_id": "f972714d-4069-4796-8dd0-213268bfd577",
+      "id": "w-8",
+      "span": 1,
+      "title": "Employees",
+      "type": "table"
      }
     ]
    }
@@ -41853,6 +42383,7 @@
        "5"
       ]
      ],
+     "refreshed_at": "2026-11-23T20:26:05.579524+00:00",
      "row_count": 12,
      "size_bytes": 571,
      "source_connector": "google-drive"

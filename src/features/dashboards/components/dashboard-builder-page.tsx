@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, AreaChart, BarChart3, Database, Hash, LineChart, LoaderCircle, PieChart, Redo2, Save, Sparkles, Table2, Undo2, Wand2 } from "lucide-react";
+import { ArrowLeft, AreaChart, BarChart3, BarChartHorizontal, ChartColumn, ChartScatter, Database, Filter, Gauge, Hash, LayoutGrid, LineChart, LoaderCircle, PieChart, Radar, Redo2, Save, Sparkles, Table2, Undo2, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { newWidget, suggestWidgets } from "../logic/aggregate";
@@ -23,8 +23,11 @@ const WidgetCard = dynamic(() => import("./widget-card").then((m) => m.WidgetCar
 const STARTERS = ["Overview with key numbers and a breakdown by category", "Trends over time with a table of the latest rows", "Compare the top categories with a pie chart"];
 const CHANGES = ["Add a table of the top rows", "Make the charts wider", "Add a filter for the main category"];
 const PALETTE: Array<{ type: WidgetType; label: string; icon: typeof Hash }> = [
-  { type: "kpi", label: "KPI", icon: Hash }, { type: "bar", label: "Bar", icon: BarChart3 }, { type: "line", label: "Line", icon: LineChart },
-  { type: "area", label: "Area", icon: AreaChart }, { type: "pie", label: "Pie", icon: PieChart }, { type: "table", label: "Table", icon: Table2 },
+  { type: "kpi", label: "KPI", icon: Hash }, { type: "gauge", label: "Gauge", icon: Gauge }, { type: "bar", label: "Bar", icon: BarChart3 },
+  { type: "hbar", label: "Horizontal bar", icon: BarChartHorizontal }, { type: "line", label: "Line", icon: LineChart }, { type: "area", label: "Area", icon: AreaChart },
+  { type: "pie", label: "Pie", icon: PieChart }, { type: "treemap", label: "Treemap", icon: LayoutGrid }, { type: "funnel", label: "Funnel", icon: Filter },
+  { type: "radar", label: "Radar", icon: Radar }, { type: "histogram", label: "Histogram", icon: ChartColumn }, { type: "scatter", label: "Scatter", icon: ChartScatter },
+  { type: "table", label: "Table", icon: Table2 },
 ];
 
 interface Snapshot { widgets: DashboardWidget[]; slicers: string[] }
@@ -156,7 +159,7 @@ export function DashboardBuilderPage() {
                   {chosen.length > 1 ? <select aria-label="Dataset for new charts" value={target?.id ?? ""} onChange={(event) => setTargetId(event.target.value)} className="mb-2 h-8 w-full rounded-md border bg-surface px-2 text-xs">{chosen.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.name}</option>)}</select> : <p className="mb-2 truncate text-[11px] text-muted-foreground">Adds from {target?.name}</p>}
                   <ul className="grid grid-cols-2 gap-1.5" aria-label="Chart types">
                     {PALETTE.map(({ type, label, icon: Icon }) => (
-                      <li key={type}><button type="button" onClick={() => target && setWidgets([...widgets, newWidget(type, target)])} className="flex h-16 w-full flex-col items-center justify-center gap-1 rounded-lg border bg-surface text-xs text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"><Icon className="size-4" />{label}</button></li>
+                      <li key={type}><button type="button" onClick={() => target && setWidgets([...widgets, newWidget(type, target)])} className="flex h-16 w-full flex-col items-center justify-center gap-1 rounded-lg border bg-surface px-1 text-center text-[11px] leading-tight text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"><Icon className="size-4" />{label}</button></li>
                     ))}
                   </ul>
                   <p className="mt-2 text-[11px] text-muted-foreground">Click a chart type to add it, then change its columns on the card.</p>

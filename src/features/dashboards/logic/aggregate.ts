@@ -1,3 +1,4 @@
+import { NUMERIC_X_TYPES, SINGLE_VALUE_TYPES } from "../types";
 import type { DashboardWidget, DatasetLite, Filters, WidgetType } from "../types";
 
 export interface Point { name: string; value: number }
@@ -18,6 +19,14 @@ export function columnKind(dataset: DatasetLite, index: number): "number" | "cat
 
 const namesOf = (dataset: DatasetLite, kind: ReturnType<typeof columnKind>) => dataset.columns.filter((_, index) => columnKind(dataset, index) === kind).map((column) => column.name);
 export const numericColumns = (dataset: DatasetLite) => namesOf(dataset, "number");
+/** Columns whose values are all numbers, including low-variety ones (years, ratings) that columnKind treats as categories. Ids are left out. */
+export function numberLikeColumns(dataset: DatasetLite): string[] {
+  return dataset.columns.filter((column, index) => {
+    if (columnKind(dataset, index) === "id") return false;
+    const values = dataset.rows.map((row) => row[index]).filter((value) => value !== null && value !== "" && value !== "N/A");
+    return values.length > 0 && values.every((value) => Number.isFinite(Number(value)));
+  }).map((column) => column.name);
+}
 export const categoryColumns = (dataset: DatasetLite) => namesOf(dataset, "category");
 
 function columnIndex(dataset: DatasetLite, name?: string): number {
@@ -50,31 +59,79 @@ export function groupedPoints(widget: DashboardWidget, dataset: DatasetLite): Po
     groups.set(key, list);
   }
   const points = [...groups].map(([name, values]) => ({ name, value: Math.round(reduce(values.filter(Number.isFinite), widget.agg) * 100) / 100 }));
-  return widget.type === "line" || widget.type === "area" ? points.slice(0, 12) : points.sort((left, right) => right.value - left.value).slice(0, 12);
+  if (widget.type === "line" || widget.type === "area") return points.slice(0, 12);
+  return points.sort((left, right) => right.value - left.value).slice(0, widget.type === "radar" ? 8 : 12);
 }
+
+const BINS = 10;
+/** Histogram: rows counted in ten equal-width ranges of a numeric column. */
+export function histogramBins(widget: DashboardWidget, dataset: DatasetLite): Point[] {
+  const x = columnIndex(dataset, widget.x);
+  const values = dataset.rows.map((row) => Number(row[x])).filter(Number.isFinite);
+  if (x < 0 || values.length < 2) return [];
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  if (low === high) return [];
+  const width = (high - low) / BINS;
+  const counts = Array.from({ length: BINS }, () => 0);
+  for (const value of values) counts[Math.min(Math.floor((value - low) / width), BINS - 1)] += 1;
+  return counts.map((count, index) => ({ name: `${formatNumber(low + index * width)}–${formatNumber(low + (index + 1) * width)}`, value: count }));
+}
+
+/** Scatter: one dot per row for two numeric columns (every nth row when there are many). */
+export function scatterPoints(widget: DashboardWidget, dataset: DatasetLite): Array<{ x: number; y: number }> {
+  const x = columnIndex(dataset, widget.x);
+  const y = columnIndex(dataset, widget.y);
+  if (x < 0 || y < 0) return [];
+  const pairs = dataset.rows.map((row) => ({ x: Number(row[x]), y: Number(row[y]) })).filter((pair) => Number.isFinite(pair.x) && Number.isFinite(pair.y));
+  const step = Math.max(Math.ceil(pairs.length / 400), 1);
+  return pairs.filter((_, index) => index % step === 0);
+}
+
+/** Gauge: the average of a numeric column against that column's maximum. */
+export function gaugeValue(widget: DashboardWidget, dataset: DatasetLite): { value: number; max: number } | null {
+  const y = columnIndex(dataset, widget.y);
+  const values = dataset.rows.map((row) => Number(row[y])).filter(Number.isFinite);
+  if (y < 0 || !values.length) return null;
+  return { value: reduce(values, "avg"), max: Math.max(...values) };
+}
+
+export const CHART_LABEL: Record<WidgetType, string> = {
+  kpi: "KPI", gauge: "Gauge", bar: "Bar", hbar: "Horizontal bar", line: "Line", area: "Area", pie: "Pie", radar: "Radar", funnel: "Funnel", treemap: "Treemap", histogram: "Histogram", scatter: "Scatter", table: "Table",
+};
 
 let counter = 0;
 const widgetId = () => `w-${Date.now().toString(36)}-${(counter++).toString(36)}`;
 
 export function newWidget(type: WidgetType, dataset: DatasetLite): DashboardWidget {
-  const y = numericColumns(dataset)[0];
+  const numbers = [...new Set([...numericColumns(dataset), ...numberLikeColumns(dataset)])];
+  const y = numbers[0];
   const x = categoryColumns(dataset)[0] ?? dataset.columns[0]?.name;
-  const label = { kpi: "Total", bar: "By", line: "Trend of", area: "Area of", pie: "Share of", table: "Rows from" }[type];
-  const subject = type === "kpi" || !x ? (y ?? dataset.name) : x;
-  return { id: widgetId(), type, title: `${label} ${subject}`, dataset_id: dataset.id, x: type === "kpi" || type === "table" ? undefined : x, y, agg: y ? "sum" : "count", span: type === "kpi" ? 1 : type === "table" ? 3 : 2 };
+  const numericX = NUMERIC_X_TYPES.includes(type);
+  const single = SINGLE_VALUE_TYPES.includes(type);
+  const column = numericX ? y : x;
+  const subject = single || !column ? (y ?? dataset.name) : column;
+  const prefix = { kpi: "Total", gauge: "Average", bar: "By", hbar: "Ranking of", line: "Trend of", area: "Area of", pie: "Share of", radar: "Profile of", funnel: "Funnel of", treemap: "Breakdown of", histogram: "Distribution of", scatter: "Relationship of", table: "Rows from" }[type];
+  const base = { id: widgetId(), type, title: `${prefix} ${subject}`, dataset_id: dataset.id, span: (single ? (type === "table" ? 3 : 1) : 2) as DashboardWidget["span"] };
+  if (single) return { ...base, y, agg: type === "gauge" ? "avg" : y ? "sum" : "count" };
+  if (type === "histogram") return { ...base, x: y, agg: "count" };
+  if (type === "scatter") return { ...base, x: y, y: numbers[1] ?? y, agg: "sum" };
+  return { ...base, x, y, agg: y ? "sum" : "count" };
 }
 
-/** Starter layout: row count + one KPI per numeric column, then charts that fit the data's shape. */
+/** Starter layout: row count + KPIs, then a varied set of charts that fit the data's shape. */
 export function suggestWidgets(datasets: DatasetLite[]): DashboardWidget[] {
   const widgets: DashboardWidget[] = [];
   for (const dataset of datasets) {
     const numbers = numericColumns(dataset);
     const categories = categoryColumns(dataset);
     widgets.push({ ...newWidget("kpi", dataset), title: `Rows in ${dataset.name}`, y: undefined, agg: "count" });
-    if (numbers[0]) widgets.push(newWidget("kpi", dataset));
-    if (categories[0] && numbers[0]) widgets.push(newWidget("bar", dataset));
+    if (numbers[0]) widgets.push(newWidget("kpi", dataset), newWidget("gauge", dataset));
+    if (categories[0] && numbers[0]) widgets.push(newWidget("hbar", dataset));
     if (categories[0]) widgets.push({ ...newWidget("pie", dataset), y: undefined, agg: "count", title: `Share of ${categories[0]}` });
-    if (numbers[0]) widgets.push(newWidget("line", dataset));
+    if (numbers[0]) widgets.push(newWidget("histogram", dataset));
+    if (numbers[1]) widgets.push(newWidget("scatter", dataset));
+    if (categories[0] && numbers[0]) widgets.push(newWidget("bar", dataset));
     widgets.push(newWidget("table", dataset));
   }
   return widgets;

@@ -10,7 +10,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 const record = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
   id, name, description: `${name} description`, status: "published", pinned: false, slicers: [], dataset_ids: [], widgets: [{ id: "w" }],
   owner: "You", ownership: "owned", role: "owner", refresh_minutes: 0, shares: [], created_at: "2026-11-01T00:00:00Z", updated_at: "2026-11-02T00:00:00Z",
-  preview: { kpis: [{ label: "Revenue", value: "36" }], charts: [{ kind: "bar", title: "By region", series: [20, 15, 1], labels: ["S", "N", "E"] }, { kind: "line", title: "Trend", series: [1, 3, 2], labels: ["a", "b", "c"] }] }, ...extra,
+  preview: { total: 3, tiles: [{ type: "kpi", title: "Revenue", span: 1, value: "36" }, { type: "bar", title: "By region", span: 2, series: [20, 15, 1], labels: ["S", "N", "E"] }, { type: "line", title: "Trend", span: 3, series: [1, 3, 2], labels: ["a", "b", "c"] }, { type: "histogram", title: "Spread", span: 1, series: [2, 5, 1], labels: ["0–1", "1–2", "2–3"] }, { type: "gauge", title: "Avg", span: 1, value: "5", max: "9", ratio: 0.5 }] }, ...extra,
 });
 
 const api = vi.hoisted(() => ({
@@ -37,7 +37,7 @@ describe("dashboards page", () => {
     vi.clearAllMocks();
     api.rows = [
       record("a", "Revenue Overview", { pinned: true }),
-      record("b", "Sales Performance", { owner: "Alex", ownership: "shared", role: "viewer", updated_at: "2026-11-03T00:00:00Z", preview: { kpis: [{ label: "Widgets", value: "1" }], charts: [] } }),
+      record("b", "Sales Performance", { owner: "Alex", ownership: "shared", role: "viewer", updated_at: "2026-11-03T00:00:00Z", preview: { tiles: [], total: 1 } }),
       record("c", "Customer Health", { status: "draft", updated_at: "2026-11-04T00:00:00Z" }),
     ];
     api.pin.mockImplementation(async (id: string, pinned: boolean) => ({ ...api.rows.find((row) => row.id === id), pinned }));
@@ -47,12 +47,13 @@ describe("dashboards page", () => {
     renderPage();
     const cards = await screen.findAllByRole("article");
     expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual(["Revenue Overview", "Customer Health", "Sales Performance"]);
-    expect(within(cards[0]).getByText("Revenue")).toBeVisible();
+    // The card mirrors the dashboard: every widget in its own type, in order.
     expect(within(cards[0]).getByText("36")).toBeVisible();
     expect(within(cards[0]).getByRole("button", { name: "S: 20" })).toBeVisible();
-    await userEvent.click(within(cards[0]).getByRole("button", { name: "line" }));
     expect(within(cards[0]).getByRole("button", { name: "b: 3" })).toBeVisible();
-    expect(within(cards[2]).getByText("No chart yet")).toBeVisible();
+    expect(within(cards[0]).getByRole("button", { name: "0–1: 2" })).toBeVisible();
+    expect(within(cards[0]).getByRole("img", { name: "Avg: 5 of 9" })).toBeVisible();
+    expect(within(cards[2]).getByText("No charts yet")).toBeVisible();
     expect(screen.getByText("3 dashboards")).toBeVisible();
   });
 

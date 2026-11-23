@@ -112,6 +112,7 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
           <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
             <span className={cn("rounded border px-1.5 py-0.5 text-[10px]", dashboard.status === "published" ? "border-emerald-400/30 text-emerald-300" : "")}>{dashboard.status === "published" ? "Published to team" : "Restricted"}</span>
             <span className="rounded border px-1.5 py-0.5 text-[10px]">{ROLE_LABEL[role]}</span>
+            {dashboard.sources?.length ? <span className="rounded border px-1.5 py-0.5 text-[10px]" title={dashboard.sources.map((source) => source.name).join(", ")}>Google Drive{dashboard.refresh_minutes ? ` · the server re-syncs every ${dashboard.refresh_minutes} min` : " · re-syncs when opened"}</span> : null}
             <span>{dashboard.owner}</span><span aria-hidden="true">·</span><span>{widgets.length} widget{widgets.length === 1 ? "" : "s"}</span>
             {editing ? <span className="text-sky-300">Editing{dirty ? " · unsaved changes" : ""}</span> : null}
           </p>

@@ -6,15 +6,20 @@ from typing import Any
 
 from agentic.runtime.contracts import ChatTurn, LLMProvider, ProviderError
 
-WIDGET_TYPES = {"kpi", "bar", "line", "area", "pie", "table"}
+WIDGET_TYPES = {"kpi", "gauge", "bar", "hbar", "line", "area", "pie", "radar", "funnel", "treemap", "histogram", "scatter", "table"}
+NO_CATEGORY = {"kpi", "gauge", "table"}
+NUMERIC_X = {"histogram", "scatter"}
 AGGREGATES = {"sum", "avg", "count"}
 MAX_WIDGETS = 12
 
 SPEC = (
-    'Widget JSON: {"type":"kpi|bar|line|area|pie|table","title":str,"dataset_id":str,"x":column|null,'
-    '"y":column|null,"agg":"sum|avg|count","span":1|2|3}. '
-    "x is the category column (bar/line/area/pie); y is the numeric column to aggregate (omit for count); "
-    "kpi and table need no x. Use only dataset ids and column names that appear in the schema."
+    'Widget JSON: {"type":"kpi|gauge|bar|hbar|line|area|pie|radar|funnel|treemap|histogram|scatter|table","title":str,"dataset_id":str,'
+    '"x":column|null,"y":column|null,"agg":"sum|avg|count","span":1|2|3}. '
+    "x is the category column (bar/hbar/line/area/pie/radar/funnel/treemap); y is the numeric column to aggregate (omit for count); "
+    "kpi, gauge (an average against the column's maximum) and table need no x; histogram takes a numeric x and counts rows per range; "
+    "scatter takes a numeric x and a numeric y (one dot per row). Mix chart types so the dashboard is varied: ranking charts (hbar, funnel), "
+    "composition (pie, treemap), trend (line, area), distribution (histogram), relationship (scatter), comparison across many measures (radar). "
+    "Use only dataset ids and column names that appear in the schema."
 )
 
 
@@ -88,7 +93,20 @@ def sanitize_widgets(raw: Any, datasets: list[dict[str, Any]]) -> tuple[list[dic
             agg = "sum"
         y = schema.column(dataset_id, item.get("y"))
         x = schema.column(dataset_id, item.get("x"))
-        if wtype not in ("kpi", "table"):
+        if wtype in NUMERIC_X:
+            x = x if x and schema.is_numeric(dataset_id, x) else schema.first_numeric(dataset_id)
+            if x is None:
+                notes.append(f"Removed “{label}”: {wtype} needs a numeric column.")
+                continue
+            if wtype == "histogram":
+                y, agg = None, "count"
+            else:
+                y = y if y and y != x and schema.is_numeric(dataset_id, y) else next((c["name"] for c in schema.datasets[dataset_id].get("columns", []) if c["name"] != x and schema.is_numeric(dataset_id, c["name"])), None)
+                if y is None:
+                    notes.append(f"Removed “{label}”: scatter needs two numeric columns.")
+                    continue
+                agg = "sum"
+        elif wtype not in NO_CATEGORY:
             if x is None:
                 x = schema.first_category(dataset_id)
                 notes.append(f"“{label}” had no valid category column; used {x}.")
@@ -99,6 +117,14 @@ def sanitize_widgets(raw: Any, datasets: list[dict[str, Any]]) -> tuple[list[dic
             x = None
         if wtype == "table":
             y, agg = None, "count"
+        elif wtype in NUMERIC_X:
+            pass
+        elif wtype == "gauge":
+            agg = "avg"
+            y = y if y and schema.is_numeric(dataset_id, y) else schema.first_numeric(dataset_id)
+            if y is None:
+                notes.append(f"Removed “{label}”: a gauge needs a numeric column.")
+                continue
         elif agg != "count":
             if y is None or not schema.is_numeric(dataset_id, y):
                 fallback = schema.first_numeric(dataset_id)
@@ -115,7 +141,7 @@ def sanitize_widgets(raw: Any, datasets: list[dict[str, Any]]) -> tuple[list[dic
         except (TypeError, ValueError):
             span = 0
         if span not in (1, 2, 3):
-            span = {"kpi": 1, "table": 3}.get(wtype, 2)
+            span = {"kpi": 1, "gauge": 1, "table": 3}.get(wtype, 2)
         widget_id = str(item.get("id") or "")
         if not widget_id or widget_id in used_ids:
             widget_id = f"w-ai-{index}-{len(cleaned)}"

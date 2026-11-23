@@ -21,7 +21,7 @@ async def test_generate_builds_widgets_and_repairs_bad_columns(client: AsyncClie
         {"type": "kpi", "title": "Revenue", "dataset_id": "d1", "y": "Revenue", "agg": "sum"},
         {"type": "bar", "title": "Units by region", "dataset_id": "d1", "x": "REGION", "y": "units", "agg": "sum", "span": 2},
         {"type": "pie", "title": "Bad", "dataset_id": "d1", "x": "nope", "y": "region", "agg": "avg"},
-        {"type": "radar", "title": "Unknown type", "dataset_id": "d1"},
+        {"type": "sankey", "title": "Unknown type", "dataset_id": "d1"},
     ]}
     provider.chunks = ["Here you go:\n```json\n", json.dumps(reply), "\n```"]
     response = await client.post("/api/dashboards/ai/generate", headers=demo_headers, json=body(prompt="Show regional sales"))

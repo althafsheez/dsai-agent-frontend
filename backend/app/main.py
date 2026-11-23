@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -22,6 +23,7 @@ from .errors import APIError, api_error_handler
 from .routes import chats, connectors, dashboards, meta, quick_assistant, resources, runs, workflow_store, workspaces
 from .services.agent_adapter import AgentToolAdapter
 from .services.identity import seed_demo_users
+from .services import dashboard_sync
 from .services.runs import RunCoordinator, reconcile_stale_runs
 from .storage import LocalFileStorage
 
@@ -46,7 +48,7 @@ def create_app(
     )
 
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if settings.auto_create_schema:
             upgrade_schema(engine)
         performance_logger = logging.getLogger("agentic.performance")
@@ -61,7 +63,10 @@ def create_app(
             snapshot.import_snapshot(engine, settings.storage_root, settings.shared_data_dir)
         with session_factory() as session:
             reconcile_stale_runs(session)
+        sync_task = asyncio.create_task(dashboard_sync.sync_loop(app, settings.dashboard_sync_seconds)) if settings.dashboard_sync_seconds > 0 else None
         yield
+        if sync_task is not None:
+            sync_task.cancel()
         await connector_client.aclose()
         engine.dispose()
 

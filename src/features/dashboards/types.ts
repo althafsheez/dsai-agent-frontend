@@ -1,5 +1,11 @@
 import type { DashboardPreviewDto } from "@/lib/api";
-export type WidgetType = "kpi" | "bar" | "line" | "area" | "pie" | "table";
+export type WidgetType = "kpi" | "gauge" | "bar" | "hbar" | "line" | "area" | "pie" | "radar" | "funnel" | "treemap" | "histogram" | "scatter" | "table";
+/** Chart types that group rows by a category column and aggregate a number. */
+export const GROUPED_TYPES: WidgetType[] = ["bar", "hbar", "line", "area", "pie", "radar", "funnel", "treemap"];
+/** Types that take a number column (not a category) as their x. */
+export const NUMERIC_X_TYPES: WidgetType[] = ["histogram", "scatter"];
+/** Types with no x column at all. */
+export const SINGLE_VALUE_TYPES: WidgetType[] = ["kpi", "gauge", "table"];
 /** Active filters: column name to the allowed values (slicers and chart clicks both write here). */
 export type Filters = Record<string, string[]>;
 export type Aggregate = "sum" | "avg" | "count";
@@ -30,6 +36,7 @@ export interface Dashboard {
   pinned: boolean;
   /** The first KPI and a small version of the first chart, for the listing card. */
   preview?: DashboardPreviewDto;
+  sources?: Array<{ name: string; provider: "google-drive"; refreshed_at: string | null; error: string | null }>;
   /** What the signed-in user may do. Falls back to the ownership when missing. */
   role?: "owner" | "editor" | "viewer";
   /** Minutes between automatic data refreshes while the dashboard is open; 0 = manual. */

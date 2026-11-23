@@ -637,8 +637,14 @@ export function getDatasetRows(resourceId: string, limit = 6000): Promise<Datase
   return requestJson(`/datasets/${encodeURIComponent(resourceId)}/rows?limit=${limit}`);
 }
 
-export interface PreviewChartDto { kind: "bar" | "line" | "area" | "donut"; title: string; series: number[]; labels: string[] }
-export interface DashboardPreviewDto { kpis: Array<{ label: string; value: string }>; charts: PreviewChartDto[] }
+/** One widget of the listing card, in the dashboard's own order, type and width. */
+export interface PreviewTileDto {
+  type: string; title: string; span: 1 | 2 | 3;
+  value?: string; max?: string; ratio?: number;
+  labels?: string[]; series?: number[]; points?: Array<[number, number]>;
+  columns?: string[]; rows?: string[][];
+}
+export interface DashboardPreviewDto { tiles: PreviewTileDto[]; total: number }
 export interface DashboardShareDto { user_id: string; role: "viewer" | "editor"; name?: string }
 export interface DashboardRecordDto {
   id: string; name: string; description: string; status: "draft" | "published"; pinned: boolean;
@@ -646,6 +652,8 @@ export interface DashboardRecordDto {
   role: "owner" | "editor" | "viewer"; refresh_minutes: number;
   /** The first KPI and a small version of the first chart, computed by the backend when the dashboard is saved. */
   preview?: DashboardPreviewDto;
+  /** Google Drive files feeding this dashboard; the server re-downloads them when the dashboard has automatic refresh on. */
+  sources?: Array<{ name: string; provider: "google-drive"; refreshed_at: string | null; error: string | null }>;
   /** Only sent to the owner. */
   shares?: DashboardShareDto[];
 }

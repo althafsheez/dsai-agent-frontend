@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from ..dependencies import get_current_user, get_db
 from ..errors import APIError
 from ..models import LibraryEntry, ResourceLink, Resource, User
-from ..services import google_drive as drive
+from ..services import dashboard_sync, google_drive as drive
 from ..services.records import require_chat, require_workspace
 from ..services.dataset_preview import inspect_dataset
 from ..services.resource_uploads import register_upload, store_file_object
@@ -156,14 +156,6 @@ async def sync_dataset_from_drive(
     metadata = dict(resource.metadata_json or {}) if resource else {}
     if resource is None or resource.resource_type != "dataset" or metadata.get("source_connector") != drive.PROVIDER or not metadata.get("drive_file_id"):
         raise APIError(422, "not_syncable", "Only datasets imported from Google Drive can be re-synced.")
-    connection = drive.require_connection(session, user.id)
-    token = await drive.access_token(session, request.app.state.settings, _http(request), connection)
-    filename, content_type, content, extra = await drive.download_file(_http(request), token, metadata["drive_file_id"])
-    file_object = store_file_object(session, request.app.state.storage, filename, content_type, content)
-    changed = file_object.id != resource.file_object_id
-    if changed:
-        resource.file_object_id = file_object.id
-        resource.metadata_json = {**metadata, "size_bytes": len(content), **inspect_dataset(filename, content), **extra}
-    resource.metadata_json = {**resource.metadata_json, "refreshed_at": datetime.now(timezone.utc).isoformat()}
-    session.commit()
-    return {"status": "updated" if changed else "unchanged", "refreshed_at": resource.metadata_json["refreshed_at"]}
+    outcome = await dashboard_sync.sync_resource(session, request.app.state.settings, _http(request), request.app.state.storage, resource)
+    refresh = dashboard_sync.refresh_previews(session, request.app.state.storage, resource.id) if outcome == "updated" else 0
+    return {"status": outcome, "refreshed_at": resource.metadata_json["refreshed_at"], "dashboards_updated": refresh}

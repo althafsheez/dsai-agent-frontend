@@ -209,11 +209,22 @@ async def test_listing_preview_is_built_from_the_data_and_pins_are_personal(clie
         {"id": "b", "type": "bar", "title": "By region", "dataset_id": dataset_id, "x": "region", "y": "revenue", "agg": "sum", "span": 2},
     ]
     saved = (await put(client, OWNER, widgets=widgets, dataset_ids=[dataset_id], status="published")).json()
-    assert saved["preview"]["kpis"] == [{"label": "Revenue", "value": "36"}]
-    assert saved["preview"]["charts"] == [{"kind": "bar", "title": "By region", "series": [20.0, 15.0, 1.0], "labels": ["S", "N", "E"]}]
+    tiles = saved["preview"]["tiles"]
+    assert [tile["type"] for tile in tiles] == ["kpi", "bar"]
+    assert tiles[0]["value"] == "36" and tiles[1]["series"] == [20.0, 15.0, 1.0] and tiles[1]["labels"] == ["S", "N", "E"]
+
+    rich = [
+        {"id": "h", "type": "histogram", "title": "Spread", "dataset_id": dataset_id, "x": "revenue", "agg": "count", "span": 1},
+        {"id": "s", "type": "scatter", "title": "Dots", "dataset_id": dataset_id, "x": "revenue", "y": "revenue", "agg": "sum", "span": 1},
+        {"id": "g", "type": "gauge", "title": "Avg", "dataset_id": dataset_id, "y": "revenue", "agg": "avg", "span": 1},
+        {"id": "f", "type": "funnel", "title": "Funnel", "dataset_id": dataset_id, "x": "region", "y": "revenue", "agg": "sum", "span": 2},
+    ]
+    kinds = (await put(client, OWNER, id="db-rich", widgets=rich, dataset_ids=[dataset_id])).json()["preview"]["tiles"]
+    assert [tile["type"] for tile in kinds] == ["histogram", "scatter", "gauge", "funnel"]
+    assert len(kinds[0]["series"]) == 10 and sum(kinds[0]["series"]) == 4 and kinds[2]["ratio"] == 0.45
 
     empty = (await client.put("/api/dashboards", headers=OWNER, json={"id": "db-empty", "name": "Empty"})).json()
-    assert empty["preview"] == {"kpis": [{"label": "Widgets", "value": "0"}], "charts": []}
+    assert empty["preview"] == {"tiles": [], "total": 0}
 
     pinned = await client.put("/api/dashboards/db-share/pin", headers=OTHER, json={"pinned": True})
     assert pinned.status_code == 200 and pinned.json()["pinned"] is True
@@ -222,3 +233,47 @@ async def test_listing_preview_is_built_from_the_data_and_pins_are_personal(clie
     assert (await client.get("/api/dashboards/db-share", headers=OTHER)).json()["pinned"] is True
     assert (await client.put("/api/dashboards/db-share/pin", headers=OTHER, json={"pinned": False})).json()["pinned"] is False
     assert (await client.put("/api/dashboards/db-empty/pin", headers=OTHER, json={"pinned": True})).status_code == 404
+
+
+async def test_server_pulls_changed_drive_files_for_dashboards_on_auto_refresh(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services import dashboard_sync
+
+    dataset_id = await upload_dataset(client, b"region,revenue\nN,1\nS,2\n")
+    app = client._transport.app  # type: ignore[attr-defined]
+    with app.state.session_factory() as session:
+        resource = session.get(Resource, dataset_id)
+        resource.metadata_json = {**resource.metadata_json, "source_connector": "google-drive", "drive_file_id": "f1", "refreshed_at": "2020-01-01T00:00:00+00:00"}
+        session.commit()
+    widgets = [{"id": "k", "type": "kpi", "title": "Revenue", "dataset_id": dataset_id, "y": "revenue", "agg": "sum", "span": 1}]
+    saved = (await put(client, OWNER, widgets=widgets, dataset_ids=[dataset_id], refresh_minutes=5)).json()
+    assert saved["preview"]["tiles"][0]["value"] == "3"
+    assert saved["sources"] == [{"name": "sales.csv", "provider": "google-drive", "refreshed_at": "2020-01-01T00:00:00+00:00", "error": None}]
+
+    current = {"content": b"region,revenue\nN,1\nS,2\nE,40\n", "fail": False}
+
+    async def fake_download(client, token, file_id):
+        if current["fail"]:
+            raise dashboard_sync.APIError(401, "connector_reauth_required", "Reconnect Google Drive.")
+        return "sales.csv", "text/csv", current["content"], {"drive_file_id": file_id}
+
+    async def fake_token(*args, **kwargs):
+        return "token"
+
+    monkeypatch.setattr(dashboard_sync.drive, "require_connection", lambda *a, **k: object())
+    monkeypatch.setattr(dashboard_sync.drive, "access_token", fake_token)
+    monkeypatch.setattr(dashboard_sync.drive, "download_file", fake_download)
+
+    assert await dashboard_sync.sync_due(app) == {"sales.csv": "updated"}
+    after = (await client.get("/api/dashboards/db-share", headers=OWNER)).json()
+    assert after["preview"]["tiles"][0]["value"] == "43"
+    assert after["updated_at"] == saved["updated_at"]  # a background refresh is not an edit
+
+    assert await dashboard_sync.sync_due(app) == {}  # just checked, not due again yet
+
+    with app.state.session_factory() as session:
+        resource = session.get(Resource, dataset_id)
+        resource.metadata_json = {**resource.metadata_json, "refreshed_at": "2020-01-01T00:00:00+00:00"}
+        session.commit()
+    current["fail"] = True
+    assert await dashboard_sync.sync_due(app) == {"sales.csv": "error"}
+    assert (await client.get("/api/dashboards/db-share", headers=OWNER)).json()["sources"][0]["error"] == "Reconnect Google Drive."

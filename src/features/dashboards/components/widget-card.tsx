@@ -1,10 +1,11 @@
 "use client";
 
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Funnel, FunnelChart, LabelList, Line, LineChart, PolarAngleAxis, PolarGrid, Pie, PieChart, Radar, RadarChart, ResponsiveContainer, Scatter, ScatterChart, Tooltip, Treemap, XAxis, YAxis, ZAxis } from "recharts";
 import { ArrowLeftRight, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { applyFilters, formatNumber, groupedPoints, kpiValue } from "../logic/aggregate";
-import type { DashboardWidget, DatasetLite, Filters } from "../types";
+import { CHART_LABEL, applyFilters, categoryColumns, formatNumber, numberLikeColumns, gaugeValue, groupedPoints, histogramBins, kpiValue, numericColumns, scatterPoints } from "../logic/aggregate";
+import { GROUPED_TYPES, NUMERIC_X_TYPES } from "../types";
+import type { DashboardWidget, DatasetLite, Filters, WidgetType } from "../types";
 
 const COLORS = ["#8fb8a8", "#9db4d8", "#d4b483", "#c49aa8", "#a99bd0", "#7fc2c9"];
 const tooltipStyle = { background: "#1d1f21", border: "1px solid #3a3d40", borderRadius: 6, fontSize: 11 };
@@ -27,26 +28,74 @@ function WidgetBody({ widget, dataset, selected, onSelect }: BodyProps) {
       </div>
     );
   }
+  if (widget.type === "gauge") {
+    const gauge = gaugeValue(widget, dataset);
+    if (!gauge) return <p className="mt-6 text-xs text-muted-foreground">Pick a numeric column for this gauge.</p>;
+    const ratio = gauge.max > 0 ? Math.min(Math.max(gauge.value / gauge.max, 0), 1) : 0;
+    const arc = Math.PI * 70;
+    return (
+      <div className="mt-2 flex h-52 flex-col items-center justify-center" role="img" aria-label={`${widget.title}: ${formatNumber(gauge.value)} of ${formatNumber(gauge.max)}`}>
+        <svg viewBox="0 0 180 100" className="w-52">
+          <path d="M20,90 A70,70 0 0 1 160,90" fill="none" stroke="#2c2f31" strokeWidth="14" strokeLinecap="round" />
+          <path d="M20,90 A70,70 0 0 1 160,90" fill="none" stroke={COLORS[0]} strokeWidth="14" strokeLinecap="round" strokeDasharray={`${arc * ratio} ${arc}`} />
+          <text x="90" y="82" textAnchor="middle" className="fill-foreground text-[22px] font-semibold">{formatNumber(gauge.value)}</text>
+        </svg>
+        <p className="text-[10px] text-muted-foreground">{Math.round(ratio * 100)}% of the highest value ({formatNumber(gauge.max)})</p>
+      </div>
+    );
+  }
+  const axis = { tick: { fontSize: 10, fill: "#8a9094" } };
+  const frame = (chart: React.ReactElement, label: string) => (
+    <div className={cn("mt-2 h-52 w-full", Boolean(onSelect) && "[&_.recharts-wrapper]:cursor-pointer")} role="img" aria-label={`${widget.title} ${label}`}><ResponsiveContainer width="100%" height="100%">{chart}</ResponsiveContainer></div>
+  );
+  const valueAxis = <YAxis {...axis} width={44} tickFormatter={(value: number) => formatNumber(Number(value))} />;
+  const grid = <CartesianGrid stroke="#2c2f31" vertical={false} />;
+  const empty = <p className="mt-6 text-xs text-muted-foreground">{dataset.rows.length ? "Pick the columns this chart needs." : "No rows match the current filters."}</p>;
+
+  if (widget.type === "histogram") {
+    const bins = histogramBins(widget, dataset);
+    if (!bins.length) return empty;
+    return frame(<BarChart data={bins} barCategoryGap={1}>{grid}<XAxis dataKey="name" {...axis} interval="preserveStartEnd" minTickGap={30} />{valueAxis}<Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#ffffff10" }} /><Bar dataKey="value" name="Rows" fill={COLORS[4]} radius={[2, 2, 0, 0]} /></BarChart>, "histogram");
+  }
+  if (widget.type === "scatter") {
+    const dots = scatterPoints(widget, dataset);
+    if (!dots.length) return empty;
+    return frame(<ScatterChart margin={{ left: 0, right: 8, top: 8 }}><CartesianGrid stroke="#2c2f31" /><XAxis type="number" dataKey="x" name={widget.x} domain={["dataMin", "dataMax"]} {...axis} tickFormatter={(value: number) => formatNumber(Number(value))} /><YAxis type="number" dataKey="y" name={widget.y} domain={["dataMin", "dataMax"]} {...axis} width={44} tickFormatter={(value: number) => formatNumber(Number(value))} /><ZAxis range={[28, 28]} /><Tooltip contentStyle={tooltipStyle} cursor={{ strokeDasharray: "3 3" }} /><Scatter data={dots} fill={COLORS[3]} fillOpacity={0.7} /></ScatterChart>, "scatter plot");
+  }
+
   const points = groupedPoints(widget, dataset);
-  if (!points.length) return <p className="mt-6 text-xs text-muted-foreground">{dataset.rows.length ? "Pick a category column to draw this chart." : "No rows match the current filters."}</p>;
+  if (!points.length) return empty;
   const dim = (name: string) => (selected.length && !selected.includes(name) ? 0.3 : 1);
   const clickable = Boolean(onSelect);
   const chartClick = (state: { activeLabel?: string | number } | null) => { if (state?.activeLabel !== undefined) onSelect?.(String(state.activeLabel)); };
-  const axis = { tick: { fontSize: 10, fill: "#8a9094" } };
+  const barClick = (entry: unknown) => onSelect?.(String((entry as { name: string }).name));
+  switch (widget.type) {
+    case "pie":
+      return frame(<PieChart><Pie data={points} dataKey="value" nameKey="name" innerRadius={36} outerRadius={70} paddingAngle={2} onClick={(entry) => onSelect?.(String(entry.name))}>{points.map((point, index) => <Cell key={point.name} fill={COLORS[index % COLORS.length]} fillOpacity={dim(point.name)} />)}</Pie><Tooltip contentStyle={tooltipStyle} /></PieChart>, "chart");
+    case "line":
+      return frame(<LineChart data={points} onClick={chartClick}>{grid}<XAxis dataKey="name" {...axis} />{valueAxis}<Tooltip contentStyle={tooltipStyle} /><Line type="monotone" dataKey="value" stroke={COLORS[0]} strokeWidth={2} dot={false} /></LineChart>, "chart");
+    case "area":
+      return frame(<AreaChart data={points} onClick={chartClick}>{grid}<XAxis dataKey="name" {...axis} />{valueAxis}<Tooltip contentStyle={tooltipStyle} /><Area type="monotone" dataKey="value" stroke={COLORS[1]} fill={COLORS[1]} fillOpacity={0.25} strokeWidth={2} /></AreaChart>, "chart");
+    case "hbar":
+      return frame(<BarChart data={points} layout="vertical" margin={{ left: 4 }}><CartesianGrid stroke="#2c2f31" horizontal={false} /><XAxis type="number" {...axis} tickFormatter={(value: number) => formatNumber(Number(value))} /><YAxis type="category" dataKey="name" {...axis} width={78} /><Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#ffffff10" }} /><Bar dataKey="value" radius={[0, 3, 3, 0]} cursor={clickable ? "pointer" : undefined} onClick={barClick}>{points.map((point, index) => <Cell key={point.name} fill={COLORS[index % COLORS.length]} fillOpacity={dim(point.name)} />)}</Bar></BarChart>, "chart");
+    case "radar":
+      return frame(<RadarChart data={points} outerRadius="70%"><PolarGrid stroke="#3a3d40" /><PolarAngleAxis dataKey="name" tick={{ fontSize: 10, fill: "#8a9094" }} /><Tooltip contentStyle={tooltipStyle} /><Radar dataKey="value" stroke={COLORS[4]} fill={COLORS[4]} fillOpacity={0.3} /></RadarChart>, "chart");
+    case "funnel":
+      return frame(<FunnelChart><Tooltip contentStyle={tooltipStyle} /><Funnel dataKey="value" nameKey="name" data={points.slice(0, 6).map((point, index) => ({ ...point, fill: COLORS[index % COLORS.length] }))} isAnimationActive={false}><LabelList position="right" dataKey="name" fill="#c9cdd0" fontSize={10} stroke="none" /></Funnel></FunnelChart>, "chart");
+    case "treemap":
+      return frame(<Treemap data={points.map((point) => ({ ...point }))} dataKey="value" nameKey="name" stroke="#1d1f21" isAnimationActive={false} content={<TreemapCell />} />, "chart");
+    default:
+      return frame(<BarChart data={points} onClick={undefined}>{grid}<XAxis dataKey="name" {...axis} />{valueAxis}<Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#ffffff10" }} /><Bar dataKey="value" fill={COLORS[0]} radius={[3, 3, 0, 0]} cursor={clickable ? "pointer" : undefined} onClick={barClick}>{points.map((point) => <Cell key={point.name} fillOpacity={dim(point.name)} />)}</Bar></BarChart>, "chart");
+  }
+}
+
+function TreemapCell(props: { x?: number; y?: number; width?: number; height?: number; index?: number; name?: string }) {
+  const { x = 0, y = 0, width = 0, height = 0, index = 0, name = "" } = props;
   return (
-    <div className={cn("mt-2 h-52 w-full", clickable && "[&_.recharts-wrapper]:cursor-pointer")} role="img" aria-label={`${widget.title} chart`}>
-      <ResponsiveContainer width="100%" height="100%">
-        {widget.type === "pie" ? (
-          <PieChart><Pie data={points} dataKey="value" nameKey="name" innerRadius={36} outerRadius={70} paddingAngle={2} onClick={(entry) => onSelect?.(String(entry.name))}>{points.map((point, index) => <Cell key={point.name} fill={COLORS[index % COLORS.length]} fillOpacity={dim(point.name)} />)}</Pie><Tooltip contentStyle={tooltipStyle} /></PieChart>
-        ) : widget.type === "line" ? (
-          <LineChart data={points} onClick={chartClick}><CartesianGrid stroke="#2c2f31" vertical={false} /><XAxis dataKey="name" {...axis} /><YAxis {...axis} width={44} tickFormatter={(value: number) => formatNumber(Number(value))} /><Tooltip contentStyle={tooltipStyle} /><Line type="monotone" dataKey="value" stroke={COLORS[0]} strokeWidth={2} dot={false} /></LineChart>
-        ) : widget.type === "area" ? (
-          <AreaChart data={points} onClick={chartClick}><CartesianGrid stroke="#2c2f31" vertical={false} /><XAxis dataKey="name" {...axis} /><YAxis {...axis} width={44} tickFormatter={(value: number) => formatNumber(Number(value))} /><Tooltip contentStyle={tooltipStyle} /><Area type="monotone" dataKey="value" stroke={COLORS[1]} fill={COLORS[1]} fillOpacity={0.25} strokeWidth={2} /></AreaChart>
-        ) : (
-          <BarChart data={points}><CartesianGrid stroke="#2c2f31" vertical={false} /><XAxis dataKey="name" {...axis} /><YAxis {...axis} width={44} tickFormatter={(value: number) => formatNumber(Number(value))} /><Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#ffffff10" }} /><Bar dataKey="value" fill={COLORS[0]} radius={[3, 3, 0, 0]} cursor={clickable ? "pointer" : undefined} onClick={(entry) => onSelect?.(String((entry as unknown as { name: string }).name))}>{points.map((point) => <Cell key={point.name} fillOpacity={dim(point.name)} />)}</Bar></BarChart>
-        )}
-      </ResponsiveContainer>
-    </div>
+    <g>
+      <rect x={x} y={y} width={width} height={height} fill={COLORS[index % COLORS.length]} fillOpacity={0.85} stroke="#1d1f21" />
+      {width > 54 && height > 18 ? <text x={x + 6} y={y + 14} fontSize={10} fill="#111315">{name.slice(0, Math.floor(width / 6))}</text> : null}
+    </g>
   );
 }
 
@@ -74,13 +123,30 @@ function describe(widget: DashboardWidget, dataset: DatasetLite | undefined): st
   return `${measure}${by} · ${dataset.name}`;
 }
 
+/** Switching chart type keeps the columns that still make sense and picks sensible ones otherwise. */
+function retype(widget: DashboardWidget, type: WidgetType, dataset: DatasetLite): DashboardWidget {
+  const numbers = [...new Set([...numericColumns(dataset), ...numberLikeColumns(dataset)])];
+  const categories = categoryColumns(dataset);
+  const next: DashboardWidget = { ...widget, type };
+  if (type === "histogram") return { ...next, x: numbers.includes(widget.x ?? "") ? widget.x : numbers[0], y: undefined, agg: "count" };
+  if (type === "scatter") { const x = numbers.includes(widget.x ?? "") ? widget.x : numbers[0]; return { ...next, x, y: numbers.find((name) => name !== x) ?? x, agg: "sum" }; }
+  if (type === "gauge") return { ...next, x: undefined, y: numbers.includes(widget.y ?? "") ? widget.y : numbers[0], agg: "avg" };
+  const wasNumericX = NUMERIC_X_TYPES.includes(widget.type) || widget.type === "gauge";
+  const x = wasNumericX || !widget.x ? categories[0] ?? dataset.columns[0]?.name : widget.x;
+  return { ...next, x, y: widget.y ?? numbers[0], agg: widget.agg === "count" && !widget.y && widget.type !== "gauge" ? "count" : widget.type === "gauge" || NUMERIC_X_TYPES.includes(widget.type) ? "sum" : widget.agg };
+}
+
 export function WidgetCard({ widget, dataset, editable, filters = {}, span, onSelect, onChange, onRemove }: WidgetCardProps) {
   const next = (value: DashboardWidget["span"]) => (value === 3 ? 1 : ((value + 1) as DashboardWidget["span"]));
-  const own = widget.x && widget.type !== "kpi" && widget.type !== "table" ? widget.x : undefined;
+  const own = widget.x && GROUPED_TYPES.includes(widget.type) ? widget.x : undefined;
   const effective: Filters = own ? Object.fromEntries(Object.entries(filters).filter(([column]) => column !== own)) : filters;
   const data = dataset ? applyFilters(dataset, effective) : undefined;
   const selected = own ? filters[own] ?? [] : [];
-  const types = ["bar", "line", "area", "pie"] as const;
+  const types = Object.keys(CHART_LABEL).filter((type) => type !== "kpi" && type !== "table") as WidgetType[];
+  const numeric = dataset ? [...new Set([...numericColumns(dataset), ...numberLikeColumns(dataset)])] : [];
+  const grouped = GROUPED_TYPES.includes(widget.type);
+  const column = (label: string, value: string | undefined, options: string[], key: "x" | "y") => <select aria-label={label} value={value ?? ""} onChange={(event) => onChange?.({ ...widget, [key]: event.target.value })} className="h-7 max-w-[150px] rounded border bg-surface px-1.5 text-[11px]">{(value && !options.includes(value) ? [value, ...options] : options).map((name) => <option key={name} value={name}>{name}</option>)}</select>;
+  const allColumns = dataset?.columns.map((item) => item.name) ?? [];
   return (
     <article className={cn("min-w-0 rounded-xl border bg-surface/50 p-3.5", spanClass[span ?? widget.span])} aria-label={widget.title}>
       <header className="flex items-center gap-2">
@@ -97,10 +163,13 @@ export function WidgetCard({ widget, dataset, editable, filters = {}, span, onSe
       {!editable && dataset ? <p className="truncate px-0.5 text-[10px] text-muted-foreground" title={describe(widget, dataset)}>{describe(widget, dataset)}</p> : null}
       {editable && dataset && widget.type !== "kpi" && widget.type !== "table" ? (
         <div className="mt-2 flex flex-wrap gap-1.5">
-          <select aria-label="Chart type" value={widget.type} onChange={(event) => onChange?.({ ...widget, type: event.target.value as DashboardWidget["type"] })} className="h-7 rounded border bg-surface px-1.5 text-[11px]">{types.map((type) => <option key={type} value={type}>{type[0].toUpperCase() + type.slice(1)}</option>)}</select>
-          <select aria-label="Category column" value={widget.x ?? ""} onChange={(event) => onChange?.({ ...widget, x: event.target.value })} className="h-7 rounded border bg-surface px-1.5 text-[11px]">{dataset.columns.map((column) => <option key={column.name} value={column.name}>{column.name}</option>)}</select>
-          <select aria-label="Aggregate" value={widget.agg} onChange={(event) => onChange?.({ ...widget, agg: event.target.value as DashboardWidget["agg"] })} className="h-7 rounded border bg-surface px-1.5 text-[11px]"><option value="sum">Sum</option><option value="avg">Average</option><option value="count">Count</option></select>
-          {widget.agg !== "count" ? <select aria-label="Value column" value={widget.y ?? ""} onChange={(event) => onChange?.({ ...widget, y: event.target.value })} className="h-7 rounded border bg-surface px-1.5 text-[11px]">{dataset.columns.map((column) => <option key={column.name} value={column.name}>{column.name}</option>)}</select> : null}
+          <select aria-label="Chart type" value={widget.type} onChange={(event) => onChange?.(retype(widget, event.target.value as WidgetType, dataset))} className="h-7 rounded border bg-surface px-1.5 text-[11px]">{types.map((type) => <option key={type} value={type}>{CHART_LABEL[type]}</option>)}</select>
+          {grouped ? column("Category column", widget.x, allColumns, "x") : null}
+          {grouped ? <select aria-label="Aggregate" value={widget.agg} onChange={(event) => onChange?.({ ...widget, agg: event.target.value as DashboardWidget["agg"] })} className="h-7 rounded border bg-surface px-1.5 text-[11px]"><option value="sum">Sum</option><option value="avg">Average</option><option value="count">Count</option></select> : null}
+          {grouped && widget.agg !== "count" ? column("Value column", widget.y, allColumns, "y") : null}
+          {widget.type === "histogram" ? column("Numeric column", widget.x, numeric, "x") : null}
+          {widget.type === "scatter" ? <>{column("X column", widget.x, numeric, "x")}{column("Y column", widget.y, numeric, "y")}</> : null}
+          {widget.type === "gauge" ? column("Value column", widget.y, numeric, "y") : null}
         </div>
       ) : null}
       {data ? <WidgetBody widget={widget} dataset={data} selected={selected} onSelect={own && onSelect ? (value) => onSelect(own, value) : undefined} /> : <p className="mt-6 text-xs text-muted-foreground">This widget’s dataset is no longer in your Library.</p>}

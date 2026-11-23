@@ -12,10 +12,9 @@ from agentic.runtime.contracts import ProviderError
 
 from ..dependencies import get_current_user, get_db
 from ..errors import APIError
-from ..models import Dashboard, FileObject, Resource, User
+from ..models import Dashboard, Resource, User
 from ..services import dashboard_ai
-from ..services.dashboard_preview import build_preview
-from ..services.dataset_preview import read_csv_rows
+from ..services.dashboard_preview import compute_preview
 
 router = APIRouter(prefix="/api/dashboards/ai", tags=["dashboards"])
 store_router = APIRouter(prefix="/api/dashboards", tags=["dashboards"])
@@ -139,6 +138,17 @@ def _utc(moment) -> str:
     return (moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)).isoformat()
 
 
+def _sources(db: Session, item: Dashboard) -> list[dict]:
+    """The Google Drive files this dashboard is fed from, and when each was last checked, so the UI can say it stays current by itself."""
+    found = []
+    for dataset_id in item.dataset_ids or []:
+        resource = db.get(Resource, dataset_id)
+        metadata = (resource.metadata_json or {}) if resource else {}
+        if resource is not None and metadata.get("source_connector") == "google-drive":
+            found.append({"name": resource.name, "provider": "google-drive", "refreshed_at": metadata.get("refreshed_at"), "error": metadata.get("sync_error")})
+    return found
+
+
 def _view(item: Dashboard, user: User, db: Session, role: str) -> dict:
     owner = db.get(User, item.owner_id)
     mine = item.owner_id == user.id
@@ -146,7 +156,7 @@ def _view(item: Dashboard, user: User, db: Session, role: str) -> dict:
         "id": item.id, "name": item.name, "description": item.description, "status": item.status, "pinned": user.id in (item.pinned_by or []),
         "slicers": item.slicers, "dataset_ids": item.dataset_ids, "widgets": item.widgets, "preview": item.preview or {},
         "owner": "You" if mine else (owner.name if owner else "Unknown"), "ownership": "owned" if mine else "shared",
-        "role": role, "refresh_minutes": item.refresh_minutes or 0,
+        "role": role, "refresh_minutes": item.refresh_minutes or 0, "sources": _sources(db, item),
         "created_at": _utc(item.created_at), "updated_at": _utc(item.updated_at),
     }
     if role == "owner":
@@ -226,20 +236,7 @@ def _with_pin(item: Dashboard, user: User, pinned: bool) -> list[str]:
 
 
 def _preview(request: Request, db: Session, widgets: list[dict[str, Any]]) -> dict[str, Any]:
-    """Reads the datasets the widgets use (the dashboard grants that access) and summarises them for the listing card."""
-    data: dict[str, dict[str, Any]] = {}
-    storage = request.app.state.storage
-    for dataset_id in {widget.get("dataset_id") for widget in widgets if isinstance(widget.get("dataset_id"), str)}:
-        row = db.execute(select(Resource, FileObject).join(FileObject, FileObject.id == Resource.file_object_id).where(Resource.id == dataset_id)).one_or_none()
-        if row is None:
-            continue
-        try:
-            rows = read_csv_rows(row[0].name, storage.read_bytes(row[1].relative_storage_path))
-        except OSError:
-            continue
-        if rows is not None:
-            data[dataset_id] = {"columns": [column["name"] for column in rows["columns"]], "rows": rows["rows"], "total_rows": rows["total_rows"]}
-    return build_preview(widgets, data)
+    return compute_preview(db, request.app.state.storage, widgets)
 
 
 class PinInput(BaseModel):

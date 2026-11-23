@@ -60,6 +60,7 @@ async def client(tmp_path, provider: FakeProvider) -> AsyncIterator[AsyncClient]
         database_url=f"sqlite:///{tmp_path / 'test.db'}",
         storage_root=tmp_path / "storage",
         auto_create_schema=True,
+        dashboard_sync_seconds=0,
         cors_origins=["http://localhost:3000"],
     )
     app = create_app(settings=settings, provider=provider)

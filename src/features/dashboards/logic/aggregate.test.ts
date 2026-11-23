@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyFilters, columnKind, groupedPoints, kpiValue, newWidget, slicerCandidates, sliceValues, suggestWidgets } from "./aggregate";
+import { applyFilters, columnKind, gaugeValue, groupedPoints, histogramBins, scatterPoints, kpiValue, newWidget, slicerCandidates, sliceValues, suggestWidgets } from "./aggregate";
 import type { DatasetLite } from "../types";
 
 const dataset: DatasetLite = {
@@ -17,7 +17,31 @@ describe("dashboard aggregation", () => {
   });
   it("suggests widgets that fit the data shape", () => {
     const types = suggestWidgets([dataset]).map((widget) => widget.type);
-    expect(types).toEqual(["kpi", "kpi", "bar", "pie", "line", "table"]);
+    expect(types).toEqual(["kpi", "kpi", "gauge", "hbar", "pie", "histogram", "bar", "table"]);
+  });
+});
+
+describe("more chart types", () => {
+  const numbers: DatasetLite = {
+    id: "n", name: "n.csv", row_count: 6, columns: [{ name: "a", data_type: "int64" }, { name: "b", data_type: "int64" }],
+    rows: [[1, 10], [2, 20], [3, 30], [4, 40], [5, 50], [10, 60]],
+  };
+  it("bins a numeric column into ten ranges that hold every row", () => {
+    const bins = histogramBins(newWidget("histogram", numbers), numbers);
+    expect(bins).toHaveLength(10);
+    expect(bins.reduce((sum, bin) => sum + bin.value, 0)).toBe(6);
+  });
+  it("builds scatter points from two numeric columns", () => {
+    const widget = newWidget("scatter", numbers);
+    expect([widget.x, widget.y]).toEqual(["a", "b"]);
+    expect(scatterPoints(widget, numbers)).toHaveLength(6);
+  });
+  it("compares a gauge's average with the column maximum", () => {
+    expect(gaugeValue({ ...newWidget("gauge", numbers), y: "b" }, numbers)).toEqual({ value: 35, max: 60 });
+  });
+  it("keeps the radar to eight spokes, ranked", () => {
+    const many: DatasetLite = { ...dataset, rows: Array.from({ length: 20 }, (_, index) => [`r${index}`, index]) };
+    expect(groupedPoints({ ...newWidget("radar", many), x: "region", y: "revenue" }, many)).toHaveLength(8);
   });
 });
 
