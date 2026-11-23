@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Database, FileText, Folder, MessageSquare, Plus, Search, Workflow, X } from "lucide-react";
+import { ChevronRight, Database, FileText, Folder, MessageSquare, Plus, Workflow, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   createWorkspaceWorkflow,
@@ -18,6 +18,10 @@ import {
   uploadResource,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { HistoryToolbar } from "@/features/history/components/history-toolbar";
+import { filterHistory } from "@/features/history/logic/filter-history";
+import type { HistoryFilterOptions, HistoryFilters, HistoryRecord } from "@/features/history/types";
+import { currentDemoUser } from "@/features/history/types";
 import { WorkspaceDatasets } from "./workspace-datasets";
 import { WorkspaceAccessDialogs } from "./workspace-access-dialogs";
 
@@ -37,7 +41,15 @@ function formatDate(value: string) {
 export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("chats");
-  const [chatSearch, setChatSearch] = useState("");
+  const [chatFilters, setChatFilters] = useState<HistoryFilters>({
+    status: "active",
+    ownership: "all",
+    time: "any",
+    sort: "updated_desc",
+    search: "",
+    authorId: "all",
+    workspaceId: workspaceId,
+  });
   const [selectedContextId, setSelectedContextId] = useState<string | null>(null);
   const [contextDraft, setContextDraft] = useState("");
   const [workflowName, setWorkflowName] = useState("");
@@ -68,7 +80,33 @@ export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
     onSuccess: async () => { setWorkflowName(""); setCreatingWorkflow(false); await queryClient.invalidateQueries({ queryKey: ["workspace", workspaceId, "workflows"] }); },
   });
 
-  const visibleChats = useMemo(() => (chats.data?.items ?? []).filter((chat) => chat.title.toLowerCase().includes(chatSearch.toLowerCase())), [chats.data?.items, chatSearch]);
+  const chatRecords = useMemo<HistoryRecord[]>(() => {
+    return (chats.data?.items ?? []).map((chat) => ({
+      id: chat.id,
+      kind: "chat" as const,
+      name: chat.title,
+      author: currentDemoUser,
+      updated_at: chat.updated_at,
+      archived_at: chat.archived_at ?? null,
+      deleted_at: chat.deleted_at ?? null,
+      workspace_id: workspaceId,
+      workspace_name: workspace.data?.name ?? "Workspace",
+    }));
+  }, [chats.data?.items, workspaceId, workspace.data?.name]);
+
+  const filteredChatRecords = useMemo(
+    () => filterHistory(chatRecords, chatFilters),
+    [chatRecords, chatFilters]
+  );
+
+  const toolbarOptions: HistoryFilterOptions = useMemo(
+    () => ({
+      workspaces: [{ id: workspaceId, name: workspace.data?.name ?? "Workspace" }],
+      authors: [{ id: "u-1", name: "You" }],
+    }),
+    [workspaceId, workspace.data?.name]
+  );
+
   const selectedContext = contextFiles.data?.items.find((file) => file.id === selectedContextId) ?? null;
 
   if (workspace.isLoading) return <section className="p-8 text-sm text-muted-foreground">Loading workspace…</section>;
@@ -94,9 +132,68 @@ export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
       {tabs.map(({ id, label, icon: Icon }) => <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={cn("flex h-14 shrink-0 items-center gap-2 border-b-2 px-5 text-sm text-muted-foreground", tab === id ? "border-foreground text-foreground" : "border-transparent hover:text-foreground")}><Icon className="size-4" />{label}<span className="rounded-full bg-raised px-1.5 py-0.5 text-[10px] text-foreground">{id === "chats" ? chats.data?.items.length ?? 0 : id === "datasets" ? datasets.data?.items.length ?? 0 : id === "context" ? contextFiles.data?.items.length ?? 0 : 0}</span></button>)}
     </div>
     <div className="pt-5">
-      {tab === "chats" && <section>
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center"><div><h3 className="text-xl font-semibold">Chats</h3><p className="mt-1 text-xs text-muted-foreground">Analyses that belong to this workspace.</p></div><div className="flex flex-1 gap-2 sm:ml-auto sm:max-w-lg"><label className="relative flex-1"><span className="sr-only">Search chats</span><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"/><input value={chatSearch} onChange={(event) => setChatSearch(event.target.value)} placeholder="Search chats…" className="h-9 w-full rounded-md border bg-surface pl-9 pr-3 text-xs outline-none"/></label><Button asChild><a href={`/workspaces/${workspaceId}/chat/new`}><Plus/>New Chat</a></Button></div></div>
-        {chats.isLoading ? <p className="py-12 text-center text-sm text-muted-foreground">Loading chats…</p> : visibleChats.length ? <div className="overflow-x-auto rounded-lg border"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-surface text-[10px] uppercase tracking-wider text-muted-foreground"><tr><th className="px-4 py-3">Name</th><th>Author</th><th>Created</th><th>Last updated</th><th/></tr></thead><tbody>{visibleChats.map((chat) => <tr key={chat.id} className="border-t hover:bg-surface"><td className="px-4 py-3 font-medium"><Link href={`/chat/${chat.id}`} className="hover:underline">{chat.title}</Link></td><td className="text-muted-foreground">You</td><td className="text-muted-foreground">{formatDate(chat.created_at)}</td><td className="text-muted-foreground">{formatDate(chat.updated_at)}</td><td><Link href={`/chat/${chat.id}`} className="text-xs text-slate">Open</Link></td></tr>)}</tbody></table></div> : <div className="rounded-lg border border-dashed px-6 py-14 text-center"><p className="text-sm font-medium">No chats yet</p><p className="mt-1 text-xs text-muted-foreground">Start the first analysis for this workspace.</p></div>}
+      {tab === "chats" && <section className="space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-xl font-semibold">Chats</h3>
+            <p className="mt-1 text-xs text-muted-foreground">Analyses that belong to this workspace.</p>
+          </div>
+          <Button asChild>
+            <a href={`/workspaces/${workspaceId}/chat/new`}>
+              <Plus className="size-4" />New Chat
+            </a>
+          </Button>
+        </div>
+
+        <HistoryToolbar
+          filters={chatFilters}
+          options={toolbarOptions}
+          onChange={(patch) => setChatFilters((prev) => ({ ...prev, ...patch }))}
+        />
+
+        {chats.isLoading ? (
+          <p className="py-12 text-center text-sm text-muted-foreground">Loading chats…</p>
+        ) : filteredChatRecords.length ? (
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full min-w-[680px] text-left text-sm">
+              <thead className="bg-surface text-[10px] uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3">Name</th>
+                  <th>Author</th>
+                  <th>Last updated</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {filteredChatRecords.map((chat) => (
+                  <tr key={chat.id} className="border-t hover:bg-surface">
+                    <td className="px-4 py-3 font-medium">
+                      <Link href={`/chat/${chat.id}`} className="hover:underline">
+                        {chat.name}
+                      </Link>
+                    </td>
+                    <td className="text-muted-foreground">{chat.author.name}</td>
+                    <td className="text-muted-foreground">{formatDate(chat.updated_at)}</td>
+                    <td>
+                      <Link href={`/chat/${chat.id}`} className="text-xs text-slate">
+                        Open
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed px-6 py-14 text-center">
+            <p className="text-sm font-medium">No matching chats</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {chatFilters.search || chatFilters.time !== "any" || chatFilters.status !== "active"
+                ? "Try adjusting your search or filter options."
+                : "Start the first analysis for this workspace."}
+            </p>
+          </div>
+        )}
       </section>}
       <div hidden={tab !== "datasets"}>
         <WorkspaceDatasets workspaceId={workspaceId} workspaceName={item.name} datasets={datasets.data?.items ?? []} onUpload={(file) => uploadDatasetMutation.mutate(file)} uploadFailed={uploadDatasetMutation.isError} />
