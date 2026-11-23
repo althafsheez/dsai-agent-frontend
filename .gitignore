@@ -59,3 +59,7 @@ backend/.env
 .remember/
 .claude/launch.json
 .claude/settings.local.json
+
+# local assistant instructions
+CLAUDE.md
+PROGRESS.md
