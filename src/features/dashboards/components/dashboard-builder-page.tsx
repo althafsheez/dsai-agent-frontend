@@ -56,7 +56,6 @@ export function DashboardBuilderPage() {
       <form onSubmit={submit} className="rounded-xl border bg-popover">
         <div className="border-b px-6 py-5 sm:px-7">
           <h1 className="text-xl font-semibold tracking-tight">Create Dashboard</h1>
-          <p className="mt-1 text-xs text-muted-foreground">Name it, choose the data files, and tell the AI what you want to see. You can change everything afterwards.</p>
         </div>
 
         <div className="space-y-5 px-6 py-5 sm:px-7">

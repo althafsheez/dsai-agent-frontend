@@ -58,13 +58,13 @@ describe("dashboard page", () => {
     renderPage("customer-health");
     expect(await screen.findByRole("textbox", { name: "Dashboard name" })).toHaveValue("Customer Health");
     const tools = screen.getByRole("complementary", { name: "Dashboard tools" });
-    const names = within(tools).getAllByRole("region").map((region) => region.getAttribute("aria-label") ?? region.textContent?.slice(0, 20));
-    expect(names.indexOf("Datasets")).toBeLessThan(names.length - 1);
+    expect(within(tools).getByRole("tab", { name: /Datasets/ })).toHaveAttribute("aria-selected", "true");
+    expect(within(tools).getByRole("tab", { name: /Library/ })).toBeVisible();
     expect(await within(tools).findByText("orders.csv")).toBeVisible();
-    expect(within(tools).getByRole("textbox", { name: "Ask AI to change this dashboard" })).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "Ask AI to change this dashboard" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Preview" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /Save changes/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Save draft/ })).toBeDisabled();
   });
 
   it("previews without editing tools or refresh, and goes back to editing", async () => {
@@ -80,20 +80,19 @@ describe("dashboard page", () => {
     expect(screen.getByRole("textbox", { name: "Dashboard name" })).toBeVisible();
   });
 
-  it("publishes on a schedule and then shows the clean live view", async () => {
+  it("publishes as live (no schedule) and then shows the clean live view", async () => {
     const user = userEvent.setup();
     renderPage("customer-health");
     await user.click(await screen.findByRole("button", { name: "Publish" }));
-    await user.selectOptions(await screen.findByRole("combobox", { name: "Update schedule" }), "60");
     await user.click(screen.getByRole("button", { name: "Publish dashboard" }));
-    expect(save).toHaveBeenCalledWith(expect.objectContaining({ id: "customer-health", status: "published", refresh_minutes: 60 }));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ id: "customer-health", status: "published", refresh_minutes: 1 }));
     expect(await screen.findByText(/Published · live/)).toBeVisible();
     expect(screen.getByRole("button", { name: "Edit" })).toBeVisible();
-    expect(screen.getByRole("button", { name: /Refresh data/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Refresh data/ })).not.toBeInTheDocument();
     const tools = screen.getByRole("complementary", { name: "Dashboard tools" });
     expect(await within(tools).findByText("orders.csv")).toBeVisible();
-    expect(within(tools).getByRole("button", { name: "Edit dashboard" })).toBeVisible();
-    expect(within(tools).queryByRole("button", { name: /Add dataset/ })).not.toBeInTheDocument();
+    expect(within(tools).queryByRole("button", { name: "Edit dashboard" })).not.toBeInTheDocument();
+    expect(within(tools).getByRole("button", { name: /Add dataset/ })).toBeVisible();
     expect(screen.queryByRole("textbox", { name: "Ask AI to change this dashboard" })).not.toBeInTheDocument();
     expect(screen.getByRole("status", { name: "Dashboard status" })).toHaveTextContent("Published");
   });
@@ -102,20 +101,25 @@ describe("dashboard page", () => {
     const user = userEvent.setup();
     renderPage("live-one");
     expect(await screen.findByRole("heading", { name: "Live One" })).toBeVisible();
-    expect(screen.getByText("Every 15 min")).toBeVisible();
+    expect(screen.getByRole("status", { name: "Dashboard status" })).toHaveTextContent(/· live/);
     expect(screen.queryByRole("textbox", { name: "Ask AI to change this dashboard" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Edit" }));
-    expect(await screen.findByRole("textbox", { name: "Ask AI to change this dashboard" })).toBeVisible();
+    const tools = screen.getByRole("complementary", { name: "Dashboard tools" });
+    expect(await within(tools).findByRole("textbox", { name: "Ask AI to change this dashboard" })).toBeVisible();
+    expect(within(tools).queryByRole("tab", { name: /Datasets/ })).not.toBeInTheDocument();
   });
 
-  it("keeps tiles locked until Edit is pressed, then offers the add-a-tile panel in the centre and drag handles", async () => {
+  it("keeps tiles locked until Edit is pressed, then swaps the datasets panel for the edit panel", async () => {
     const user = userEvent.setup();
     renderPage("customer-health");
     const edit = await screen.findByRole("button", { name: "Edit" });
-    expect(screen.queryByText("Add a tile yourself")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Move Revenue by region" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Move Revenue by region" })).not.toBeInTheDocument();
     await user.click(edit);
-    expect(await screen.findByText("Add a tile yourself")).toBeVisible();
+    const tools = screen.getByRole("complementary", { name: "Dashboard tools" });
+    expect(await within(tools).findByRole("list", { name: "Starting prompts" })).toBeVisible();
+    expect(within(tools).getByRole("textbox", { name: "Ask AI to change this dashboard" })).toBeVisible();
+    expect(within(tools).queryByRole("tab", { name: /Datasets/ })).not.toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Move Revenue by region" })).toBeVisible();
     expect(screen.getByRole("separator", { name: "Resize Revenue by region" })).toBeVisible();
   });
@@ -134,7 +138,7 @@ describe("dashboard page", () => {
     await user.clear(sql);
     await user.type(sql, "SELECT region AS name, SUM(revenue) AS value FROM orders GROUP BY region");
     await user.click(within(editor).getByRole("button", { name: "Run & apply" }));
-    expect(screen.getByRole("button", { name: /Save changes/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Save draft/ })).toBeEnabled();
   });
 
   it("is read-only for viewers: no edit, share, delete or AI change box", async () => {

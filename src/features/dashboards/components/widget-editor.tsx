@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { CHART_LABEL, numberLikeColumns, numericColumns } from "../logic/aggregate";
 import { generatedSql, tableFor } from "../logic/sql";
 import { GROUPED_TYPES, usedDatasetIds } from "../types";
-import type { DashboardWidget, DatasetLite, WidgetType } from "../types";
+import type { DashboardWidget, DatasetLite, WidgetLayout, WidgetType } from "../types";
 import { retype } from "./widget-card";
 
 const select = "h-8 w-full rounded-md border bg-surface px-2 text-xs outline-none focus:border-border-strong";
@@ -17,6 +17,9 @@ const area = "min-h-32 w-full resize-y rounded-md border bg-surface p-2 font-mon
 const TYPES = Object.keys(CHART_LABEL).filter((type) => type !== "custom") as WidgetType[];
 
 interface WidgetEditorProps {
+  /** The tile's cell on the grid; changes go through the grid so tiles never overlap. */
+  layout?: WidgetLayout;
+  onLayout?: (layout: WidgetLayout) => void;
   widget: DashboardWidget;
   /** Every dataset the dashboard can use. */
   datasets: DatasetLite[];
@@ -26,7 +29,7 @@ interface WidgetEditorProps {
 }
 
 /** Everything about one widget in one place: which tables it reads, the query behind it (visual, SQL or Python), its type and width. */
-export function WidgetEditor({ widget, datasets, onChange, onRemove, onClose }: WidgetEditorProps) {
+export function WidgetEditor({ widget, datasets, onChange, onRemove, onClose, layout, onLayout }: WidgetEditorProps) {
   const ids = usedDatasetIds([widget]);
   const dataset = datasets.find((item) => item.id === widget.dataset_id);
   const available = datasets.map((item) => item.id);
@@ -154,14 +157,15 @@ export function WidgetEditor({ widget, datasets, onChange, onRemove, onClose }: 
               </select>
             </label>
           ) : null}
-          <div><span className={label}>Size on the grid (columns × rows)</span>
-            <div role="group" aria-label="Size" className="flex items-center gap-1.5">
-              <input type="number" min={1} max={12} aria-label="Columns" value={widget.layout?.w ?? widget.span * 4} onChange={(event) => onChange({ ...widget, layout: { c: widget.layout?.c ?? 0, r: widget.layout?.r ?? 0, h: widget.layout?.h ?? 5, w: Math.min(12, Math.max(1, Number(event.target.value) || 1)) } })} className="h-8 w-16 rounded-md border bg-surface px-2 text-xs" />
-              <span className="text-xs text-muted-foreground">×</span>
-              <input type="number" min={2} aria-label="Rows" value={widget.layout?.h ?? 5} onChange={(event) => onChange({ ...widget, layout: { c: widget.layout?.c ?? 0, r: widget.layout?.r ?? 0, w: widget.layout?.w ?? widget.span * 4, h: Math.max(2, Number(event.target.value) || 2) } })} className="h-8 w-16 rounded-md border bg-surface px-2 text-xs" />
-              <span className="text-[10px] text-muted-foreground">or drag the corner when Edit is on</span>
+          {layout && onLayout ? (
+            <div><span className={label}>Size (columns × rows)</span>
+              <div role="group" aria-label="Size" className="flex items-center gap-1.5">
+                <input type="number" min={1} max={12} aria-label="Columns" value={layout.w} onChange={(event) => onLayout({ ...layout, w: Math.min(12, Math.max(1, Number(event.target.value) || 1)) })} className="h-8 w-14 rounded-md border bg-surface px-2 text-xs" />
+                <span className="text-xs text-muted-foreground">×</span>
+                <input type="number" min={2} aria-label="Rows" value={layout.h} onChange={(event) => onLayout({ ...layout, h: Math.max(2, Number(event.target.value) || 2) })} className="h-8 w-14 rounded-md border bg-surface px-2 text-xs" />
+              </div>
             </div>
-          </div>
+          ) : null}
         </div>
 
         <button type="button" onClick={onRemove} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-red-300"><Trash2 className="size-3.5" />Remove widget</button>

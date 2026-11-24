@@ -29,8 +29,11 @@ export function GridCanvas({ widgets, layouts, unlocked, onLayouts, render }: Gr
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(960);
   const [live, setLive] = useState<Layouts | null>(null);
+  /** Pointer offset in pixels, so the held tile follows the pointer exactly while the others snap. */
+  const [delta, setDelta] = useState<{ x: number; y: number } | null>(null);
   const gesture = useRef<Gesture | null>(null);
   const liveRef = useRef<Layouts | null>(null);
+  const lastKey = useRef("");
 
   useEffect(() => {
     const node = box.current;
@@ -50,6 +53,9 @@ export function GridCanvas({ widgets, layouts, unlocked, onLayouts, render }: Gr
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     gesture.current = { id, kind, x: event.clientX, y: event.clientY, from: layouts };
+    liveRef.current = layouts;
+    setLive(layouts);
+    setDelta({ x: 0, y: 0 });
   }
 
   function move(event: ReactPointerEvent<HTMLElement>) {
@@ -58,9 +64,13 @@ export function GridCanvas({ widgets, layouts, unlocked, onLayouts, render }: Gr
     const dc = Math.round((event.clientX - g.x) / (colW + GAP));
     const dr = Math.round((event.clientY - g.y) / (ROW_H + GAP));
     const base = g.from[g.id];
+    setDelta({ x: event.clientX - g.x, y: event.clientY - g.y });
     const next = g.kind === "move"
       ? { ...base, c: Math.min(COLS - base.w, Math.max(0, base.c + dc)), r: Math.max(0, base.r + dr) }
       : { ...base, w: Math.min(COLS - base.c, Math.max(MIN_W, base.w + dc)), h: Math.max(MIN_H, base.h + dr) };
+    const key = `${next.c},${next.r},${next.w},${next.h}`;
+    if (key === lastKey.current) return;
+    lastKey.current = key;
     const settled = settle({ ...g.from, [g.id]: next }, g.id);
     liveRef.current = settled;
     setLive(settled);
@@ -68,13 +78,30 @@ export function GridCanvas({ widgets, layouts, unlocked, onLayouts, render }: Gr
 
   function end() {
     const done = liveRef.current;
+    if (gesture.current && delta && Math.hypot(delta.x, delta.y) > 4) {
+      // The pointer-up after a drag would also click the tile (and open its editor); swallow that one click.
+      const swallow = (event: MouseEvent) => { event.stopPropagation(); event.preventDefault(); };
+      window.addEventListener("click", swallow, { capture: true, once: true });
+      window.setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
+    }
     gesture.current = null;
     liveRef.current = null;
+    lastKey.current = "";
     setLive(null);
+    setDelta(null);
     if (done && JSON.stringify(done) !== JSON.stringify(layouts)) onLayouts(done);
   }
 
   const active = gesture.current?.id;
+  const box_ = (cell: { c: number; r: number; w: number; h: number }) => ({ left: cell.c * (colW + GAP), top: cell.r * (ROW_H + GAP), width: cell.w * colW + (cell.w - 1) * GAP, height: cell.h * ROW_H + (cell.h - 1) * GAP });
+  const held = (id: string) => {
+    const g = gesture.current;
+    if (!g || g.id !== id || !delta) return null;
+    const from = box_(g.from[id]);
+    return g.kind === "move"
+      ? { ...from, left: from.left + delta.x, top: from.top + delta.y }
+      : { ...from, width: Math.max(colW, from.width + delta.x), height: Math.max(ROW_H * MIN_H, from.height + delta.y) };
+  };
   return (
     <div
       ref={box}
@@ -82,14 +109,15 @@ export function GridCanvas({ widgets, layouts, unlocked, onLayouts, render }: Gr
       style={narrow ? undefined : { height: Math.max(1, rowsOf(shown)) * (ROW_H + GAP) }}
       data-testid="grid-canvas"
     >
+      {active && live?.[active] ? <div aria-hidden="true" style={box_(live[active])} className="pointer-events-none absolute rounded-lg border-2 border-dashed border-sage/60 bg-sage/10 transition-[left,top,width,height] duration-150 ease-out" /> : null}
       {widgets.map((widget) => {
         const cell = shown[widget.id];
         if (!cell) return null;
         const style = narrow
           ? { height: cell.h * ROW_H + (cell.h - 1) * GAP, marginBottom: GAP }
-          : { left: cell.c * (colW + GAP), top: cell.r * (ROW_H + GAP), width: cell.w * colW + (cell.w - 1) * GAP, height: cell.h * ROW_H + (cell.h - 1) * GAP };
+          : held(widget.id) ?? box_(cell);
         return (
-          <div key={widget.id} style={style} className={cn(!narrow && "absolute transition-[left,top,width,height] duration-150", active === widget.id && "z-10 opacity-90 shadow-xl transition-none")}
+          <div key={widget.id} style={style} className={cn(!narrow && "absolute transition-[left,top,width,height] duration-200 ease-out", active === widget.id && "z-20 cursor-grabbing opacity-95 shadow-2xl ring-1 ring-sage/50 transition-none")}
             onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
             {render(widget, unlocked && !narrow ? { onPointerDown: (event) => start(widget.id, "move", event) } : undefined)}
             {unlocked && !narrow ? (

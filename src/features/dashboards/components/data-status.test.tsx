@@ -1,6 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { DataStatus, ago } from "./data-status";
 
 describe("ago", () => {
@@ -15,22 +14,18 @@ describe("ago", () => {
 });
 
 describe("DataStatus", () => {
-  const base = { checkedAt: Date.now(), dataChangedAt: null, refreshing: false, syncIssue: false, refreshMinutes: 0, onRefresh: vi.fn() };
+  const base = { checkedAt: Date.now(), dataChangedAt: null, syncIssue: false };
 
-  it("refreshes on click and lets editors pick the auto-refresh schedule", async () => {
-    const onRefresh = vi.fn();
-    const onRefreshMinutes = vi.fn();
-    render(<DataStatus {...base} onRefresh={onRefresh} onRefreshMinutes={onRefreshMinutes} />);
-    await userEvent.click(screen.getByRole("button", { name: /Refresh data/ }));
-    expect(onRefresh).toHaveBeenCalled();
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Auto-refresh" }), "5");
-    expect(onRefreshMinutes).toHaveBeenCalledWith(5);
+  it("says live when published, with no refresh button or schedule", () => {
+    render(<DataStatus {...base} live dataChangedAt={new Date(Date.now() - 120_000).toISOString()} />);
+    expect(screen.getByText(/live · data changed 2 min ago/)).toBeVisible();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   });
 
-  it("shows the schedule as text for viewers and warns when Drive could not be reached", () => {
-    render(<DataStatus {...base} refreshMinutes={15} syncIssue />);
-    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
-    expect(screen.getByText("Every 15 min")).toBeVisible();
+  it("says a draft shows a snapshot, and warns when Drive could not be reached", () => {
+    render(<DataStatus {...base} live={false} syncIssue />);
+    expect(screen.getByText(/showing the data as of/)).toBeVisible();
     expect(screen.getByText(/Could not reach Google Drive/)).toBeVisible();
   });
 });
