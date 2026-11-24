@@ -367,11 +367,15 @@ export function LibraryPage() {
             >
               <LibraryThumbnail item={item} compact={view === "list"} />
             </button>
-            {isFav && (
-              <span aria-hidden="true" className="pointer-events-none absolute left-2 top-2 z-10 grid size-6 place-items-center rounded-md border border-amber-400/40 bg-black/70 text-amber-400">
-                <Star className="size-3 fill-amber-400" />
-              </span>
-            )}
+            <button
+              type="button"
+              onClick={() => toggleFavorite(item.id)}
+              aria-label={isFav ? `Unfavorite ${item.name}` : `Favorite ${item.name}`}
+              aria-pressed={isFav}
+              className="absolute left-2 top-2 z-10 grid size-7 place-items-center rounded-md border border-white/20 bg-black/75 text-white transition-opacity hover:bg-black/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(hover:hover)]:pointer-events-none [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:pointer-events-auto [@media(hover:hover)]:group-hover:opacity-100 focus-visible:!pointer-events-auto focus-visible:!opacity-100"
+            >
+              <Star aria-hidden="true" className={cn("size-3.5", isFav && "fill-current")} />
+            </button>
             {view === "grid" && <div className="pointer-events-none absolute inset-x-0 bottom-[64px] h-16 bg-gradient-to-t from-background/95 to-transparent" />}
             {view === "grid" && <span className={`pointer-events-none absolute bottom-[78px] left-3 text-[10px] font-medium uppercase tracking-[0.12em] ${categoryStyle[item.library_category].color}`}>{categoryLabel(item.library_category)}</span>}
             <div className={`relative min-w-0 shrink-0 p-3 ${view === "list" ? "flex-1" : ""}`}>
@@ -397,18 +401,6 @@ export function LibraryPage() {
                 </p>
               </button>
               <div className={`absolute right-3 flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100 ${view === "grid" ? "bottom-full mb-2" : "bottom-3.5"}`}>
-                <button
-                  type="button"
-                  onClick={() => toggleFavorite(item.id)}
-                  aria-label={isFav ? `Unfavorite ${item.name}` : `Favorite ${item.name}`}
-                  aria-pressed={isFav}
-                  className={cn(
-                    "grid size-7 place-items-center rounded-md bg-raised transition-colors",
-                    isFav ? "text-amber-400 hover:text-amber-300" : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  <Star className={cn("size-3.5", isFav && "fill-amber-400")} />
-                </button>
                 <button
                   type="button"
                   onClick={() => setPreview(item)}
@@ -524,7 +516,7 @@ export function LibraryPage() {
           </button>
           </div>
         </header>
-        <DriveBrowserDialog open={driveOpen} onOpenChange={setDriveOpen} onReauth={() => router.push("/connectors")} target={{ scopeType: "library", scopeId: "library", label: "your Library" }} />
+        <DriveBrowserDialog open={driveOpen} onOpenChange={setDriveOpen} onReauth={() => router.push("/extensions")} target={{ scopeType: "library", scopeId: "library", label: "your Library" }} />
         {zipMutation.isError ? <p role="alert" className="-mt-3 mb-4 text-xs text-red-300">Download failed. Please try again.</p> : null}
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -546,15 +538,8 @@ export function LibraryPage() {
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <Icon
-                  className={cn("size-3.5", id === "favorites" && favorites.size > 0 && "fill-amber-400 text-amber-400")}
-                />
+                <Icon aria-hidden="true" className="size-3.5" />
                 {label}
-                {id === "favorites" && favorites.size > 0 && (
-                  <span className="ml-1 rounded-full border border-amber-400/20 bg-amber-400/10 px-1.5 text-[10px] font-semibold text-amber-400">
-                    {favorites.size}
-                  </span>
-                )}
               </button>
             ))}
           </div>
@@ -698,7 +683,7 @@ export function LibraryPage() {
         ) : (
           <div className="mt-8 rounded-xl border border-dashed px-6 py-16 text-center">
             {filter === "favorites" && ownership !== "shared" ? (
-              <Star className="mx-auto size-7 text-amber-400/60" strokeWidth={1.5} />
+              <Star className="mx-auto size-7 text-muted-foreground" strokeWidth={1.5} />
             ) : (
               <Bookmark className="mx-auto size-7 text-muted-foreground" strokeWidth={1.5} />
             )}

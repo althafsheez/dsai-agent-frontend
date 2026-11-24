@@ -859,7 +859,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
       case "mcp":
       case "skills":
         clearDraft(null);
-        router.push("/connectors");
+        router.push("/extensions");
         return;
       case "memory":
         if (!chatQuery.data?.workspace_id) return clearDraft("Memory lives in a workspace's AI context. Move this chat into a workspace first.");
@@ -1687,7 +1687,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
         <DriveBrowserDialog
           open={driveDialogOpen}
           onOpenChange={setDriveDialogOpen}
-          onReauth={() => router.push("/connectors")}
+          onReauth={() => router.push("/extensions")}
           target={{ scopeType: "chat", scopeId: chatId, label: "this chat" }}
           onImported={(result) => {
             void queryClient.invalidateQueries({ queryKey: ["chat", chatId] });

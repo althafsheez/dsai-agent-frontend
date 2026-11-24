@@ -19,7 +19,7 @@ src/
       layout.tsx, page.tsx
       chat/[chatId]/page.tsx
       workspaces/page.tsx, workspaces/[workspaceId]/page.tsx
-      history/page.tsx, library/page.tsx, connectors/page.tsx
+      history/page.tsx, library/page.tsx, extensions/page.tsx
       dashboards/page.tsx, workflows/page.tsx, settings/page.tsx
   components/
     ui/                     # shadcn/Radix primitives
@@ -64,10 +64,10 @@ Create directories when needed. Keep route composition separate from business ru
 - /workspaces: generic list/create. /workspaces/[workspaceId]: chats and workspace datasets; direct workspace uploads.
 - /history: chats and workspaces only.
 - /library: saved artifact references across accessible contexts.
-- /connectors: connect and manage PostgreSQL from its catalog card. Other external connectors are marked coming soon.
+- /extensions: manage saved connections and enabled skill previews in My Connections. Browse Databases, Apps, and Skills in separate tabs. PostgreSQL and Google Drive use their existing connector APIs. Entries without an implementation show a disabled Add action.
 - Dashboards/Workflows navigation and placeholders; full builders deferred.
 
-Sidebar: logo/name, search icon, collapse control, New Analysis. Exact nav order: Recent Analyses, Workspaces, Dashboards, Workflows, Library, Connectors. First four have compact recent-item hover flyouts, also keyboard-accessible; click navigates. Collapsible Pinned and Activity below. Avatar/name/settings footer. No inline expanded recent list. Approximately 240px expanded, 56px collapsed; mobile drawer and readable focus styles.
+Sidebar: logo/name, search icon, collapse control, New Analysis. Exact nav order: Recent Analyses, Workspaces, Dashboards, Workflows, Library, Extensions. First four have compact recent-item hover flyouts, also keyboard-accessible; click navigates. Collapsible Pinned and Activity below. Avatar/name/settings footer. No inline expanded recent list. Approximately 240px expanded, 56px collapsed; mobile drawer and readable focus styles.
 
 Header: standalone = chat title; workspace chat = folder icon + clickable workspace name > chat title; workspace overview = folder icon + workspace name. Share and right-panel toggle on chat header; sharing may be visibly unavailable until implemented.
 

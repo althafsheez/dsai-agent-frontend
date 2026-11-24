@@ -351,7 +351,7 @@ export function WelcomeComposer({ initialWorkspaceId = null }: { initialWorkspac
         : <p id="composer-hint"><span className="hidden sm:inline">Enter to send · Shift + Enter for a new line</span><span className="sm:hidden">Add files, choose a workspace, then send</span></p>}
     </div>
 
-    <DriveBrowserDialog open={driveOpen} onOpenChange={setDriveOpen} onReauth={() => router.push("/connectors")} onPick={(files) => setDriveFiles((current) => [...current, ...files.filter((file) => !current.some((item) => item.id === file.id))])} />
+    <DriveBrowserDialog open={driveOpen} onOpenChange={setDriveOpen} onReauth={() => router.push("/extensions")} onPick={(files) => setDriveFiles((current) => [...current, ...files.filter((file) => !current.some((item) => item.id === file.id))])} />
 
     <div className="mt-3 flex flex-wrap justify-center gap-2">
       {suggestions.map(({ icon: Icon, label, prompt }) => <button key={label} type="button" onClick={() => { setDraft(prompt); setError(null); inputRef.current?.focus(); }}

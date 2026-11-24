@@ -13,8 +13,9 @@ test("connects to a real PostgreSQL database and submits it from New Analysis", 
   };
   const name = `Browser PostgreSQL sales ${testInfo.project.name}`;
 
-  await page.goto("/connectors");
-  await page.getByRole("button", { name: "Connect PostgreSQL" }).click();
+  await page.goto("/extensions");
+  await page.getByRole("tab", { name: "Databases" }).click();
+  await page.getByRole("button", { name: "Add PostgreSQL" }).click();
   const setup = page.getByRole("dialog", { name: "Add PostgreSQL connection" });
   await setup.getByLabel("Connection name").fill(name);
   await setup.getByLabel("Host", { exact: true }).fill(form.host);
@@ -27,7 +28,8 @@ test("connects to a real PostgreSQL database and submits it from New Analysis", 
   await expect(setup.getByText("Connected to PostgreSQL")).toBeVisible();
   await setup.getByRole("button", { name: "Save Connection" }).click();
 
-  const saved = page.getByRole("region", { name: "Saved PostgreSQL connections" }).getByRole("article").filter({ hasText: name });
+  await page.getByRole("button", { name: "Manage PostgreSQL" }).click();
+  const saved = page.getByRole("dialog", { name: "Manage PostgreSQL" }).getByRole("article").filter({ hasText: name });
   await expect(saved).toContainText("Connected");
   await saved.getByRole("button", { name: "Browse tables" }).click();
   const browser = page.getByRole("dialog", { name });
@@ -61,8 +63,10 @@ test("connects to a real PostgreSQL database and submits it from New Analysis", 
     expect(envelopes.find((event) => event.type === "message.completed")?.data.content).toContain("173");
   }
 
-  await page.goto("/connectors");
+  await page.goto("/extensions");
+  await page.getByRole("button", { name: "Manage PostgreSQL" }).click();
   await saved.getByRole("button", { name: "Disconnect" }).click();
   await page.getByRole("dialog", { name: "Disconnect PostgreSQL" }).getByRole("button", { name: "Disconnect" }).click();
-  await expect(saved).toHaveCount(0);
+  const disconnected = page.getByRole("status").filter({ hasText: `${name} disconnected.` });
+  await expect(disconnected).toBeVisible();
 });

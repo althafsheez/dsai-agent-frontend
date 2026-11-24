@@ -109,7 +109,7 @@ export function DriveBrowserDialog({ open, onOpenChange, onReauth, target: fixed
 
         <div className="min-h-[220px] flex-1 overflow-y-auto rounded-md border" role="list" aria-label="Drive files">
           {files.isPending ? <p className="flex items-center gap-2 p-4 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />Loading…</p> : null}
-          {files.isError ? <p role="alert" className="p-4 text-xs text-red-300">{errorText(files.error)}{files.error instanceof ApiError && files.error.code === "connector_not_connected" ? <> <Link href="/connectors" className="underline">Open Connectors</Link></> : null}</p> : null}
+          {files.isError ? <p role="alert" className="p-4 text-xs text-red-300">{errorText(files.error)}{files.error instanceof ApiError && files.error.code === "connector_not_connected" ? <> <Link href="/extensions" className="underline">Open Extensions</Link></> : null}</p> : null}
           {files.isSuccess && !items.length ? <p className="p-4 text-xs text-muted-foreground">{query ? "No files match that search." : "This folder is empty."}</p> : null}
           {items.map((file) => {
             const failure = failedById.get(file.id);

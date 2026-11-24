@@ -1,8 +1,17 @@
-import type { Metadata } from "next";
-import { ConnectorsPage } from "@/features/connectors/components/connectors-page";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = { title: "Connectors" };
+export default async function LegacyConnectorsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(await searchParams)) {
+    for (const item of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+      params.append(key, item);
+    }
+  }
 
-export default function Page() {
-  return <ConnectorsPage />;
+  const query = params.toString();
+  redirect(query ? `/extensions?${query}` : "/extensions");
 }

@@ -268,17 +268,10 @@ export function WorkspacesPage() {
                       href={`/workspaces/${workspace.id}`}
                       className="flex min-w-0 items-center gap-2.5 px-1 py-3 outline-none focus-visible:bg-raised"
                     >
-                      <div className="min-w-0">
-                        <span className="flex min-w-0 items-center gap-1.5 font-medium group-hover:text-foreground">
-                          <span className="truncate">{workspace.name}</span>
-                          {workspace.pinned_at && <Pin aria-label="Pinned" className="size-3 shrink-0 fill-current text-muted-foreground" />}
-                        </span>
-                        {workspace.description && (
-                          <span className="block truncate text-[11px] font-normal text-muted-foreground">
-                            {workspace.description}
-                          </span>
-                        )}
-                      </div>
+                      <span className="flex min-w-0 items-center gap-1.5 font-medium group-hover:text-foreground">
+                        <span className="truncate">{workspace.name}</span>
+                        {workspace.pinned_at && <Pin aria-label="Pinned" className="size-3 shrink-0 fill-current text-muted-foreground" />}
+                      </span>
                     </Link>
                   </td>
                   <td className="truncate px-3.5 py-3 text-muted-foreground">

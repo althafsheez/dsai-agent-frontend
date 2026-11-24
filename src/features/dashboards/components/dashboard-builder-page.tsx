@@ -227,7 +227,7 @@ export function DashboardBuilderPage() {
           </Section>
         </div>
       </div>
-      <DriveBrowserDialog open={driveOpen} onOpenChange={setDriveOpen} target={{ scopeType: "library", scopeId: "library", label: "your Library" }} onReauth={() => router.push("/connectors")} onImported={() => void hydrated.refetch()} />
+      <DriveBrowserDialog open={driveOpen} onOpenChange={setDriveOpen} target={{ scopeType: "library", scopeId: "library", label: "your Library" }} onReauth={() => router.push("/extensions")} onImported={() => void hydrated.refetch()} />
     </section>
   );
 }

@@ -1,4 +1,4 @@
-import { BookOpen, FolderKanban, History, LayoutDashboard, Plug, Workflow } from "lucide-react";
+import { BookOpen, FolderKanban, History, LayoutDashboard, Layers3, Workflow } from "lucide-react";
 
 export const navigation = [
   { label: "Recent Analyses", href: "/history", icon: History, flyout: true },
@@ -6,7 +6,7 @@ export const navigation = [
   { label: "Dashboards", href: "/dashboards", icon: LayoutDashboard, flyout: true },
   { label: "Workflows", href: "/workflows", icon: Workflow, flyout: true },
   { label: "Library", href: "/library", icon: BookOpen, flyout: false },
-  { label: "Connectors", href: "/connectors", icon: Plug, flyout: false },
+  { label: "Extensions", href: "/extensions", icon: Layers3, flyout: false },
 ] as const;
 export const searchablePages = [
   { label: "New Analysis", href: "/", description: "Start with a question about your data" },

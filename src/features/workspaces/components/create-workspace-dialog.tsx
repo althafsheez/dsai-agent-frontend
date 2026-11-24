@@ -132,7 +132,7 @@ export function CreateWorkspaceDialog({ onCreated }: CreateWorkspaceDialogProps)
                 <p className="min-w-0 flex-1">
                   <span className="font-medium text-foreground">{selectedConnector.name}</span> connections are not available yet. Export the data as CSV, Excel or Parquet and upload it above for now.
                 </p>
-                <Link href="/connectors" className="inline-flex shrink-0 items-center gap-1 text-foreground hover:underline">Connectors<ArrowRight className="size-3" /></Link>
+                <Link href="/extensions" className="inline-flex shrink-0 items-center gap-1 text-foreground hover:underline">Extensions<ArrowRight className="size-3" /></Link>
               </div>
             ) : null}
           </section>
