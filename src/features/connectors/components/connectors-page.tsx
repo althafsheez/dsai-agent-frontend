@@ -94,7 +94,7 @@ function ConnectorRow({ connector, connected, onToggle, live }: { connector: Con
           {live?.unavailable ? "Not configured on this server. Add Google credentials to the backend to enable it." : connected && live?.email ? `Connected as ${live.email}` : connector.description}
         </p>
       </div>
-      {connected ? <span className="hidden shrink-0 items-center gap-1 rounded-full border border-emerald-400/30 px-2 py-0.5 text-[10px] text-emerald-300 sm:inline-flex"><Check className="size-3" />Connected</span> : null}
+      {connected && !live ? <span className="hidden shrink-0 items-center gap-1 rounded-full border border-emerald-400/30 px-2 py-0.5 text-[10px] text-emerald-300 sm:inline-flex"><Check className="size-3" />Connected</span> : null}
       {live && connected ? (
         <button type="button" onClick={live.onBrowse} className="h-8 shrink-0 rounded-md bg-foreground px-3 text-xs text-background hover:opacity-90">Import files</button>
       ) : null}

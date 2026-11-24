@@ -22,7 +22,7 @@ export function AddDatasetMenu({ onUploaded, onDrive }: { onUploaded: () => void
       </button>
       <input ref={input} type="file" multiple accept=".csv,.tsv,.xlsx,.xls" className="sr-only" tabIndex={-1} aria-label="Choose dataset files" onChange={(event) => { const files = Array.from(event.target.files ?? []); if (files.length) upload.mutate(files); event.currentTarget.value = ""; }} />
       {open ? (
-        <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-72 animate-pop-in overflow-hidden rounded-xl border border-border-strong bg-sidebar p-1.5 shadow-2xl">
+        <div role="menu" onMouseDown={(event) => event.preventDefault()} className="absolute right-0 top-full z-30 mt-2 w-60 max-w-[calc(100vw-2rem)] animate-pop-in overflow-hidden rounded-xl border border-border-strong bg-sidebar p-1.5 shadow-2xl">
           <button type="button" role="menuitem" onClick={() => { setOpen(false); input.current?.click(); }} className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-raised">
             <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#b8cef0] text-[#172033]"><Paperclip className="size-4" /></span>
             <span className="min-w-0"><span className="block text-xs font-semibold">Local storage</span><span className="block text-[10px] text-muted-foreground">Upload from your device</span></span>
