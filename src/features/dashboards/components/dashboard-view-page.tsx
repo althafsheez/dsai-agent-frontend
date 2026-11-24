@@ -272,8 +272,15 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   return (
     <div className="flex flex-col xl:min-h-0 xl:flex-1 xl:flex-row">
       <section className="min-w-0 xl:flex-1 xl:overflow-y-auto">
+        <div className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur sm:px-6">
+          <Link href="/dashboards" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="size-3.5" />Dashboards</Link>
+          <div className="ml-auto flex items-center gap-2">
+            {editing ? <Button type="button" variant="outline" onClick={() => { setOpenId(null); setMode("preview"); }} disabled={!draft.length}><Eye />Preview</Button> : null}
+            {mode === "preview" ? <Button type="button" variant="outline" onClick={() => setMode("edit")}><Pencil />Back to editing</Button> : null}
+            {mode !== "view" && isOwner && !published ? <Button type="button" onClick={() => setPublishOpen(true)} disabled={!draft.length || !name.trim()}><Radio />Publish</Button> : null}
+          </div>
+        </div>
         <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
-      <Link href="/dashboards" className="mb-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="size-3.5" />Dashboards</Link>
       <div role="status" aria-label="Dashboard status" className={cn("mb-3 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-xs", published ? "border-emerald-400/30 bg-emerald-400/5 text-emerald-200" : "bg-surface/50 text-muted-foreground")}>
         {published ? <Radio className="size-3.5" /> : <Pencil className="size-3.5" />}
         <span className="font-medium">{published ? "Published" : "Draft"}</span>
@@ -296,20 +303,13 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
               {isOwner ? <Button type="button" variant="outline" onClick={() => setShareOpen(true)}><Share2 />Share</Button> : null}
               {canEdit ? <Button type="button" variant="outline" aria-pressed={false} onClick={startEditing}><Pencil />Edit</Button> : null}
             </>
-          ) : mode === "preview" ? (
-            <>
-              <Button type="button" variant="outline" onClick={() => setMode("edit")}><Pencil />Back to editing</Button>
-              {isOwner && !published ? <Button type="button" onClick={() => setPublishOpen(true)} disabled={!draft.length || !name.trim()}><Radio />Publish</Button> : null}
-            </>
-          ) : (
+          ) : mode === "preview" ? null : (
             <>
               {dirty ? <Button type="button" variant="outline" onClick={discard}><Undo2 />Discard</Button> : null}
-              <Button type="button" variant="outline" onClick={() => { setOpenId(null); setMode("preview"); }} disabled={!draft.length}><Eye />Preview</Button>
               {unlocked || published
                 ? <Button type="button" aria-pressed onClick={finishEditing} disabled={save.isPending}><Check />Done</Button>
                 : <Button type="button" variant="outline" aria-pressed={false} onClick={startEditing}><Pencil />Edit</Button>}
               {!published ? <Button type="button" variant="outline" onClick={() => void saveEdits()} disabled={!dirty || !name.trim() || save.isPending}><Save />Save draft</Button> : null}
-              {isOwner && !published ? <Button type="button" onClick={() => setPublishOpen(true)} disabled={!draft.length || !name.trim()}><Radio />Publish</Button> : null}
             </>
           )}
         </div>
