@@ -418,8 +418,9 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
             </div>
           )}
           {canEdit ? (
-            <div aria-label="Edit with AI" style={{ height: chatHeight }} className="relative flex shrink-0 flex-col border-t">
+            <div aria-label="Edit with AI" style={{ height: chatHeight }} className="relative mt-2 flex shrink-0 flex-col border-t-2 border-sage/40 bg-background/50">
               <HeightResizer height={chatHeight} onHeight={setChatHeight} />
+              <p className="flex shrink-0 items-center gap-1.5 border-b px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-sage"><Wand2 className="size-3.5" />Edit with AI</p>
               <div className="min-h-0 flex-1 overflow-y-auto">
                 {pending ? (
                   <div aria-label="AI suggestion" className="space-y-3 p-3">
