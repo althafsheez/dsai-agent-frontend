@@ -68,12 +68,12 @@ def _load(connection: sqlite3.Connection, datasets: list[dict[str, Any]]) -> Non
         connection.executemany(f"INSERT INTO {_quote(table)} VALUES ({', '.join('?' for _ in columns)})", prepared)
 
 
-def run_sql(sql: str, datasets: list[dict[str, Any]], limit: int = MAX_ROWS) -> dict[str, Any]:
+def run_sql(sql: str, datasets: list[dict[str, Any]], limit: int = MAX_ROWS, max_sql: int = MAX_SQL) -> dict[str, Any]:
     statement = sql.strip().rstrip(";").strip()
     if not statement:
         raise SqlError("The query is empty.")
-    if len(statement) > MAX_SQL:
-        raise SqlError(f"The query is longer than {MAX_SQL} characters.")
+    if len(statement) > max_sql:
+        raise SqlError(f"The query is longer than {max_sql} characters.")
     if not re.match(r"(?is)^(select|with)\b", statement):
         raise SqlError("Only SELECT queries are allowed.")
     connection = sqlite3.connect(":memory:")

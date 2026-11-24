@@ -3,10 +3,11 @@
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Funnel, FunnelChart, LabelList, Line, LineChart, PolarAngleAxis, PolarGrid, Pie, PieChart, Radar, RadarChart, ResponsiveContainer, Scatter, ScatterChart, Tooltip, Treemap, XAxis, YAxis, ZAxis } from "recharts";
 import { useQuery } from "@tanstack/react-query";
 import { Code2, GripVertical, LoaderCircle, Pencil, Trash2 } from "lucide-react";
-import { runCustomChart, runDashboardSql } from "@/lib/api";
+import { runCustomChart, runDashboardSql, runDax } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { CHART_LABEL, applyFilters, categoryColumns, formatNumber, numberLikeColumns, gaugeValue, groupedPoints, histogramBins, kpiValue, numericColumns, scatterPoints } from "../logic/aggregate";
 import { resultFromSql } from "../logic/sql";
+import { measureOf, useMeasures } from "../measures-context";
 import { GROUPED_TYPES, NUMERIC_X_TYPES } from "../types";
 import type { CustomResult, DashboardWidget, DatasetLite, Filters, WidgetType } from "../types";
 import type { GridHandle } from "./grid-canvas";
@@ -166,6 +167,31 @@ function CustomBody({ widget, dataset }: { widget: DashboardWidget; dataset: Dat
   return <ResultBody widget={widget} result={run.data as CustomResult} />;
 }
 
+/** A tile drawn from a DAX expression: grouped by the tile's x column for charts, one value for number tiles. Slicers are its filter context. */
+function DaxBody({ widget, filters }: { widget: DashboardWidget; filters: Filters }) {
+  const { measures, datasetIds } = useMeasures();
+  const ids = [...new Set([widget.dataset_id, ...datasetIds])];
+  const grouped = Boolean(widget.x) && !["kpi", "gauge"].includes(widget.type);
+  const own = Object.fromEntries(Object.entries(filters).filter(([column, values]) => column !== widget.x && values.length));
+  const run = useQuery({
+    queryKey: ["dax-run", widget.dax, widget.x, widget.dataset_id, ids, measures, own],
+    queryFn: () => runDax({ expression: widget.dax ?? "", datasetIds: ids, measures, filters: own, group: grouped ? { datasetId: widget.dataset_id, column: widget.x ?? "" } : undefined, order: widget.type === "line" || widget.type === "area" ? "name" : "value" }),
+    enabled: Boolean(widget.dax),
+    staleTime: 60_000,
+    retry: false,
+  });
+  if (run.isPending) return <p className="mt-6 flex items-center gap-2 text-xs text-muted-foreground" role="status"><LoaderCircle className="size-3.5 animate-spin" />Calculating…</p>;
+  if (run.isError || !run.data) return <p role="alert" className="mt-6 text-xs text-red-300">{run.error instanceof Error ? run.error.message : "The DAX formula could not run."}</p>;
+  const percent = measureOf(widget.dax, measures)?.format === "percent";
+  const data = percent ? { ...run.data, rows: run.data.rows.map((row) => row.map((cell, index) => (index === row.length - 1 && typeof cell === "number" ? Math.round(cell * 1000) / 10 : cell))) } : run.data;
+  try {
+    const result = resultFromSql(widget, data);
+    return <ResultBody widget={widget} result={result.kind === "kpi" ? { ...result, label: percent ? "%" : undefined } : result} />;
+  } catch (error) {
+    return <p role="alert" className="mt-6 text-xs text-red-300">{error instanceof Error ? error.message : "The result cannot be drawn as this chart type."}</p>;
+  }
+}
+
 /** A tile drawn from a read-only SQL query over the dashboard's datasets. */
 function SqlBody({ widget, dataset }: { widget: DashboardWidget; dataset: DatasetLite | undefined }) {
   const ids = widget.datasets?.length ? widget.datasets : [widget.dataset_id];
@@ -208,6 +234,7 @@ const AGG_LABEL = { sum: "Sum of", avg: "Average of", count: "Count of rows" } a
 
 /** What the widget computes, in words, so a number can be checked against the data. */
 function describe(widget: DashboardWidget, dataset: DatasetLite | undefined): string {
+  if (widget.dax) return `DAX ${widget.dax.length > 40 ? `${widget.dax.slice(0, 40)}…` : widget.dax}${widget.x && !["kpi", "gauge"].includes(widget.type) ? ` by ${widget.x}` : ""}`;
   if (widget.sql) return `SQL query${dataset ? ` · ${dataset.name}` : ""}`;
   if (widget.type === "custom") return widget.request ? `Python script · ${widget.request}` : "Python script";
   if (!dataset) return "";
@@ -259,7 +286,7 @@ export function WidgetCard({ widget, dataset, editable, filters = {}, onSelect, 
         ) : null}
       </header>
       {!editable && dataset ? <p className="truncate px-0.5 text-[10px] text-muted-foreground" title={describe(widget, dataset)}>{describe(widget, dataset)}</p> : null}
-      {editable && !onOpen && dataset && widget.type !== "kpi" && widget.type !== "table" && widget.type !== "custom" && !widget.sql ? (
+      {editable && !onOpen && dataset && widget.type !== "kpi" && widget.type !== "table" && widget.type !== "custom" && !widget.sql && !widget.dax ? (
         <div className="mt-2 flex flex-wrap gap-1.5">
           <select aria-label="Chart type" value={widget.type} onChange={(event) => onChange?.(retype(widget, event.target.value as WidgetType, dataset))} className="h-7 rounded border bg-surface px-1.5 text-[11px]">{types.map((type) => <option key={type} value={type}>{CHART_LABEL[type]}</option>)}</select>
           {grouped ? column("Category column", widget.x, allColumns, "x") : null}
@@ -270,7 +297,7 @@ export function WidgetCard({ widget, dataset, editable, filters = {}, onSelect, 
           {widget.type === "gauge" ? column("Value column", widget.y, numeric, "y") : null}
         </div>
       ) : null}
-      {widget.sql ? <SqlBody widget={widget} dataset={dataset} /> : widget.type === "custom" ? (
+      {widget.dax ? <DaxBody widget={widget} filters={filters} /> : widget.sql ? <SqlBody widget={widget} dataset={dataset} /> : widget.type === "custom" ? (
         <>
           <details className="mt-1 text-[10px] text-muted-foreground">
             <summary className="inline-flex cursor-pointer items-center gap-1 hover:text-foreground"><Code2 className="size-3" />Built by an AI-written Python script</summary>

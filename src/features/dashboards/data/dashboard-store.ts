@@ -19,7 +19,7 @@ export async function getDashboard(id: string): Promise<Dashboard | null> {
 }
 
 export type DashboardInput = Pick<Dashboard, "name" | "description" | "dataset_ids" | "widgets"> & {
-  id?: string; slicers?: string[]; status?: Dashboard["status"]; pinned?: boolean; refresh_minutes?: number; shares?: Array<{ user_id: string; role: "viewer" | "editor" }>;
+  id?: string; slicers?: string[]; measures?: Dashboard["measures"]; status?: Dashboard["status"]; pinned?: boolean; refresh_minutes?: number; shares?: Array<{ user_id: string; role: "viewer" | "editor" }>;
 };
 
 export async function saveDashboard(input: DashboardInput): Promise<Dashboard> {
@@ -33,6 +33,7 @@ export async function saveDashboard(input: DashboardInput): Promise<Dashboard> {
     slicers: input.slicers ?? existing?.slicers ?? [],
     dataset_ids: input.dataset_ids,
     widgets: input.widgets,
+    measures: input.measures,
     refresh_minutes: input.refresh_minutes ?? existing?.refresh_minutes ?? 0,
     shares: input.shares ?? existing?.shares?.map(({ user_id, role }) => ({ user_id, role })),
   });
@@ -51,6 +52,6 @@ export async function pinDashboard(id: string, pinned: boolean): Promise<Dashboa
 export async function duplicateDashboard(source: Dashboard): Promise<Dashboard> {
   return saveDashboard({
     name: `Copy of ${source.name}`.slice(0, 160), description: source.description, slicers: source.slicers, dataset_ids: source.dataset_ids,
-    widgets: source.widgets, status: "draft", refresh_minutes: source.refresh_minutes, shares: [],
+    widgets: source.widgets, measures: source.measures, status: "draft", refresh_minutes: source.refresh_minutes, shares: [],
   });
 }

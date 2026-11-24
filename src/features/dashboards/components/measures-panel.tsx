@@ -1,0 +1,211 @@
+"use client";
+
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { BarChart3, Check, ChevronDown, Hash, LoaderCircle, Pencil, Plus, Sigma, Sparkles, Trash2 } from "lucide-react";
+import { runDax } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { formatNumber } from "../logic/aggregate";
+import type { DashboardMeasure, DatasetLite, Filters } from "../types";
+
+type Format = NonNullable<DashboardMeasure["format"]>;
+
+const EXAMPLES: Array<[string, string]> = [
+  ["Total", "SUM(Sales[Amount])"],
+  ["Row count", "COUNTROWS(Sales)"],
+  ["Share of total", "DIVIDE([Total], CALCULATE([Total], ALL(Sales)))"],
+  ["Only one region", "CALCULATE([Total], Sales[Region] = \"East\")"],
+  ["Row by row", "SUMX(Sales, Sales[Price] * Sales[Qty])"],
+  ["Big orders", "COUNTROWS(FILTER(Sales, Sales[Amount] > 100))"],
+  ["Variables", "VAR t = [Total] RETURN IF(t > 1000, \"High\", \"Low\")"],
+];
+
+export function formatMeasure(value: unknown, format: Format = "number"): string {
+  if (value === null || value === undefined || value === "") return "(blank)";
+  if (typeof value !== "number") return String(value);
+  if (format === "percent") return `${Math.round(value * 1000) / 10}%`;
+  return format === "currency" ? `$${formatNumber(value)}` : formatNumber(value);
+}
+
+/** The value of a DAX expression right now, with the dashboard's slicers as filter context. */
+function useDaxValue(expression: string, measures: DashboardMeasure[], datasetIds: string[], filters: Filters, enabled = true) {
+  return useQuery({
+    queryKey: ["dax-value", expression, measures, datasetIds, filters],
+    queryFn: () => runDax({ expression, datasetIds, measures, filters }),
+    enabled: enabled && Boolean(expression.trim()) && datasetIds.length > 0,
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+function Value({ expression, measures, datasetIds, filters, format }: { expression: string; measures: DashboardMeasure[]; datasetIds: string[]; filters: Filters; format?: Format }) {
+  const run = useDaxValue(expression, measures, datasetIds, filters);
+  if (run.isFetching && !run.data) return <span className="inline-flex items-center gap-1 text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />…</span>;
+  if (run.isError) return <span role="alert" className="text-red-300">{run.error instanceof Error ? run.error.message : "Error"}</span>;
+  return <span className="font-semibold tabular-nums text-foreground">{formatMeasure(run.data?.rows[0]?.[0], format)}</span>;
+}
+
+interface EditorProps {
+  initial: DashboardMeasure;
+  others: DashboardMeasure[];
+  datasetIds: string[];
+  filters: Filters;
+  onSave: (measure: DashboardMeasure) => void;
+  onCancel: () => void;
+  note?: string;
+}
+
+/** Name, formula and format of one measure, with a Test run before saving. */
+function MeasureEditor({ initial, others, datasetIds, filters, onSave, onCancel, note }: EditorProps) {
+  const [name, setName] = useState(initial.name);
+  const [expression, setExpression] = useState(initial.expression);
+  const [format, setFormat] = useState<Format>(initial.format ?? "number");
+  const [tested, setTested] = useState<string | null>(null);
+  const clash = others.some((measure) => measure.name.toLowerCase() === name.trim().toLowerCase());
+  const candidate = { name: name.trim() || "Measure", expression, format };
+  const test = useDaxValue(tested ?? "", [...others, candidate], datasetIds, filters, tested !== null);
+  const field = "w-full rounded-md border bg-background/60 px-2 py-1.5 text-xs outline-none focus:border-border-strong";
+  return (
+    <div aria-label="Measure editor" role="group" className="space-y-2 rounded-lg border border-border-strong bg-surface/60 p-3">
+      {note ? <p className="text-[11px] text-muted-foreground">{note}</p> : null}
+      <div className="flex gap-2">
+        <label className="min-w-0 flex-1 text-[11px] text-muted-foreground">Name
+          <input aria-label="Measure name" value={name} onChange={(event) => { setName(event.target.value); setTested(null); }} className={cn(field, "mt-1")} placeholder="Total Sales" />
+        </label>
+        <label className="w-28 text-[11px] text-muted-foreground">Format
+          <select aria-label="Measure format" value={format} onChange={(event) => setFormat(event.target.value as Format)} className={cn(field, "mt-1")}>
+            <option value="number">Number</option><option value="percent">Percent</option><option value="currency">Currency</option>
+          </select>
+        </label>
+      </div>
+      <label className="block text-[11px] text-muted-foreground">DAX formula
+        <textarea aria-label="DAX formula" value={expression} onChange={(event) => { setExpression(event.target.value); setTested(null); }} spellCheck={false} rows={Math.min(10, Math.max(3, expression.split("\n").length + 1))}
+          placeholder="SUM(Sales[Amount])" className={cn(field, "mt-1 resize-y font-mono leading-relaxed")} />
+      </label>
+      {clash ? <p role="alert" className="text-[11px] text-red-300">Another measure already has this name.</p> : null}
+      {tested !== null ? (
+        <p className="text-[11px]">Result: {test.isFetching ? <LoaderCircle className="inline size-3 animate-spin" /> : test.isError ? <span role="alert" className="text-red-300">{test.error instanceof Error ? test.error.message : "Error"}</span> : <span className="font-semibold">{formatMeasure(test.data?.rows[0]?.[0], format)}</span>}</p>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" size="sm" variant="outline" disabled={!expression.trim()} onClick={() => setTested(`[${candidate.name}]`)}>Test</Button>
+        <Button type="button" size="sm" disabled={!name.trim() || !expression.trim() || clash} onClick={() => onSave({ name: name.trim(), expression: expression.trim(), format })}><Check />Save measure</Button>
+        <Button type="button" size="sm" variant="outline" onClick={onCancel}>Cancel</Button>
+      </div>
+    </div>
+  );
+}
+
+interface MeasuresPanelProps {
+  measures: DashboardMeasure[];
+  datasets: DatasetLite[];
+  filters: Filters;
+  /** Missing for viewers: the list is read-only. */
+  onChange?: (measures: DashboardMeasure[]) => void;
+  onAddTile?: (tile: { title: string; dax: string; datasetId: string; x?: string }) => void;
+  ai?: { ready: boolean; busy: boolean; error?: string; write: (request: string) => Promise<DashboardMeasure & { explanation: string }> };
+}
+
+/** DAX measures, like Power BI: named formulas that react to the dashboard's filters and can be shown as tiles. */
+export function MeasuresPanel({ measures, datasets, filters, onChange, onAddTile, ai }: MeasuresPanelProps) {
+  const [editing, setEditing] = useState<string | "new" | null>(null);
+  const [draft, setDraft] = useState<(DashboardMeasure & { explanation: string }) | null>(null);
+  const [request, setRequest] = useState("");
+  const [chartFor, setChartFor] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const datasetIds = datasets.map((dataset) => dataset.id);
+  const columns = datasets.flatMap((dataset) => dataset.columns.map((column) => ({ datasetId: dataset.id, column: column.name, label: datasets.length > 1 ? `${dataset.name} · ${column.name}` : column.name })));
+  const tableNames = datasets.map((dataset) => dataset.name.replace(/\.[A-Za-z0-9]{1,5}$/, "").replace(/[^0-9A-Za-z_]+/g, "_").replace(/^_+|_+$/g, "").toLowerCase());
+  const save = (next: DashboardMeasure, previous?: string) => {
+    onChange?.(previous ? measures.map((measure) => (measure.name === previous ? next : measure)) : [...measures, next]);
+    setEditing(null);
+  };
+
+  async function askAi() {
+    if (!ai || !request.trim()) return;
+    try {
+      setDraft(await ai.write(request.trim()));
+    } catch {
+      /* shown through ai.error */
+    }
+  }
+
+  return (
+    <section aria-label="Measures" className="flex flex-col gap-3 p-3">
+      <div className="flex items-center gap-2">
+        <h2 className="flex items-center gap-1.5 text-xs font-semibold"><Sigma className="size-3.5" />Measures <span className="font-normal text-muted-foreground">{measures.length}</span></h2>
+        {onChange ? <Button type="button" size="sm" variant="outline" className="ml-auto" onClick={() => { setEditing("new"); setDraft(null); }}><Plus />New measure</Button> : null}
+      </div>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">DAX formulas, like in Power BI. Each one recalculates for every bar of a chart and for the slicers you pick. Tables: {tableNames.map((name) => <code key={name} className="mx-0.5 rounded bg-raised px-1 font-mono text-foreground">{name}</code>)}</p>
+
+      {onChange && ai ? (
+        draft ? (
+          <MeasureEditor initial={draft} others={measures} datasetIds={datasetIds} filters={filters} note={`AI: ${draft.explanation || "Here is the formula."} Edit it if needed, then save.`}
+            onSave={(measure) => { save(measure); setDraft(null); setRequest(""); }} onCancel={() => setDraft(null)} />
+        ) : (
+          <form onSubmit={(event) => { event.preventDefault(); void askAi(); }} className="space-y-1.5">
+            <label className="sr-only" htmlFor="measure-ai">Describe a measure</label>
+            <div className="flex gap-2">
+              <input id="measure-ai" value={request} onChange={(event) => setRequest(event.target.value)} placeholder="Describe a measure, e.g. share of revenue by region" className="h-8 min-w-0 flex-1 rounded-md border bg-surface px-2.5 text-xs outline-none placeholder:text-muted-foreground focus:border-border-strong" />
+              <Button type="submit" size="sm" disabled={!ai.ready || ai.busy || request.trim().length < 3}>{ai.busy ? <LoaderCircle className="animate-spin" /> : <Sparkles />}Write</Button>
+            </div>
+            {ai.error ? <p role="alert" className="text-[11px] text-red-300">{ai.error}</p> : null}
+          </form>
+        )
+      ) : null}
+
+      {editing === "new" ? <MeasureEditor initial={{ name: "", expression: "", format: "number" }} others={measures} datasetIds={datasetIds} filters={filters} onSave={(measure) => save(measure)} onCancel={() => setEditing(null)} /> : null}
+
+      {measures.length ? (
+        <ul className="space-y-2">
+          {measures.map((measure) => (
+            <li key={measure.name}>
+              {editing === measure.name ? (
+                <MeasureEditor initial={measure} others={measures.filter((item) => item.name !== measure.name)} datasetIds={datasetIds} filters={filters} onSave={(next) => save(next, measure.name)} onCancel={() => setEditing(null)} />
+              ) : (
+                <article aria-label={`Measure ${measure.name}`} className="rounded-lg border bg-surface/40 p-2.5">
+                  <div className="flex items-center gap-2">
+                    <p className="min-w-0 flex-1 truncate text-xs font-medium">{measure.name}</p>
+                    <span className="text-xs"><Value expression={`[${measure.name}]`} measures={measures} datasetIds={datasetIds} filters={filters} format={measure.format} /></span>
+                  </div>
+                  <pre className="mt-1.5 max-h-28 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 px-2 py-1 font-mono text-[10px] leading-relaxed text-foreground/85">{measure.expression}</pre>
+                  {onChange ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-1">
+                      {onAddTile ? <button type="button" onClick={() => onAddTile({ title: measure.name, dax: `[${measure.name}]`, datasetId: datasetIds[0] ?? "" })} className="inline-flex h-7 items-center gap-1 rounded-md border bg-surface px-2 text-[11px] hover:border-border-strong"><Hash className="size-3" />Number tile</button> : null}
+                      {onAddTile ? (
+                        chartFor === measure.name ? (
+                          <select autoFocus aria-label={`Chart ${measure.name} by`} defaultValue="" onBlur={() => setChartFor(null)} onChange={(event) => {
+                            const picked = columns.find((column) => `${column.datasetId}|${column.column}` === event.target.value);
+                            if (picked) onAddTile({ title: `${measure.name} by ${picked.column}`, dax: `[${measure.name}]`, datasetId: picked.datasetId, x: picked.column });
+                            setChartFor(null);
+                          }} className="h-7 rounded-md border bg-surface px-1.5 text-[11px]">
+                            <option value="" disabled>Chart by…</option>
+                            {columns.map((column) => <option key={`${column.datasetId}|${column.column}`} value={`${column.datasetId}|${column.column}`}>{column.label}</option>)}
+                          </select>
+                        ) : <button type="button" onClick={() => setChartFor(measure.name)} className="inline-flex h-7 items-center gap-1 rounded-md border bg-surface px-2 text-[11px] hover:border-border-strong"><BarChart3 className="size-3" />Chart by…</button>
+                      ) : null}
+                      <button type="button" aria-label={`Edit measure ${measure.name}`} onClick={() => setEditing(measure.name)} className="ml-auto grid size-7 place-items-center rounded text-muted-foreground hover:bg-raised hover:text-foreground"><Pencil className="size-3.5" /></button>
+                      <button type="button" aria-label={`Delete measure ${measure.name}`} onClick={() => onChange(measures.filter((item) => item.name !== measure.name))} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-raised hover:text-red-300"><Trash2 className="size-3.5" /></button>
+                    </div>
+                  ) : null}
+                </article>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : editing !== "new" && !draft ? <p className="rounded-lg border border-dashed px-3 py-6 text-center text-[11px] text-muted-foreground">No measures yet.{onChange ? " Describe one above, or press New measure." : ""}</p> : null}
+
+      <div className="rounded-lg border">
+        <button type="button" aria-expanded={helpOpen} onClick={() => setHelpOpen((open) => !open)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] font-medium hover:bg-raised/60">
+          <ChevronDown className={cn("size-3.5 text-muted-foreground transition-transform", !helpOpen && "-rotate-90")} />DAX examples
+        </button>
+        {helpOpen ? (
+          <div className="space-y-1 border-t px-3 py-2">
+            {EXAMPLES.map(([label, code]) => <p key={label} className="text-[10px]"><span className="text-muted-foreground">{label}: </span><code className="font-mono text-foreground/90">{code}</code></p>)}
+            <p className="pt-1 text-[10px] text-muted-foreground">Also: AVERAGE, MIN, MAX, DISTINCTCOUNT, COUNTBLANK, MEDIAN, AVERAGEX, MINX, MAXX, ALLEXCEPT, ALLSELECTED, KEEPFILTERS, VALUES, SELECTEDVALUE, SWITCH, ROUND, COALESCE… Not yet: relationships between tables and time intelligence.</p>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}

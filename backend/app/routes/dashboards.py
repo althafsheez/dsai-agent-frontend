@@ -16,6 +16,7 @@ from ..models import Dashboard, FileObject, Resource, User
 from ..services import dashboard_ai
 from ..services import dataset_relations
 from ..services.dashboard_sql import SqlError, describe, run_sql
+from ..services.dax import DaxError, run_dax
 from ..services.dashboard_preview import compute_preview, delta_of
 from ..services.dashboard_script import ScriptError, run_script
 from ..services.dataset_preview import read_csv_rows
@@ -43,6 +44,12 @@ class GenerateRequest(BaseModel):
     model_id: str
     effort: str | None = None
     context: str = Field(default="", max_length=3000)
+
+
+class MeasureInput(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    expression: str = Field(min_length=1, max_length=4000)
+    format: str = Field(default="number", pattern="^(number|percent|currency)$")
 
 
 class TuneRequest(BaseModel):
@@ -114,6 +121,25 @@ async def tune_dashboard(data: TuneRequest, request: Request, user: User = Depen
     if not result["ok"]:
         raise APIError(502, "dashboard_ai_failed", result["error"])
     return await _with_scripts(result, data, request, db, user)
+
+
+class MeasureAiRequest(BaseModel):
+    request: str = Field(min_length=3, max_length=1000)
+    dataset_ids: list[str] = Field(min_length=1, max_length=8)
+    measures: list[MeasureInput] = Field(default_factory=list, max_length=50)
+    model_id: str
+    effort: str | None = None
+
+
+@router.post("/measure")
+async def write_measure(data: MeasureAiRequest, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    """The AI writes a DAX measure from plain words; it is run once to check it works before it comes back."""
+    _validated(request, data.model_id, data.effort)
+    loaded = _datasets_for_sql(request, db, user, data.dataset_ids)
+    try:
+        return await dashboard_ai.write_measure(request.app.state.provider, data.request.strip(), loaded, {item.name: item.expression for item in data.measures}, data.model_id, data.effort)
+    except (ProviderError, ValueError) as exc:
+        raise APIError(502, "dashboard_ai_failed", str(exc)) from exc
 
 
 class CustomRequest(BaseModel):
@@ -193,6 +219,30 @@ def sql_run(data: SqlRunRequest, request: Request, user: User = Depends(get_curr
         raise APIError(422, "dashboard_sql_failed", str(exc)) from exc
 
 
+class DaxRunRequest(BaseModel):
+    expression: str = Field(min_length=1, max_length=4000)
+    dataset_ids: list[str] = Field(min_length=1, max_length=8)
+    measures: list[MeasureInput] = Field(default_factory=list, max_length=50)
+    # Evaluate once per value of this column (dataset id + column name); omit for a single number.
+    group_dataset_id: str | None = None
+    group_column: str | None = Field(default=None, max_length=200)
+    filters: dict[str, list[str]] = Field(default_factory=dict)
+    order: str = Field(default="value", pattern="^(value|name)$")
+
+
+dax_router = APIRouter(prefix="/api/dashboards/dax", tags=["dashboards"])
+
+
+@dax_router.post("/run")
+def dax_run(data: DaxRunRequest, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    """Evaluates a DAX expression (with the dashboard's measures) over the chosen datasets, optionally grouped by a column."""
+    group = (data.group_dataset_id, data.group_column) if data.group_dataset_id and data.group_column else None
+    try:
+        return run_dax(data.expression, _datasets_for_sql(request, db, user, data.dataset_ids), {measure.name: measure.expression for measure in data.measures}, group, data.filters, data.order)
+    except DaxError as exc:
+        raise APIError(422, "dax_failed", str(exc)) from exc
+
+
 class AnalyzeRequest(BaseModel):
     dataset_ids: list[str] = Field(min_length=2, max_length=8)
 
@@ -229,6 +279,7 @@ class DashboardInput(BaseModel):
     slicers: list[str] = Field(default_factory=list, max_length=12)
     dataset_ids: list[str] = Field(default_factory=list, max_length=20)
     widgets: list[dict[str, Any]] = Field(default_factory=list, max_length=40)
+    measures: list[MeasureInput] | None = Field(default=None, max_length=50)
     shares: list[ShareInput] | None = Field(default=None, max_length=50)
     refresh_minutes: int | None = None
 
@@ -282,7 +333,7 @@ def _view(item: Dashboard, user: User, db: Session, role: str) -> dict:
     mine = item.owner_id == user.id
     view = {
         "id": item.id, "name": item.name, "description": item.description, "status": item.status, "pinned": user.id in (item.pinned_by or []),
-        "slicers": item.slicers, "dataset_ids": item.dataset_ids, "widgets": item.widgets, "preview": _preview_view(item.preview),
+        "slicers": item.slicers, "dataset_ids": item.dataset_ids, "widgets": item.widgets, "measures": item.measures or [], "preview": _preview_view(item.preview),
         "owner": "You" if mine else (owner.name if owner else "Unknown"), "ownership": "owned" if mine else "shared",
         "role": role, "refresh_minutes": item.refresh_minutes or 0, "sources": _sources(db, item),
         "created_at": _utc(item.created_at), "updated_at": _utc(item.updated_at),
@@ -338,6 +389,11 @@ def save_dashboard(data: DashboardInput, request: Request, user: User = Depends(
     item.slicers = data.slicers
     item.dataset_ids = data.dataset_ids
     item.widgets = data.widgets
+    if data.measures is not None:
+        names = [measure.name.strip().lower() for measure in data.measures]
+        if len(set(names)) != len(names):
+            raise APIError(422, "duplicate_measure", "Two measures have the same name.")
+        item.measures = [{"name": measure.name.strip(), "expression": measure.expression.strip(), "format": measure.format} for measure in data.measures]
     if data.refresh_minutes is not None:
         if data.refresh_minutes not in REFRESH_CHOICES:
             raise APIError(422, "invalid_refresh", "Refresh must be off, or every 1, 5, 15 or 60 minutes.")

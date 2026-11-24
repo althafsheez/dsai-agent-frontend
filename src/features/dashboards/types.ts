@@ -35,7 +35,12 @@ export interface DashboardWidget {
   datasets?: string[];
   /** A hand-written (or generated) read-only SELECT over the dashboard's datasets; when set it replaces the x/y/agg query. */
   sql?: string;
+  /** A DAX expression (usually a measure, e.g. "[Total Sales]"); grouped by `x` for charts, a single value for number tiles. */
+  dax?: string;
 }
+
+/** A Power BI style DAX measure saved on the dashboard. */
+export interface DashboardMeasure { name: string; expression: string; format?: "number" | "percent" | "currency" }
 
 /** Every dataset a set of widgets reads (custom tiles can read several). */
 export const usedDatasetIds = (widgets: Array<Pick<DashboardWidget, "dataset_id" | "datasets">>): string[] => [...new Set(widgets.flatMap((widget) => [widget.dataset_id, ...(widget.datasets ?? [])]))];
@@ -63,6 +68,7 @@ export interface Dashboard {
   slicers?: string[];
   dataset_ids: string[];
   widgets: DashboardWidget[];
+  measures?: DashboardMeasure[];
   created_at: string;
   updated_at: string;
 }

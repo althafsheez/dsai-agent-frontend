@@ -321,6 +321,8 @@ class Dashboard(TimestampMixin, Base):
     slicers: Mapped[list[Any]] = mapped_column(JSON, default=list)
     dataset_ids: Mapped[list[Any]] = mapped_column(JSON, default=list)
     widgets: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    # DAX measures: [{"name": str, "expression": str, "format": "number" | "percent" | "currency"}]
+    measures: Mapped[list[Any]] = mapped_column(JSON, default=list)
     # [{"user_id": str, "role": "viewer" | "editor"}]; a published dashboard is also visible to the whole team (view only).
     shares: Mapped[list[Any]] = mapped_column(JSON, default=list)
     # 0 = manual refresh only; otherwise the minutes between automatic data refreshes while the dashboard is open.

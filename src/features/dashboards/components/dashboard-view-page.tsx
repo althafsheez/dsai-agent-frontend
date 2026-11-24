@@ -8,7 +8,7 @@ import type { CSSProperties } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSqlTables } from "@/lib/api";
 import { generatedSql } from "../logic/sql";
-import { ArrowLeft, BookOpen, Check, Database, Download, Info, Eye, LayoutDashboard, LoaderCircle, Merge, Pencil, Radio, Save, Share2, Trash2, Undo2, Wand2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, Database, Download, Info, Eye, LayoutDashboard, LoaderCircle, Merge, Pencil, Radio, Save, Share2, Sigma, Trash2, Undo2, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { DriveBrowserDialog } from "@/features/connectors/components/drive-browser-dialog";
@@ -19,7 +19,9 @@ import type { ConflictPolicy } from "../logic/manual";
 import { resolveLayouts, settle } from "../logic/grid";
 import type { Layouts } from "../logic/grid";
 import { roleOf, usedDatasetIds } from "../types";
-import type { Dashboard, DashboardWidget, DatasetLite, Filters } from "../types";
+import type { Dashboard, DashboardMeasure, DashboardWidget, DatasetLite, Filters } from "../types";
+import { MeasuresContext } from "../measures-context";
+import { MeasuresPanel } from "./measures-panel";
 import { categoryColumns, numberLikeColumns, numericColumns } from "../logic/aggregate";
 import { AiNotes } from "./ai-notes";
 import { AskAiBar } from "./ask-ai-bar";
@@ -66,12 +68,13 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   /** The tile whose details (data, tables, query) are shown while not editing. */
   const [infoId, setInfoId] = useState<string | null>(null);
   /** Which view the right panel shows. */
-  const [side, setSide] = useState<"datasets" | "library" | "info" | "edit">("datasets");
+  const [side, setSide] = useState<"datasets" | "library" | "measures" | "info" | "edit">("datasets");
   const [fill, setFill] = useState<{ text: string; n: number }>();
   const [panelWidth, setPanelWidth] = usePanelWidth();
   const [name, setName] = useState("");
   const [notes, setNotes] = useState<string[]>([]);
   const [slicers, setSlicers] = useState<string[]>([]);
+  const [measures, setMeasures] = useState<DashboardMeasure[]>([]);
   const filters: Filters = {};
   const [shareOpen, setShareOpen] = useState(false);
   const [driveOpen, setDriveOpen] = useState(false);
@@ -93,13 +96,13 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   const hydrated = useHydratedDatasets(attached, live ? LIVE_MINUTES : 0);
   const datasets = hydrated.datasets;
   const sqlTables = useQuery({ queryKey: ["sql-tables", attached], queryFn: () => getSqlTables(attached), enabled: chosenMode !== "view" && attached.length > 0, staleTime: 60_000, retry: false });
-  const dirty = Boolean(dashboard) && (name !== dashboard?.name || JSON.stringify(draft) !== JSON.stringify(dashboard?.widgets) || JSON.stringify(slicers) !== JSON.stringify(dashboard?.slicers ?? []) || JSON.stringify([...attachedIds].sort()) !== JSON.stringify([...(dashboard?.dataset_ids ?? [])].sort()));
+  const dirty = Boolean(dashboard) && (name !== dashboard?.name || JSON.stringify(draft) !== JSON.stringify(dashboard?.widgets) || JSON.stringify(slicers) !== JSON.stringify(dashboard?.slicers ?? []) || JSON.stringify([...attachedIds].sort()) !== JSON.stringify([...(dashboard?.dataset_ids ?? [])].sort()) || JSON.stringify(measures) !== JSON.stringify(dashboard?.measures ?? []));
 
   useEffect(() => {
     if (!dashboard) return;
     const key = `${dashboard.id}:${dashboard.updated_at}`;
     if (key === syncedKey || (syncedKey.startsWith(`${dashboard.id}:`) && dirty)) return;
-    setSyncedKey(key); setDraft(dashboard.widgets); setBaseline(dashboard.widgets); setName(dashboard.name); setSlicers(dashboard.slicers ?? []); setAttachedIds(dashboard.dataset_ids ?? []);
+    setSyncedKey(key); setDraft(dashboard.widgets); setBaseline(dashboard.widgets); setName(dashboard.name); setSlicers(dashboard.slicers ?? []); setAttachedIds(dashboard.dataset_ids ?? []); setMeasures(dashboard.measures ?? []);
   }, [dashboard, syncedKey, dirty]);
 
   const attachedDatasets = datasets.filter((dataset) => attached.includes(dataset.id));
@@ -208,6 +211,13 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
     setPending(null);
   }
 
+  /** A tile showing a DAX measure: a number, or a bar chart when grouped by a column. */
+  function addMeasureTile(tile: { title: string; dax: string; datasetId: string; x?: string }) {
+    if (mode !== "edit") setMode("edit");
+    const widget: DashboardWidget = { id: `w-dax-${Date.now().toString(36)}`, type: tile.x ? "bar" : "kpi", title: tile.title, dataset_id: tile.datasetId, x: tile.x, agg: "sum", span: tile.x ? 2 : 1, dax: tile.dax };
+    setDraft((items) => [...items, widget]);
+  }
+
   /** Opens a widget's editor (code included) from anywhere, e.g. the dataset panel. */
   const editWidget = (id: string) => { if (mode !== "edit") setMode("edit"); setUnlocked(true); setSide("edit"); setOpenId(id); };
   /** The header Edit/Done toggle: Edit unlocks the tiles; Done locks them again (and, when published, saves and goes back to the live view). */
@@ -218,19 +228,19 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   };
 
   async function saveEdits() {
-    await save.mutateAsync(writeFields({ widgets: draft, name, slicers, datasetIds: attachedIds }));
+    await save.mutateAsync({ ...writeFields({ widgets: draft, name, slicers, datasetIds: attachedIds }), measures });
     setNotes([]);
   }
 
   async function publish() {
-    await save.mutateAsync(writeFields({ widgets: draft, name, slicers, datasetIds: attachedIds, status: "published", refresh_minutes: LIVE_MINUTES }));
+    await save.mutateAsync({ ...writeFields({ widgets: draft, name, slicers, datasetIds: attachedIds, status: "published", refresh_minutes: LIVE_MINUTES }), measures });
     setPublishOpen(false);
     setOpenId(null);
     setMode("view");
   }
 
   function discard() {
-    setDraft(dashboard!.widgets); setBaseline(dashboard!.widgets); setName(dashboard!.name); setSlicers(dashboard!.slicers ?? []); setAttachedIds(dashboard!.dataset_ids ?? []);
+    setDraft(dashboard!.widgets); setBaseline(dashboard!.widgets); setName(dashboard!.name); setSlicers(dashboard!.slicers ?? []); setAttachedIds(dashboard!.dataset_ids ?? []); setMeasures(dashboard!.measures ?? []);
     setNotes([]); setOpenId(null);
     if (published) setMode("view");
   }
@@ -272,6 +282,7 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
 
   const panel = editing || mode === "view";
   return (
+    <MeasuresContext.Provider value={{ measures, datasetIds: attachedIds }}>
     <div className="flex flex-col xl:min-h-0 xl:flex-1 xl:flex-row">
       <section className="min-w-0 xl:flex-1 xl:overflow-y-auto">
         <div className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur sm:px-6">
@@ -359,7 +370,7 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
         <aside aria-label="Dashboard tools" style={{ "--panel-w": `${panelWidth}px` } as CSSProperties} className="relative flex w-full shrink-0 flex-col border-t bg-sidebar text-sidebar-foreground xl:h-full xl:w-[var(--panel-w)] xl:border-l xl:border-t-0">
           <PanelResizer width={panelWidth} onWidth={setPanelWidth} />
           <div role="tablist" aria-label="Side panel" className="flex shrink-0 gap-0.5 border-b p-2">
-            {([["datasets", "Datasets", Database], ...(canEdit ? [["library", "Library", BookOpen]] : []), ["info", "Info", Info], ...(canEdit ? [["edit", "Edit", Pencil]] : [])] as Array<["datasets" | "library" | "info" | "edit", string, typeof Pencil]>).map(([value, label, Icon]) => (
+            {([["datasets", "Datasets", Database], ...(canEdit ? [["library", "Library", BookOpen]] : []), ["measures", "Measures", Sigma], ["info", "Info", Info], ...(canEdit ? [["edit", "Edit", Pencil]] : [])] as Array<["datasets" | "library" | "measures" | "info" | "edit", string, typeof Pencil]>).map(([value, label, Icon]) => (
               <button key={value} type="button" role="tab" aria-selected={side === value} onClick={() => setSide(value)}
                 className={cn("flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-xs transition-colors", side === value ? "bg-raised font-medium text-foreground" : "text-muted-foreground hover:bg-raised/50 hover:text-foreground")}>
                 <Icon className="size-3.5" />{label}
@@ -421,7 +432,14 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
             </>
           ) : (
             <div className="min-h-0 flex-1 xl:overflow-y-auto">
-              {side === "info" ? (
+              {side === "measures" ? (
+                <MeasuresPanel
+                  measures={measures} datasets={attachedDatasets.length ? attachedDatasets : datasets.slice(0, 1)} filters={filters}
+                  onChange={canEdit ? (next) => { if (mode !== "edit") setMode("edit"); setMeasures(next); } : undefined}
+                  onAddTile={canEdit ? addMeasureTile : undefined}
+                  ai={{ ready: ai.ready, busy: ai.measure.isPending, error: messageOf(ai.measure.error) ?? undefined, write: (request) => ai.measure.mutateAsync({ request, datasetIds: attachedIds.length ? attachedIds : datasets.slice(0, 1).map((dataset) => dataset.id), measures }) }}
+                />
+              ) : side === "info" ? (
                 infoWidget
                   ? <WidgetInfo widget={infoWidget} datasets={datasets} onClose={() => setInfoId(null)} onEdit={canEdit ? () => editWidget(infoWidget.id) : undefined} />
                   : <p className="px-4 py-10 text-center text-xs text-muted-foreground">Click a tile to see the data, tables and query behind it.</p>
@@ -442,6 +460,7 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
       ) : null}
       <DriveBrowserDialog open={driveOpen} onOpenChange={setDriveOpen} target={{ scopeType: "library", scopeId: "library", label: "your Library" }} onReauth={() => router.push("/extensions")} onImported={() => void attachNew()} />
     </div>
+    </MeasuresContext.Provider>
   );
 }
 
