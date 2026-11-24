@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { deleteChat, getActivity, getChats, updateChat } from "@/lib/api";
@@ -8,8 +8,10 @@ import { filterHistory } from "../logic/filter-history";
 import { currentDemoUser, type HistoryFilters, type HistoryOwnership, type HistoryRecord, type HistorySort, type HistoryStatus, type HistoryTime } from "../types";
 import { HistoryTable } from "./history-table";
 import { HistoryToolbar } from "./history-toolbar";
+import { Button } from "@/components/ui/button";
 
 const historyKey = ["history"] as const;
+const MAX_PAGE_SIZE = 15;
 
 function readFilters(params: URLSearchParams): HistoryFilters {
   const ownership = params.get("ownership");
@@ -32,6 +34,8 @@ export function HistoryPage() {
   const router = useRouter();
   const pathname = usePathname();
   const queryClient = useQueryClient();
+  const tableAnchor = useRef<HTMLDivElement>(null);
+  const [pageSize, setPageSize] = useState(8);
   const filters = useMemo(() => readFilters(new URLSearchParams(params.toString())), [params]);
   const activityQuery = useQuery({ queryKey: ["activity"], queryFn: getActivity, refetchInterval: 2000 });
   const historyQuery = useQuery({
@@ -56,6 +60,25 @@ export function HistoryPage() {
     refetchInterval: 2000,
   });
   const records = useMemo(() => filterHistory(historyQuery.data ?? [], filters), [filters, historyQuery.data]);
+  useEffect(() => {
+    const updatePageSize = () => {
+      const anchor = tableAnchor.current;
+      const container = anchor?.closest("main");
+      if (!anchor || !container) return;
+      const available = container.getBoundingClientRect().bottom - anchor.getBoundingClientRect().top;
+      // Reserve space for the table header, pagination, and the section's bottom padding.
+      setPageSize(Math.max(1, Math.min(MAX_PAGE_SIZE, Math.floor((available - 148) / 41))));
+    };
+    updatePageSize();
+    const observer = new ResizeObserver(updatePageSize);
+    if (tableAnchor.current) observer.observe(tableAnchor.current);
+    window.addEventListener("resize", updatePageSize);
+    return () => { observer.disconnect(); window.removeEventListener("resize", updatePageSize); };
+  }, []);
+  const requestedPage = Number(params.get("page"));
+  const pageCount = Math.max(1, Math.ceil(records.length / pageSize));
+  const page = Math.min(Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1, pageCount);
+  const pageRecords = records.slice((page - 1) * pageSize, page * pageSize);
   const options = useMemo(() => ({
     authors: historyQuery.data?.length ? [currentDemoUser] : [],
     workspaces: [],
@@ -86,6 +109,14 @@ export function HistoryPage() {
     router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
   }
 
+  function changePage(nextPage: number) {
+    const search = new URLSearchParams(params.toString());
+    if (nextPage <= 1) search.delete("page");
+    else search.set("page", String(nextPage));
+    const query = search.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }
+
   const hasFilters = filters.search !== "" || filters.ownership !== "owned" || filters.status !== "active" || filters.time !== "any" || filters.authorId !== "all" || filters.workspaceId !== "all" || filters.sort !== "updated_desc";
   const mutate = (operation: () => Promise<void>) => mutation.mutateAsync(operation);
 
@@ -95,8 +126,9 @@ export function HistoryPage() {
       <p className="mt-1 text-xs text-muted-foreground">View and manage your chats</p>
     </header>
     <HistoryToolbar filters={filters} options={options} onChange={updateFilters} />
+    <div ref={tableAnchor}>
     <HistoryTable
-      records={records}
+      records={pageRecords}
       activity={activityQuery.data?.items ?? []}
       loading={historyQuery.isLoading}
       hasFilters={hasFilters}
@@ -121,5 +153,16 @@ export function HistoryPage() {
         await Promise.all(selectedRecords.map((record) => deleteChat(record.id)));
       })}
     />
+    </div>
+    {!historyQuery.isLoading && records.length > 0 && (
+      <nav aria-label="History pagination" className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+        <span>Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, records.length)} of {records.length} chats</span>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="outline" size="sm" disabled={page === 1} onClick={() => changePage(page - 1)}>Previous</Button>
+          <span aria-live="polite">Page {page} of {pageCount}</span>
+          <Button type="button" variant="outline" size="sm" disabled={page === pageCount} onClick={() => changePage(page + 1)}>Next</Button>
+        </div>
+      </nav>
+    )}
   </section>;
 }
