@@ -269,6 +269,7 @@ class Filter:
     sql: str  # predicate with `token` standing for the scanned table's alias
     kind: str  # slicer | group | calc | row
     token: str = _TOKEN
+    span: tuple[str, str] | None = None  # for a date filter: its first and last calendar day (SQL), like a date table
 
 
 @dataclass
@@ -299,16 +300,58 @@ _AGGREGATES = {"SUM": "SUM", "AVERAGE": "AVG", "MIN": "MIN", "MAX": "MAX", "COUN
 _ITERATORS = {"SUMX": "SUM", "AVERAGEX": "AVG", "MINX": "MIN", "MAXX": "MAX", "COUNTX": "COUNT", "COUNTAX": "COUNT"}
 _UNSUPPORTED = {
     "RELATED", "RELATEDTABLE", "USERELATIONSHIP", "CROSSFILTER", "TREATAS", "SUMMARIZE", "SUMMARIZECOLUMNS", "ADDCOLUMNS",
-    "TOTALYTD", "TOTALQTD", "TOTALMTD", "SAMEPERIODLASTYEAR", "DATEADD", "DATESYTD", "DATESMTD", "DATESQTD", "PARALLELPERIOD",
-    "PREVIOUSMONTH", "PREVIOUSYEAR", "PREVIOUSQUARTER", "DATESBETWEEN", "DATESINPERIOD", "RANKX", "TOPN", "EARLIER", "LOOKUPVALUE",
+    "RANKX", "TOPN", "EARLIER", "LOOKUPVALUE",
 }
+_UNITS = {"DAY": (1, "days"), "MONTH": (1, "months"), "QUARTER": (3, "months"), "YEAR": (1, "years")}
+_TIME_TABLES = {
+    "DATESYTD", "DATESQTD", "DATESMTD", "SAMEPERIODLASTYEAR", "DATEADD", "PARALLELPERIOD", "DATESBETWEEN", "DATESINPERIOD",
+    *(f"{step}{unit}" for step in ("PREVIOUS", "NEXT") for unit in ("DAY", "MONTH", "QUARTER", "YEAR")),
+}
+_TIME_SCALARS = {
+    "TOTALYTD", "TOTALQTD", "TOTALMTD", "FIRSTDATE", "LASTDATE", "STARTOFMONTH", "STARTOFQUARTER", "STARTOFYEAR", "ENDOFMONTH",
+    "ENDOFQUARTER", "ENDOFYEAR", "DATE", "TODAY", "NOW", "EOMONTH", "DATEDIFF", "QUARTER",
+}
+
+
+def _start(day: str, unit: str) -> str:
+    """SQL for the first day of the period (DAY/MONTH/QUARTER/YEAR) that `day` falls in."""
+    if unit == "YEAR":
+        return f"date({day}, 'start of year')"
+    if unit == "MONTH":
+        return f"date({day}, 'start of month')"
+    if unit == "QUARTER":
+        return f"date({day}, 'start of month', printf('-%d months', (CAST(STRFTIME('%m', {day}) AS INTEGER) - 1) % 3))"
+    return f"date({day})"
+
+
+def _end(day: str, unit: str) -> str:
+    if unit == "DAY":
+        return f"date({day})"
+    months = {"YEAR": 12, "MONTH": 1, "QUARTER": 3}[unit]
+    return f"date({_start(day, unit)}, '+{months} months', '-1 day')"
+
+
+def _shift(day: str, count: int, unit: str, keep_month_end: bool = False) -> str:
+    """`day` moved by `count` periods, clamped to the end of a shorter month. Like Power BI, a range that ends on a
+    month's last day still ends on one after the move."""
+    size, word = _UNITS[unit]
+    step = f"'{count * size:+d} {word}'"
+    if unit == "DAY":
+        return f"date({day}, {step})"
+    month_end = f"date({day}, 'start of month', {step}, '+1 month', '-1 day')"
+    moved = f"MIN(date({day}, 'start of month', {step}, printf('+%d days', CAST(STRFTIME('%d', {day}) AS INTEGER) - 1)), {month_end})"
+    if not keep_month_end:
+        return moved
+    return f"(CASE WHEN date({day}, '+1 day') = date({day}, 'start of month', '+1 month') THEN {month_end} ELSE {moved} END)"
+
+
 SUPPORTED = sorted(
     set(_AGGREGATES) | set(_ITERATORS) | {
         "DISTINCTCOUNT", "COUNTBLANK", "COUNTROWS", "CALCULATE", "FILTER", "ALL", "REMOVEFILTERS", "ALLEXCEPT", "ALLSELECTED",
         "KEEPFILTERS", "VALUES", "DISTINCT", "SELECTEDVALUE", "HASONEVALUE", "ISFILTERED", "DIVIDE", "IF", "SWITCH", "AND", "OR",
         "NOT", "ABS", "ROUND", "ROUNDUP", "ROUNDDOWN", "INT", "SQRT", "POWER", "MOD", "BLANK", "ISBLANK", "COALESCE", "TRUE",
         "FALSE", "CONCATENATE", "LEN", "UPPER", "LOWER", "TRIM", "LEFT", "RIGHT", "YEAR", "MONTH", "DAY", "MEDIAN",
-    }
+    } | _TIME_TABLES | _TIME_SCALARS
 )
 
 
@@ -406,7 +449,123 @@ class Translator:
                 return TableValue(source.table, fresh)
             if name == "ALLEXCEPT":
                 return TableValue(self.table_value(node.args[0], ctx).table, self.remove(node, ctx))
+            if name in _TIME_TABLES:
+                return self.dates(node, ctx)
         raise DaxError("Expected a table here, e.g. Sales, FILTER(Sales, ...), ALL(Sales) or VALUES(Sales[Region]).")
+
+    # ---- time intelligence
+
+    def date_column(self, node: Call) -> tuple[str, str]:
+        if not node.args or not isinstance(node.args[0], Col):
+            raise DaxError(f"{node.name} needs a date column first, e.g. {node.name}(Sales[Date]).")
+        return self.column(node.args[0])
+
+    def bound(self, fn: str, table: str, column: str, ctx: Ctx) -> str:
+        """The first (MIN) or last (MAX) date visible in the current filter context."""
+        current = self.transition(ctx).filters.get((table, column))
+        if current and current.span:
+            return current.span[0 if fn == "MIN" else 1]
+        alias = self.alias()
+        return self.scan(TableValue(table, self.transition(ctx)), f"{fn}(date({alias}.{_q(column)}))", alias)
+
+    @staticmethod
+    def unit(node: Any, name: str) -> str:
+        if isinstance(node, Name) and node.name.upper() in _UNITS:
+            return node.name.upper()
+        raise DaxError(f"{name} needs an interval: DAY, MONTH, QUARTER or YEAR.")
+
+    @staticmethod
+    def count(node: Any, name: str) -> int:
+        negative = isinstance(node, Neg)
+        value = node.value if negative else node
+        if not isinstance(value, Num) or not value.value.is_integer():
+            raise DaxError(f"{name} needs a whole number of periods, e.g. -1.")
+        return -int(value.value) if negative else int(value.value)
+
+    def dates(self, node: Call, ctx: Ctx) -> TableValue:
+        """A date function used as a table (DATESYTD, DATEADD, ...): the dates it keeps, as a filter that replaces
+        the filter already on that date column, like Power BI."""
+        name, args = node.name, node.args
+        table, column = self.date_column(node)
+        first, last = self.bound("MIN", table, column, ctx), self.bound("MAX", table, column, ctx)
+        if name in ("DATESYTD", "DATESQTD", "DATESMTD"):
+            low, high = _start(last, {"DATESYTD": "YEAR", "DATESQTD": "QUARTER", "DATESMTD": "MONTH"}[name]), last
+        elif name in ("SAMEPERIODLASTYEAR", "DATEADD"):
+            if name == "DATEADD" and len(args) != 3:
+                raise DaxError("DATEADD takes a date column, a number and an interval, e.g. DATEADD(Sales[Date], -1, MONTH).")
+            count, unit = (-1, "YEAR") if name == "SAMEPERIODLASTYEAR" else (self.count(args[1], name), self.unit(args[2], name))
+            low, high = _shift(first, count, unit), _shift(last, count, unit, keep_month_end=True)
+        elif name == "PARALLELPERIOD":
+            if len(args) != 3:
+                raise DaxError("PARALLELPERIOD takes a date column, a number and an interval, e.g. PARALLELPERIOD(Sales[Date], -1, YEAR).")
+            count, unit = self.count(args[1], name), self.unit(args[2], name)
+            low, high = _start(_shift(first, count, unit), unit), _end(_shift(last, count, unit), unit)
+        elif name.startswith("PREVIOUS"):
+            unit = name[len("PREVIOUS"):]
+            low, high = _start(_shift(first, -1, unit), unit), _end(_shift(first, -1, unit), unit)
+        elif name.startswith("NEXT"):
+            unit = name[len("NEXT"):]
+            low, high = _start(_shift(last, 1, unit), unit), _end(_shift(last, 1, unit), unit)
+        elif name == "DATESBETWEEN":
+            if len(args) != 3:
+                raise DaxError("DATESBETWEEN takes a date column, a start and an end, e.g. DATESBETWEEN(Sales[Date], DATE(2024,1,1), DATE(2024,6,30)).")
+            low, high = f"date({self.scalar(args[1], ctx)})", f"date({self.scalar(args[2], ctx)})"
+        else:  # DATESINPERIOD
+            if len(args) != 4:
+                raise DaxError("DATESINPERIOD takes a date column, a start date, a number and an interval, e.g. DATESINPERIOD(Sales[Date], LASTDATE(Sales[Date]), -3, MONTH).")
+            start, count, unit = f"date({self.scalar(args[1], ctx)})", self.count(args[2], name), self.unit(args[3], name)
+            low, high = (f"date({_shift(start, count, unit)}, '+1 day')", start) if count < 0 else (start, f"date({_shift(start, count, unit)}, '-1 day')")
+        day = f"date({_TOKEN}.{_q(column)})"
+        fresh = self.transition(ctx).copy()
+        fresh.filters = {key: item for key, item in fresh.filters.items() if key != (table, column)}
+        fresh.filters[(table, column)] = Filter(table, f"({low} IS NULL OR {day} >= {low}) AND ({high} IS NULL OR {day} <= {high})", "calc", span=(low, high))
+        return TableValue(table, fresh)
+
+    def time_scalar(self, node: Call, ctx: Ctx) -> str:
+        name, args = node.name, node.args
+        if name in ("TOTALYTD", "TOTALQTD", "TOTALMTD"):
+            if len(args) < 2:
+                raise DaxError(f"{name} takes an expression and a date column, e.g. {name}([Total Sales], Sales[Date]).")
+            dates = Call("DATES" + name[5:], [args[1]])
+            return self.scalar(Call("CALCULATE", [args[0], dates, *args[2:3]]), ctx)
+        if name in ("FIRSTDATE", "LASTDATE", "STARTOFMONTH", "STARTOFQUARTER", "STARTOFYEAR", "ENDOFMONTH", "ENDOFQUARTER", "ENDOFYEAR"):
+            table, column = self.date_column(node)
+            day = self.bound("MIN" if name == "FIRSTDATE" or name.startswith("START") else "MAX", table, column, ctx)
+            if name in ("FIRSTDATE", "LASTDATE"):
+                return day
+            unit = name[len("STARTOF"):] if name.startswith("START") else name[len("ENDOF"):]
+            return _start(day, unit) if name.startswith("START") else _end(day, unit)
+        values = [self.scalar(arg, ctx) for arg in args if not (isinstance(arg, Name) and arg.name.upper() in _UNITS)]
+        if name == "DATE":
+            if len(args) != 3:
+                raise DaxError("DATE takes a year, a month and a day, e.g. DATE(2024, 1, 31).")
+            year, month, day = values
+            return f"date(printf('%04d-01-01', {year}), printf('%+d months', ({month}) - 1), printf('%+d days', ({day}) - 1))"
+        if name == "TODAY":
+            return "date('now')"
+        if name == "NOW":
+            return "datetime('now')"
+        if name == "QUARTER":
+            if len(args) != 1:
+                raise DaxError("QUARTER takes a date.")
+            return f"((CAST(STRFTIME('%m', {values[0]}) AS INTEGER) + 2) / 3)"
+        if name == "EOMONTH":
+            if len(args) != 2:
+                raise DaxError("EOMONTH takes a date and a number of months, e.g. EOMONTH(TODAY(), 0).")
+            return f"date({values[0]}, 'start of month', printf('%+d months', ({values[1]}) + 1), '-1 day')"
+        if len(args) != 3:  # DATEDIFF
+            raise DaxError("DATEDIFF takes two dates and an interval, e.g. DATEDIFF(DATE(2024,1,1), TODAY(), DAY).")
+        unit = self.unit(args[2], name)
+        start, end = values
+        if unit == "DAY":
+            return f"CAST(julianday(date({end})) - julianday(date({start})) AS INTEGER)"
+        year = lambda day: f"CAST(STRFTIME('%Y', {day}) AS INTEGER)"  # noqa: E731
+        month = lambda day: f"CAST(STRFTIME('%m', {day}) AS INTEGER)"  # noqa: E731
+        if unit == "YEAR":
+            return f"({year(end)} - {year(start)})"
+        if unit == "MONTH":
+            return f"(({year(end)} * 12 + {month(end)}) - ({year(start)} * 12 + {month(start)}))"
+        return f"(({year(end)} * 4 + ({month(end)} + 2) / 3) - ({year(start)} * 4 + ({month(start)} + 2) / 3))"
 
     def row_filter(self, node: Any, table: str, ctx: Ctx) -> Filter:
         """A condition evaluated for each row of `table` (row context). It gets its own placeholder so measures used inside
@@ -527,7 +686,11 @@ class Translator:
                 raise DaxError(f"{name} takes {low if high == low else f'{low} to {high}' if high else f'at least {low}'} argument(s).{(' e.g. ' + example) if example else ''}")
 
         if name in _UNSUPPORTED:
-            raise DaxError(f"{name} is not supported yet (relationships and time intelligence come later).")
+            raise DaxError(f"{name} is not supported yet (relationships come later).")
+        if name in _TIME_SCALARS:
+            return self.time_scalar(node, ctx)
+        if name in _TIME_TABLES:
+            raise DaxError(f"{name} returns dates (a table); use it inside CALCULATE, e.g. CALCULATE([Total Sales], {name}(Sales[Date]...)).")
         if name in ("TRUE", "FALSE"):
             return "1" if name == "TRUE" else "0"
         if name == "BLANK":
@@ -656,7 +819,7 @@ class Translator:
                 table = self.single_table(item.args[0])
                 fresh.filters[(table, f"#{next(self.counter)}")] = self.row_filter(item.args[0], table, ctx.copy(rows={}))
                 continue
-            if isinstance(item, Call) and item.name in ("FILTER", "VALUES", "DISTINCT") or isinstance(item, Name):
+            if isinstance(item, Call) and item.name in ("FILTER", "VALUES", "DISTINCT", *_TIME_TABLES) or isinstance(item, Name):
                 value = self.table_value(item, fresh)
                 if value.distinct and value.post:
                     # FILTER(VALUES(T[c]), ...): keep only the values that passed, as a filter on that column.
@@ -732,6 +895,7 @@ def compile_query(
     group_by: tuple[str, str] | None = None,
     filters: dict[str, list[str]] | None = None,
     order: str = "value",
+    grain: str | None = None,
 ) -> DaxQuery:
     """The SELECT that evaluates `expression` (optionally once per value of `group_by` = (dataset_id, column))."""
     if not datasets:
@@ -760,12 +924,27 @@ def compile_query(
     column = next((name for name in translator.columns[table] if name.lower() == column_name.lower()), None)
     if not column:
         raise DaxError(f"Table '{table}' has no column [{column_name}] to group by.")
+    if grain not in (None, "year", "quarter", "month", "day"):
+        raise DaxError("A date can be grouped by year, quarter, month or day.")
+
+    def bucket(row: str) -> str:
+        day = f"date({row}.{_q(column)})"
+        return {None: f"{row}.{_q(column)}", "year": f"STRFTIME('%Y', {day})", "month": f"STRFTIME('%Y-%m', {day})", "day": day,
+                "quarter": f"(STRFTIME('%Y', {day}) || '-Q' || ((CAST(STRFTIME('%m', {day}) AS INTEGER) + 2) / 3))"}[grain]
+
     grouped = base.copy()
-    grouped.filters[(table, column)] = Filter(table, f"{_TOKEN}.{_q(column)} IS g.{_q(column)}", "group")
+    key = f"g.{_q(column)}"
+    starts = {"year": f"date({key} || '-01-01')", "month": f"date({key} || '-01')", "day": f"date({key})",
+              "quarter": f"date(SUBSTR({key}, 1, 4) || printf('-%02d-01', (CAST(SUBSTR({key}, 7) AS INTEGER) - 1) * 3 + 1))"}
+    span = (starts[grain], _end(starts[grain], grain.upper())) if grain else None
+    grouped.filters[(table, column)] = Filter(table, f"{bucket(_TOKEN)} IS g.{_q(column)}", "group", span=span)
     value = translator.scalar(tree, grouped)
     outer = translator.alias()
-    groups = f"(SELECT DISTINCT {outer}.{_q(column)} AS {_q(column)} FROM {_q(table)} {outer}{translator.where(table, base, outer)}) g"
-    ordering = f"g.{_q(column)}" if order == "name" else "value DESC"
+    where = translator.where(table, base, outer)
+    if grain:
+        where = (where + " AND " if where else " WHERE ") + f"{bucket(outer)} IS NOT NULL"
+    groups = f"(SELECT DISTINCT {bucket(outer)} AS {_q(column)} FROM {_q(table)} {outer}{where}) g"
+    ordering = f"g.{_q(column)}" if order == "name" or grain else "value DESC"
     return DaxQuery(f"SELECT g.{_q(column)} AS {_q(column)}, {value} AS value FROM {groups} ORDER BY {ordering} LIMIT {MAX_GROUPS}", column)
 
 
@@ -776,8 +955,9 @@ def run_dax(
     group_by: tuple[str, str] | None = None,
     filters: dict[str, list[str]] | None = None,
     order: str = "value",
+    grain: str | None = None,
 ) -> dict[str, Any]:
-    query = compile_query(expression, datasets, measures, group_by, filters, order)
+    query = compile_query(expression, datasets, measures, group_by, filters, order, grain)
     try:
         result = run_sql(query.sql, datasets, limit=MAX_GROUPS, max_sql=400_000)
     except SqlError as exc:

@@ -37,6 +37,8 @@ export interface DashboardWidget {
   sql?: string;
   /** A DAX expression (usually a measure, e.g. "[Total Sales]"); grouped by `x` for charts, a single value for number tiles. */
   dax?: string;
+  /** A DAX tile grouped by a date column: one point per year, quarter, month or day. */
+  grain?: "year" | "quarter" | "month" | "day";
 }
 
 /** A Power BI style DAX measure saved on the dashboard. */

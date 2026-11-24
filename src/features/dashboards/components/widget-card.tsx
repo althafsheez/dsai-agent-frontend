@@ -174,8 +174,8 @@ function DaxBody({ widget, filters }: { widget: DashboardWidget; filters: Filter
   const grouped = Boolean(widget.x) && !["kpi", "gauge"].includes(widget.type);
   const own = Object.fromEntries(Object.entries(filters).filter(([column, values]) => column !== widget.x && values.length));
   const run = useQuery({
-    queryKey: ["dax-run", widget.dax, widget.x, widget.dataset_id, ids, measures, own],
-    queryFn: () => runDax({ expression: widget.dax ?? "", datasetIds: ids, measures, filters: own, group: grouped ? { datasetId: widget.dataset_id, column: widget.x ?? "" } : undefined, order: widget.type === "line" || widget.type === "area" ? "name" : "value" }),
+    queryKey: ["dax-run", widget.dax, widget.x, widget.grain, widget.dataset_id, ids, measures, own],
+    queryFn: () => runDax({ expression: widget.dax ?? "", datasetIds: ids, measures, filters: own, group: grouped ? { datasetId: widget.dataset_id, column: widget.x ?? "", grain: widget.grain } : undefined, order: widget.type === "line" || widget.type === "area" ? "name" : "value" }),
     enabled: Boolean(widget.dax),
     staleTime: 60_000,
     retry: false,

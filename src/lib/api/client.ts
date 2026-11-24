@@ -754,11 +754,12 @@ export interface DashboardRecordDto {
 }
 export type DashboardSaveBody = Pick<DashboardRecordDto, "name" | "description" | "status" | "slicers" | "dataset_ids" | "widgets"> & { pinned?: boolean; id?: string; refresh_minutes?: number; shares?: DashboardShareDto[]; measures?: DaxMeasureDto[] };
 
+export type DateGrain = "year" | "quarter" | "month" | "day";
 export interface DaxMeasureDto { name: string; expression: string; format?: "number" | "percent" | "currency" }
 export interface DaxRunInput {
   expression: string; datasetIds: string[]; measures: DaxMeasureDto[];
   /** Evaluate once per value of this column; leave out for a single number. */
-  group?: { datasetId: string; column: string }; filters?: Record<string, string[]>; order?: "value" | "name";
+  group?: { datasetId: string; column: string; grain?: DateGrain }; filters?: Record<string, string[]>; order?: "value" | "name";
 }
 /** Evaluates a DAX expression with the dashboard's measures, in the current filter context (slicers, optional group-by column). */
 export function runDax(input: DaxRunInput): Promise<SqlResult & { sql: string }> {
@@ -766,7 +767,7 @@ export function runDax(input: DaxRunInput): Promise<SqlResult & { sql: string }>
     method: "POST",
     body: JSON.stringify({
       expression: input.expression, dataset_ids: input.datasetIds, measures: input.measures, filters: input.filters ?? {}, order: input.order ?? "value",
-      group_dataset_id: input.group?.datasetId ?? null, group_column: input.group?.column ?? null,
+      group_dataset_id: input.group?.datasetId ?? null, group_column: input.group?.column ?? null, group_grain: input.group?.grain ?? null,
     }),
   });
 }

@@ -7,7 +7,7 @@ import { runDax } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "../logic/aggregate";
-import type { DashboardMeasure, DatasetLite, Filters } from "../types";
+import type { DashboardMeasure, DashboardWidget, DatasetLite, Filters } from "../types";
 
 type Format = NonNullable<DashboardMeasure["format"]>;
 
@@ -19,6 +19,9 @@ const EXAMPLES: Array<[string, string]> = [
   ["Row by row", "SUMX(Sales, Sales[Price] * Sales[Qty])"],
   ["Big orders", "COUNTROWS(FILTER(Sales, Sales[Amount] > 100))"],
   ["Variables", "VAR t = [Total] RETURN IF(t > 1000, \"High\", \"Low\")"],
+  ["Year to date", "TOTALYTD([Total], Sales[Date])"],
+  ["Same time last year", "CALCULATE([Total], SAMEPERIODLASTYEAR(Sales[Date]))"],
+  ["Last 3 months", "CALCULATE([Total], DATESINPERIOD(Sales[Date], LASTDATE(Sales[Date]), -3, MONTH))"],
 ];
 
 export function formatMeasure(value: unknown, format: Format = "number"): string {
@@ -102,11 +105,17 @@ interface MeasuresPanelProps {
   filters: Filters;
   /** Missing for viewers: the list is read-only. */
   onChange?: (measures: DashboardMeasure[]) => void;
-  onAddTile?: (tile: { title: string; dax: string; datasetId: string; x?: string }) => void;
+  onAddTile?: (tile: { title: string; dax: string; datasetId: string; x?: string; grain?: DashboardWidget["grain"] }) => void;
   ai?: { ready: boolean; busy: boolean; error?: string; write: (request: string) => Promise<DashboardMeasure & { explanation: string }> };
 }
 
 /** DAX measures, like Power BI: named formulas that react to the dashboard's filters and can be shown as tiles. */
+const GRAINS = ["year", "quarter", "month", "day"] as const;
+/** Date columns can be charted over time (by year, quarter, month or day). */
+function looksLikeDate(type: string, sample: unknown): boolean {
+  return /date|time/i.test(type) || (typeof sample === "string" && /^(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})/.test(sample));
+}
+
 export function MeasuresPanel({ measures, datasets, filters, onChange, onAddTile, ai }: MeasuresPanelProps) {
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [draft, setDraft] = useState<(DashboardMeasure & { explanation: string }) | null>(null);
@@ -114,7 +123,7 @@ export function MeasuresPanel({ measures, datasets, filters, onChange, onAddTile
   const [chartFor, setChartFor] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const datasetIds = datasets.map((dataset) => dataset.id);
-  const columns = datasets.flatMap((dataset) => dataset.columns.map((column) => ({ datasetId: dataset.id, column: column.name, label: datasets.length > 1 ? `${dataset.name} · ${column.name}` : column.name })));
+  const columns = datasets.flatMap((dataset) => dataset.columns.map((column, index) => ({ datasetId: dataset.id, column: column.name, date: looksLikeDate(column.data_type, dataset.rows.find((row) => row[index] != null && row[index] !== "")?.[index]), label: datasets.length > 1 ? `${dataset.name} · ${column.name}` : column.name })));
   const tableNames = datasets.map((dataset) => dataset.name.replace(/\.[A-Za-z0-9]{1,5}$/, "").replace(/[^0-9A-Za-z_]+/g, "_").replace(/^_+|_+$/g, "").toLowerCase());
   const save = (next: DashboardMeasure, previous?: string) => {
     onChange?.(previous ? measures.map((measure) => (measure.name === previous ? next : measure)) : [...measures, next]);
@@ -175,12 +184,18 @@ export function MeasuresPanel({ measures, datasets, filters, onChange, onAddTile
                       {onAddTile ? (
                         chartFor === measure.name ? (
                           <select autoFocus aria-label={`Chart ${measure.name} by`} defaultValue="" onBlur={() => setChartFor(null)} onChange={(event) => {
-                            const picked = columns.find((column) => `${column.datasetId}|${column.column}` === event.target.value);
-                            if (picked) onAddTile({ title: `${measure.name} by ${picked.column}`, dax: `[${measure.name}]`, datasetId: picked.datasetId, x: picked.column });
+                            const [key, grain] = event.target.value.split("@") as [string, DashboardWidget["grain"]];
+                            const picked = columns.find((column) => `${column.datasetId}|${column.column}` === key);
+                            if (picked) onAddTile({ title: `${measure.name} by ${grain ?? picked.column}`, dax: `[${measure.name}]`, datasetId: picked.datasetId, x: picked.column, grain });
                             setChartFor(null);
                           }} className="h-7 rounded-md border bg-surface px-1.5 text-[11px]">
                             <option value="" disabled>Chart by…</option>
                             {columns.map((column) => <option key={`${column.datasetId}|${column.column}`} value={`${column.datasetId}|${column.column}`}>{column.label}</option>)}
+                            {columns.filter((column) => column.date).map((column) => (
+                              <optgroup key={`${column.datasetId}|${column.column}@`} label={`${column.label} over time`}>
+                                {GRAINS.map((grain) => <option key={grain} value={`${column.datasetId}|${column.column}@${grain}`}>by {grain}</option>)}
+                              </optgroup>
+                            ))}
                           </select>
                         ) : <button type="button" onClick={() => setChartFor(measure.name)} className="inline-flex h-7 items-center gap-1 rounded-md border bg-surface px-2 text-[11px] hover:border-border-strong"><BarChart3 className="size-3" />Chart by…</button>
                       ) : null}

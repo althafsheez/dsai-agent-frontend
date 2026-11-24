@@ -228,6 +228,8 @@ class DaxRunRequest(BaseModel):
     group_column: str | None = Field(default=None, max_length=200)
     filters: dict[str, list[str]] = Field(default_factory=dict)
     order: str = Field(default="value", pattern="^(value|name)$")
+    # For a date column: group by year, quarter, month or day instead of each raw value.
+    group_grain: str | None = Field(default=None, pattern="^(year|quarter|month|day)$")
 
 
 dax_router = APIRouter(prefix="/api/dashboards/dax", tags=["dashboards"])
@@ -238,7 +240,7 @@ def dax_run(data: DaxRunRequest, request: Request, user: User = Depends(get_curr
     """Evaluates a DAX expression (with the dashboard's measures) over the chosen datasets, optionally grouped by a column."""
     group = (data.group_dataset_id, data.group_column) if data.group_dataset_id and data.group_column else None
     try:
-        return run_dax(data.expression, _datasets_for_sql(request, db, user, data.dataset_ids), {measure.name: measure.expression for measure in data.measures}, group, data.filters, data.order)
+        return run_dax(data.expression, _datasets_for_sql(request, db, user, data.dataset_ids), {measure.name: measure.expression for measure in data.measures}, group, data.filters, data.order, data.group_grain)
     except DaxError as exc:
         raise APIError(422, "dax_failed", str(exc)) from exc
 

@@ -141,7 +141,8 @@ const readsColumn = (widget: DashboardWidget, column: string) =>
   [widget.x, widget.y].includes(column) || [widget.sql, widget.script].some((text) => text?.includes(column));
 
 /** The code behind a widget: its own SQL or Python, or the SQL its visual settings are equal to. */
-function queryOf(widget: DashboardWidget, table: string | undefined): { language: "SQL" | "Python"; code: string } {
+function queryOf(widget: DashboardWidget, table: string | undefined): { language: "SQL" | "Python" | "DAX"; code: string } {
+  if (widget.dax) return { language: "DAX", code: widget.x ? `${widget.dax}\n\n-- by ${widget.x}` : widget.dax };
   if (widget.script) return { language: "Python", code: widget.script };
   if (widget.sql) return { language: "SQL", code: widget.sql };
   return { language: "SQL", code: table ? generatedSql(widget, table) : "" };
@@ -280,7 +281,7 @@ export function WidgetInfo({ widget, datasets, onClose, onEdit }: { widget: Dash
           ) : <p className="text-xs text-muted-foreground">This tile does not read a dataset.</p>}
         </div>
         <div>
-          <p className={label}>{language === "Python" ? "Python script" : widget.sql ? "SQL query" : "Query (SQL equivalent)"}</p>
+          <p className={label}>{language === "Python" ? "Python script" : language === "DAX" ? "DAX measure" : widget.sql ? "SQL query" : "Query (SQL equivalent)"}</p>
           {widget.request ? <p className="mb-1 text-[11px] text-muted-foreground">Asked for: {widget.request}</p> : null}
           <pre aria-label="Tile code" className="max-h-80 overflow-auto rounded-md border bg-background/60 p-2 font-mono text-[10px] leading-relaxed text-foreground/90">{code || "No query."}</pre>
         </div>

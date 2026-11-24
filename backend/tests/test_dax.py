@@ -107,7 +107,7 @@ def test_friendly_errors():
     with pytest.raises(DaxError, match="refers to itself"):
         compile_query("[Loop]", DATA, {"Loop": "[Loop] + 1"})
     with pytest.raises(DaxError, match="not supported yet"):
-        compile_query("TOTALYTD([Total Sales], Sales[Date])", DATA, MEASURES)
+        compile_query("RANKX(Sales, [Total Sales])", DATA, MEASURES)
     with pytest.raises(DaxError, match="Expected"):
         compile_query("SUM(Sales[Amount]", DATA)
 
@@ -160,3 +160,41 @@ async def test_ai_measure_is_checked_and_retried_on_an_error(client, monkeypatch
     assert response.status_code == 200, response.text
     assert response.json() == {"name": "Revenue", "expression": "SUM(orders[rev])", "format": "currency", "explanation": "Adds up rev.", "value": 40.0}
     assert "no column [revenue]" in prompts[1]
+
+
+DATED = {
+    "id": "d3",
+    "name": "orders.csv",
+    "columns": ["Date", "Amount"],
+    "rows": [
+        ["01/15/2023", "10"], ["02/10/2023", "20"], ["03/05/2023", "30"], ["12/31/2023", "5"],
+        ["01/20/2024", "40"], ["02/29/2024", "50"], ["03/01/2024", "60"],
+    ],
+}
+TIME_MEASURES = {"Total": "SUM(Orders[Amount])", "YTD": "TOTALYTD([Total], Orders[Date])", "LY": "CALCULATE([Total], SAMEPERIODLASTYEAR(Orders[Date]))"}
+
+
+def by_month(expression: str, grain: str = "month") -> dict:
+    result = run_dax(expression, [DATED], TIME_MEASURES, group_by=("d3", "Date"), grain=grain)
+    return {row[0]: row[1] for row in result["rows"]}
+
+
+def test_dates_are_read_as_iso_and_grouped_by_grain():
+    assert by_month("[Total]", "year") == {"2023": 65, "2024": 150}
+    assert by_month("[Total]", "quarter") == {"2023-Q1": 60, "2023-Q4": 5, "2024-Q1": 150}
+    assert by_month("[Total]")["2024-02"] == 50
+    assert run_dax("LASTDATE(Orders[Date])", [DATED], {})["rows"][0][0] == "2024-03-01"
+
+
+def test_time_intelligence_like_power_bi():
+    ytd = by_month("[YTD]")
+    assert ytd["2023-02"] == 30 and ytd["2023-12"] == 65 and ytd["2024-01"] == 40 and ytd["2024-03"] == 150
+    last_year = by_month("[LY]")
+    assert last_year["2024-01"] == 10 and last_year["2024-02"] == 20 and last_year["2024-03"] == 30
+    assert by_month("CALCULATE([Total], DATEADD(Orders[Date], -1, MONTH))")["2024-03"] == 50
+    assert by_month("CALCULATE([Total], PREVIOUSMONTH(Orders[Date]))")["2024-02"] == 40
+    assert by_month("CALCULATE([Total], PARALLELPERIOD(Orders[Date], -1, YEAR))", "year")["2024"] == 65
+    assert by_month("CALCULATE([Total], DATESINPERIOD(Orders[Date], LASTDATE(Orders[Date]), -3, MONTH))")["2024-03"] == 150
+    assert run_dax("CALCULATE([Total], DATESBETWEEN(Orders[Date], DATE(2023, 2, 1), DATE(2023, 12, 31)))", [DATED], TIME_MEASURES)["rows"][0][0] == 55
+    assert run_dax("DATEDIFF(DATE(2024, 1, 31), EOMONTH(DATE(2024, 1, 31), 1), DAY)", [DATED], {})["rows"][0][0] == 29
+    assert run_dax("QUARTER(DATE(2024, 8, 1)) + YEAR(STARTOFYEAR(Orders[Date]))", [DATED], {})["rows"][0][0] == 2026

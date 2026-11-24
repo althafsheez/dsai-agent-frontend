@@ -8,7 +8,7 @@ import type { CSSProperties } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSqlTables } from "@/lib/api";
 import { generatedSql } from "../logic/sql";
-import { ArrowLeft, BookOpen, Check, Database, Download, Info, Eye, LayoutDashboard, LoaderCircle, Merge, Pencil, Radio, Save, Share2, Sigma, Trash2, Undo2, Wand2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, Database, Download, Info, Eye, LayoutDashboard, LoaderCircle, Merge, Pencil, Radio, Save, Share2, Trash2, Undo2, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { DriveBrowserDialog } from "@/features/connectors/components/drive-browser-dialog";
@@ -68,7 +68,7 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   /** The tile whose details (data, tables, query) are shown while not editing. */
   const [infoId, setInfoId] = useState<string | null>(null);
   /** Which view the right panel shows. */
-  const [side, setSide] = useState<"datasets" | "library" | "measures" | "info" | "edit">("datasets");
+  const [side, setSide] = useState<"datasets" | "library" | "info" | "edit">("datasets");
   const [fill, setFill] = useState<{ text: string; n: number }>();
   const [panelWidth, setPanelWidth] = usePanelWidth();
   const [name, setName] = useState("");
@@ -212,9 +212,9 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   }
 
   /** A tile showing a DAX measure: a number, or a bar chart when grouped by a column. */
-  function addMeasureTile(tile: { title: string; dax: string; datasetId: string; x?: string }) {
+  function addMeasureTile(tile: { title: string; dax: string; datasetId: string; x?: string; grain?: DashboardWidget["grain"] }) {
     if (mode !== "edit") setMode("edit");
-    const widget: DashboardWidget = { id: `w-dax-${Date.now().toString(36)}`, type: tile.x ? "bar" : "kpi", title: tile.title, dataset_id: tile.datasetId, x: tile.x, agg: "sum", span: tile.x ? 2 : 1, dax: tile.dax };
+    const widget: DashboardWidget = { id: `w-dax-${Date.now().toString(36)}`, type: tile.grain ? "line" : tile.x ? "bar" : "kpi", title: tile.title, grain: tile.grain, dataset_id: tile.datasetId, x: tile.x, agg: "sum", span: tile.x ? 2 : 1, dax: tile.dax };
     setDraft((items) => [...items, widget]);
   }
 
@@ -370,7 +370,7 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
         <aside aria-label="Dashboard tools" style={{ "--panel-w": `${panelWidth}px` } as CSSProperties} className="relative flex w-full shrink-0 flex-col border-t bg-sidebar text-sidebar-foreground xl:h-full xl:w-[var(--panel-w)] xl:border-l xl:border-t-0">
           <PanelResizer width={panelWidth} onWidth={setPanelWidth} />
           <div role="tablist" aria-label="Side panel" className="flex shrink-0 gap-0.5 border-b p-2">
-            {([["datasets", "Datasets", Database], ...(canEdit ? [["library", "Library", BookOpen]] : []), ["measures", "Measures", Sigma], ["info", "Info", Info], ...(canEdit ? [["edit", "Edit", Pencil]] : [])] as Array<["datasets" | "library" | "measures" | "info" | "edit", string, typeof Pencil]>).map(([value, label, Icon]) => (
+            {([["datasets", "Datasets", Database], ...(canEdit ? [["library", "Library", BookOpen]] : []), ["info", "Info", Info], ...(canEdit ? [["edit", "Edit", Pencil]] : [])] as Array<["datasets" | "library" | "info" | "edit", string, typeof Pencil]>).map(([value, label, Icon]) => (
               <button key={value} type="button" role="tab" aria-selected={side === value} onClick={() => setSide(value)}
                 className={cn("flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-xs transition-colors", side === value ? "bg-raised font-medium text-foreground" : "text-muted-foreground hover:bg-raised/50 hover:text-foreground")}>
                 <Icon className="size-3.5" />{label}
@@ -432,17 +432,18 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
             </>
           ) : (
             <div className="min-h-0 flex-1 xl:overflow-y-auto">
-              {side === "measures" ? (
-                <MeasuresPanel
-                  measures={measures} datasets={attachedDatasets.length ? attachedDatasets : datasets.slice(0, 1)} filters={filters}
-                  onChange={canEdit ? (next) => { if (mode !== "edit") setMode("edit"); setMeasures(next); } : undefined}
-                  onAddTile={canEdit ? addMeasureTile : undefined}
-                  ai={{ ready: ai.ready, busy: ai.measure.isPending, error: messageOf(ai.measure.error) ?? undefined, write: (request) => ai.measure.mutateAsync({ request, datasetIds: attachedIds.length ? attachedIds : datasets.slice(0, 1).map((dataset) => dataset.id), measures }) }}
-                />
-              ) : side === "info" ? (
-                infoWidget
-                  ? <WidgetInfo widget={infoWidget} datasets={datasets} onClose={() => setInfoId(null)} onEdit={canEdit ? () => editWidget(infoWidget.id) : undefined} />
-                  : <p className="px-4 py-10 text-center text-xs text-muted-foreground">Click a tile to see the data, tables and query behind it.</p>
+              {side === "info" ? (
+                <>
+                  {infoWidget
+                    ? <WidgetInfo widget={infoWidget} datasets={datasets} onClose={() => setInfoId(null)} onEdit={canEdit ? () => editWidget(infoWidget.id) : undefined} />
+                    : <p className="border-b px-4 py-6 text-center text-xs text-muted-foreground">Click a tile to see the data, tables and query behind it.</p>}
+                  <MeasuresPanel
+                    measures={measures} datasets={attachedDatasets.length ? attachedDatasets : datasets.slice(0, 1)} filters={filters}
+                    onChange={canEdit ? (next) => { if (mode !== "edit") setMode("edit"); setMeasures(next); } : undefined}
+                    onAddTile={canEdit ? addMeasureTile : undefined}
+                    ai={{ ready: ai.ready, busy: ai.measure.isPending, error: messageOf(ai.measure.error) ?? undefined, write: (request) => ai.measure.mutateAsync({ request, datasetIds: attachedIds.length ? attachedIds : datasets.slice(0, 1).map((dataset) => dataset.id), measures }) }}
+                  />
+                </>
               ) : mode === "view" ? (
                 <DatasetsPanel view={side === "library" ? "library" : "datasets"} onShowLibrary={() => setSide("library")} readOnly canAdd={canEdit} widgets={draft} onEditWidget={canEdit ? editWidget : undefined} attached={attachedDatasets} library={datasets} usage={usage} onAttach={(id) => addDatasets([id])} onDetach={() => undefined} onUploaded={() => void attachNew()} onDrive={() => setDriveOpen(true)} />
               ) : (

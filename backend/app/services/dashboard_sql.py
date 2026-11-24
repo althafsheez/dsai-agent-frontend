@@ -8,6 +8,7 @@ Nothing here touches the application database.
 from __future__ import annotations
 
 import re
+from datetime import datetime
 import sqlite3
 import time
 from typing import Any
@@ -56,6 +57,25 @@ def _quote(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+_DATE_FORMATS = ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y/%m/%d", "%m/%d/%Y", "%d/%m/%Y", "%d-%m-%Y", "%m-%d-%Y", "%b %d %Y", "%d %b %Y", "%b %d, %Y")
+
+
+def _as_dates(values: list[Any]) -> list[str | None] | None:
+    """The column as ISO dates when every filled value is a date in one format (so SQLite and DAX date functions work)."""
+    filled = [str(value).strip() for value in values if value not in (None, "")]
+    if not filled or not any(mark in filled[0] for mark in "-/ "):
+        return None
+    for fmt in _DATE_FORMATS:
+        try:
+            parsed = [datetime.strptime(value, fmt) for value in filled]
+        except ValueError:
+            continue
+        timed = "%H" in fmt
+        out = iter(item.strftime("%Y-%m-%d %H:%M:%S" if timed else "%Y-%m-%d") for item in parsed)
+        return [None if value in (None, "") else next(out) for value in values]
+    return None
+
+
 def _load(connection: sqlite3.Connection, datasets: list[dict[str, Any]]) -> None:
     names = table_names(datasets)
     for dataset in datasets:
@@ -65,6 +85,11 @@ def _load(connection: sqlite3.Connection, datasets: list[dict[str, Any]]) -> Non
         table = names[str(dataset["id"])]
         connection.execute(f"CREATE TABLE {_quote(table)} ({', '.join(_quote(column) + (' REAL' if numeric[index] else ' TEXT') for index, column in enumerate(columns))})")
         prepared = [[(None if cell in (None, "") else _number(cell) if numeric[index] else str(cell)) for index, cell in enumerate(row)] for row in rows]
+        for index in range(len(columns)):
+            dates = None if numeric[index] else _as_dates([row[index] for row in rows])
+            if dates:
+                for row, value in zip(prepared, dates):
+                    row[index] = value
         connection.executemany(f"INSERT INTO {_quote(table)} VALUES ({', '.join('?' for _ in columns)})", prepared)
 
 
