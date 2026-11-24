@@ -764,9 +764,55 @@ export async function deleteDashboardRecord(id: string): Promise<void> {
   if (!response.ok) throw await apiError(response);
 }
 
-export type WorkflowStepKind = "data" | "script" | "ai" | "condition" | "notify";
+export type WorkflowStepKind = "data" | "script" | "ai" | "condition" | "notify" | "human";
+export interface WorkflowAction {
+  provider: "postgresql";
+  connection_id: string;
+  instructions: string;
+  operation: "query";
+  arguments: { sql: string; bindings: Array<string | number | boolean | null>; limit: number };
+  output: "table";
+  summary: string;
+  validation: "valid";
+  test_status: "untested" | "passed";
+  test_receipt?: string | null;
+}
+export interface WorkflowQueryTable {
+  kind: "query_table";
+  columns: string[];
+  column_types: string[];
+  rows: unknown[][];
+  row_count: number;
+  duration_ms: number;
+  truncated: boolean;
+  output_id?: string;
+}
+export interface WorkflowActionRequest {
+  provider: "postgresql";
+  connection_id: string;
+  instructions: string;
+  previous_sql?: string;
+  feedback?: string;
+}
+export interface WorkflowActionProposal {
+  status: "supported" | "unsupported" | "needs_clarification" | "missing_requirement";
+  message: string;
+  action: WorkflowAction | null;
+}
+export type WorkflowActionTest = { status: "passed"; result: WorkflowQueryTable; receipt: string; duration_ms: number; logs: string[] }
+  | { status: "failed"; error: string; code: string; duration_ms: number; logs: string[] };
+
+export function generateWorkflowAction(body: WorkflowActionRequest): Promise<WorkflowActionProposal> {
+  return requestJson("/workflow-store/actions/generate", { method: "POST", body: JSON.stringify(body) });
+}
+export function testWorkflowAction(action: WorkflowAction): Promise<WorkflowActionTest> {
+  return requestJson("/workflow-store/actions/test", { method: "POST", body: JSON.stringify(action) });
+}
+export function applyWorkflowAction(action: WorkflowAction, receipt?: string): Promise<WorkflowAction> {
+  return requestJson("/workflow-store/actions/apply", { method: "POST", body: JSON.stringify({ action, test_receipt: receipt }) });
+}
 export interface WorkflowStepDto { id: string; kind: WorkflowStepKind | string; title: string; detail: string; config?: Record<string, unknown> }
-export interface WorkflowTriggerDto { kind: "manual" | "schedule"; config?: { frequency?: string; time?: string; day?: string; day_of_month?: string | number } }
+export interface WorkflowTriggerDto { kind: "manual" | "schedule"; config?: { frequency?: string; time?: string; day?: string; day_of_month?: string | number; show_on_canvas?: false } }
 export interface WorkflowRecordDto {
   id: string; name: string; description: string; prompt: string; state: "active" | "inactive" | "draft";
   trigger: WorkflowTriggerDto; steps: WorkflowStepDto[]; schedule: string;
@@ -777,9 +823,10 @@ export type WorkflowStepStatus = "pending" | "running" | "success" | "failed" | 
 export interface WorkflowStepResultDto {
   step_id: string; title: string; kind: string; status: WorkflowStepStatus; input: unknown; output: unknown;
   logs: string[]; error: string; started_at: string | null; finished_at: string | null;
+  progress?: string;
 }
 export interface WorkflowRunRecordDto {
-  id: string; workflow_id: string; workflow_name: string; trigger: "manual" | "schedule";
+  id: string; workflow_id: string; workflow_name: string; trigger: "manual" | "schedule" | "test";
   status: "running" | "success" | "failed" | "cancelled"; results: WorkflowStepResultDto[]; error: string;
   started_at: string; finished_at: string | null; cancelled_at: string | null;
 }
@@ -809,6 +856,9 @@ export function getWorkflowRunRecord(id: string): Promise<WorkflowRunRecordDto> 
 }
 export function runWorkflowNow(id: string): Promise<WorkflowRunRecordDto> {
   return requestJson(`/workflow-store/${encodeURIComponent(id)}/run`, { method: "POST" });
+}
+export function testWorkflow(id: string, steps: WorkflowStepDto[]): Promise<WorkflowRunRecordDto> {
+  return requestJson(`/workflow-store/${encodeURIComponent(id)}/test`, { method: "POST", body: JSON.stringify({ steps }) });
 }
 export function cancelWorkflowRunRecord(id: string): Promise<WorkflowRunRecordDto> {
   return requestJson(`/workflow-store/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" });

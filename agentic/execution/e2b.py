@@ -22,6 +22,8 @@ PYTHON_ERRORS = {
     "PermissionError": "Python was denied access to a resource",
 }
 
+SANDBOX_PACKAGES = {"duckdb": "2.0.1", "reportlab": "4.4.10"}
+
 
 def _failure(code: str, category: str, message: str, stage: str, **metadata: Any) -> dict[str, Any]:
     return {"success": False, "error": message, "diagnostic": diagnostic("E2B", code, category, message, stage, **metadata)}
@@ -57,7 +59,7 @@ class E2BSandboxPool:
         self._api_key = api_key
         self._timeout_seconds = timeout_seconds
         self._sandboxes: dict[str, Any] = {}
-        self._pdf_ready: set[str] = set()
+        self._prepared_packages: dict[str, set[str]] = {}
         self._output_hashes: dict[str, dict[str, str]] = {}
         self._lock = RLock()
 
@@ -126,7 +128,7 @@ class E2BSandboxPool:
         def run() -> dict[str, Any]:
             stage = "python_execution"
             try:
-                self._ensure_pdf_library(run_id, sandbox, code)
+                self._prepare_packages(run_id, sandbox, code)
                 execution = sandbox.run_code(code, timeout=bounded_timeout)
                 stage = "output_collection"
                 generated = self._scan_outputs_sync(run_id, sandbox)
@@ -160,19 +162,21 @@ class E2BSandboxPool:
 
         return await asyncio.to_thread(run)
 
-    def _ensure_pdf_library(self, run_id: str, sandbox: Any, code: str) -> None:
-        """Installing reportlab takes seconds, so do it only for runs whose code actually uses it."""
-        if "reportlab" not in code or run_id in self._pdf_ready:
-            return
-        started = time.perf_counter()
-        try:
-            sandbox.commands.run(
-                "python -c 'import reportlab' || python -m pip install --disable-pip-version-check reportlab==4.4.10",
-                timeout=120,
-            )
-            self._pdf_ready.add(run_id)
-        finally:
-            logger.info("e2b_dependency_prep duration_ms=%.1f", (time.perf_counter() - started) * 1000)
+    def _prepare_packages(self, run_id: str, sandbox: Any, code: str) -> None:
+        """Prepare only the allowlisted packages the code uses."""
+        prepared = self._prepared_packages.setdefault(run_id, set())
+        for package, version in SANDBOX_PACKAGES.items():
+            if package not in code or package in prepared:
+                continue
+            started = time.perf_counter()
+            try:
+                sandbox.commands.run(
+                    f"python -c 'import {package}' || python -m pip install --disable-pip-version-check {package}=={version}",
+                    timeout=120,
+                )
+                prepared.add(package)
+            finally:
+                logger.info("e2b_dependency_prep duration_ms=%.1f", (time.perf_counter() - started) * 1000)
 
     def _scan_outputs_sync(self, run_id: str, sandbox: Any) -> list[dict[str, Any]]:
         generated: list[dict[str, Any]] = []
@@ -285,7 +289,7 @@ class E2BSandboxPool:
         with self._lock:
             sandbox = self._sandboxes.pop(run_id, None)
             self._output_hashes.pop(run_id, None)
-            self._pdf_ready.discard(run_id)
+            self._prepared_packages.pop(run_id, None)
         if sandbox is not None:
             try:
                 sandbox.kill()

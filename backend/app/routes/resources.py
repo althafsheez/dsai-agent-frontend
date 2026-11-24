@@ -18,7 +18,7 @@ from ..errors import APIError
 from ..models import Chat, FileObject, LibraryEntry, Message, Resource, ResourceLink, User, Workspace
 from ..services.records import require_chat, require_workspace
 from ..services.dataset_preview import MAX_DASHBOARD_ROWS, MAX_PREVIEW_ROWS, read_csv_rows
-from ..services.resource_uploads import CODE_EXTENSIONS, read_upload, register_upload
+from ..services.resource_uploads import CODE_EXTENSIONS, read_upload, register_upload, save_owned_resource_to_library
 from ..storage import LocalFileStorage
 router = APIRouter(prefix="/api/resources", tags=["resources"])
 catalog_router = APIRouter(prefix="/api", tags=["resources"])
@@ -350,16 +350,9 @@ async def add_resource_to_library(
     user: User = Depends(get_current_user),
 ) -> dict:
     _accessible_resource(session, user, resource_id)
-    entry = session.scalar(select(LibraryEntry).where(
-        LibraryEntry.user_id == user.id,
-        LibraryEntry.resource_id == resource_id,
-    ))
-    if entry is None:
-        entry = LibraryEntry(user_id=user.id, resource_id=resource_id)
-        session.add(entry)
-        session.commit()
-        session.refresh(entry)
-    return {"resource_id": resource_id, "in_library": True, "library_entry_id": entry.id}
+    entry_id = save_owned_resource_to_library(session, user.id, resource_id).id
+    session.commit()
+    return {"resource_id": resource_id, "in_library": True, "library_entry_id": entry_id}
 
 
 @router.delete("/{resource_id}/library", status_code=status.HTTP_204_NO_CONTENT)

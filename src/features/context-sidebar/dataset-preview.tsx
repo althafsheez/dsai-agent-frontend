@@ -1,19 +1,21 @@
+import { useId } from "react";
 import { formatCount } from "./resource-utils";
 import type { DatasetResource } from "./types";
 
 interface DatasetPreviewProps {
-  dataset: DatasetResource;
+  dataset: Pick<DatasetResource, "columns" | "preview_rows" | "row_count" | "column_count">;
 }
 
 export function DatasetPreview({ dataset }: DatasetPreviewProps) {
+  const id = useId();
   const columns = dataset.columns ?? [];
   const rows = (dataset.preview_rows ?? []).slice(0, 100);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
-      <section aria-labelledby="dataset-columns-title" className="shrink-0 rounded-md border bg-background/40 px-3 py-2">
+    <div className="flex h-full min-h-0 min-w-0 flex-col gap-3">
+      <section aria-labelledby={`${id}-columns`} className="shrink-0 rounded-md border bg-background/40 px-3 py-2">
         <div className="mb-1.5 flex items-center justify-between gap-3">
-          <h2 id="dataset-columns-title" className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Columns</h2>
+          <h2 id={`${id}-columns`} className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Columns</h2>
           <span className="text-[10px] text-muted-foreground">{formatCount(dataset.row_count, "row")} · {formatCount(dataset.column_count, "column")}</span>
         </div>
         {columns.length ? (
@@ -28,9 +30,9 @@ export function DatasetPreview({ dataset }: DatasetPreviewProps) {
         ) : <p className="text-[10px] text-muted-foreground">Column metadata is not available yet.</p>}
       </section>
 
-      <section aria-labelledby="dataset-table-title" className="flex min-h-0 flex-1 flex-col">
+      <section aria-labelledby={`${id}-table`} className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="mb-2 flex items-center justify-between gap-3">
-          <h2 id="dataset-table-title" className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Preview</h2>
+          <h2 id={`${id}-table`} className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Preview</h2>
           {rows.length ? <span className="text-[11px] text-muted-foreground">First {rows.length} rows</span> : null}
         </div>
         {columns.length && rows.length ? (

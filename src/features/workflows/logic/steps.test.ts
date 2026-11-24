@@ -19,9 +19,10 @@ describe("workflow steps", () => {
   it("says what is missing before a workflow can be saved", () => {
     expect(problems("", [])).toEqual(["Give the workflow a name.", "Add at least one step."]);
     const ai = { ...newStep("ai"), detail: "Summarise" };
-    expect(problems("x", [ai])).toContain("Put a “Get data” step before the steps that use it.");
+    expect(problems("x", [ai])).toEqual([]);
+    expect(problems("x", [{ ...newStep("script"), detail: "Summarise" }])).toContain("Attach a dataset to the step that uses it.");
     const data = newStep("data");
-    expect(problems("x", [data, ai]).join(" ")).toContain("choose a dataset");
+    expect(problems("x", [data, ai]).join(" ")).toContain("choose a saved connection");
     expect(problems("x", [newStep("data", ["d1"]), ai])).toEqual([]);
     expect(problems("x", [newStep("data", ["d1"]), { ...newStep("condition"), config: { operator: "greater", value: "abc" } }])[0]).toContain("not a number");
   });

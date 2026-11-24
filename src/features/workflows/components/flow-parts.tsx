@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import { Bell, CheckCircle2, CircleDashed, Clock, Code2, Database, Filter, Loader2, MinusCircle, MousePointerClick, Plus, Sparkles, XCircle } from "lucide-react";
-import type { WorkflowStepDto, WorkflowStepKind, WorkflowStepStatus, WorkflowTriggerDto } from "@/lib/api";
+import type { ReactNode } from "react";
+import { Bell, CheckCircle2, CircleDashed, Clock, Code2, Database, Filter, Loader2, MinusCircle, MousePointerClick, Sparkles, UserCheck, XCircle } from "lucide-react";
+import type { WorkflowStepDto, WorkflowStepStatus, WorkflowTriggerDto } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { describeSchedule, kindInfo, STEP_KINDS } from "../logic/steps";
+import { describeSchedule, kindInfo } from "../logic/steps";
 
-const icons: Record<string, typeof Database> = { data: Database, script: Code2, ai: Sparkles, condition: Filter, notify: Bell };
+const icons: Record<string, typeof Database> = { data: Database, script: Code2, ai: Sparkles, condition: Filter, notify: Bell, human: UserCheck };
 export const StepIcon = ({ kind, className }: { kind: string; className?: string }) => { const Icon = icons[kind] ?? Sparkles; return <Icon className={className ?? "size-4"} strokeWidth={1.6} />; };
 
 const statusLook: Record<string, { label: string; tone: string; icon: typeof Clock }> = {
@@ -38,32 +38,8 @@ export function TriggerCard({ trigger, children }: { trigger: WorkflowTriggerDto
   );
 }
 
-/** The vertical line between two cards. With `onAdd` it carries a "+" that opens the step picker. */
-export function Connector({ onAdd, label }: { onAdd?: (kind: WorkflowStepKind) => void; label?: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="relative flex flex-col items-center" aria-hidden={onAdd ? undefined : true}>
-      <span className="h-4 w-px bg-border-strong" />
-      {onAdd ? (
-        <>
-          <button type="button" aria-label={label ?? "Add a step here"} aria-expanded={open} onClick={() => setOpen(!open)} className="grid size-6 place-items-center rounded-full border bg-surface text-muted-foreground transition-colors hover:border-sky-300 hover:text-sky-300"><Plus className="size-3.5" /></button>
-          <span className="h-4 w-px bg-border-strong" />
-          {open ? (
-            <ul role="menu" aria-label="Step types" className="absolute left-1/2 top-8 z-20 w-72 -translate-x-1/2 max-w-[calc(100vw-2rem)] rounded-xl border bg-raised p-1.5 shadow-xl">
-              {STEP_KINDS.map((item) => (
-                <li key={item.kind} role="none">
-                  <button type="button" role="menuitem" onClick={() => { setOpen(false); onAdd(item.kind); }} className="flex w-full items-start gap-2.5 rounded-lg p-2 text-left hover:bg-surface">
-                    <span className="mt-0.5 text-sky-300"><StepIcon kind={item.kind} /></span>
-                    <span className="min-w-0"><span className="block text-xs font-medium">{item.label}</span><span className="block text-[11px] leading-snug text-muted-foreground">{item.hint}</span><span className="mt-0.5 block text-[10px] text-sky-300/80">{item.needs}</span></span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </>
-      ) : <span className="h-4 w-px bg-border-strong" />}
-    </div>
-  );
+export function Connector() {
+  return <div aria-hidden className="mx-auto h-8 w-px bg-border-strong" />;
 }
 
 export function StepCard({ index, step, status, actions, children, tone }: { index: number; step: Pick<WorkflowStepDto, "kind" | "title" | "detail">; status?: WorkflowStepStatus; actions?: ReactNode; children?: ReactNode; tone?: "active" }) {

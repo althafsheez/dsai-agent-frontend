@@ -31,6 +31,8 @@ class AgentRunner:
         is_cancelled: Callable[[], bool],
         context: ToolContext | None = None,
         poll_steering: Callable[[str], list[str]] | None = None,
+        *,
+        allowed_tools: frozenset[str] | None = None,
     ) -> AsyncIterator[RunnerEvent]:
         def check_control(checkpoint: str) -> None:
             if is_cancelled():
@@ -41,7 +43,7 @@ class AgentRunner:
                     raise RunnerSteered(instructions)
 
         check_control("before.model")
-        definitions = self._tools.definitions()
+        definitions = tuple(tool for tool in self._tools.definitions() if allowed_tools is None or tool.name in allowed_tools)
         stream_with_tools = getattr(self._provider, "stream_with_tools", None)
         if definitions and context is not None and callable(stream_with_tools):
             provider_tools = tuple(ProviderTool(tool.name, tool.description, tool.parameters) for tool in definitions)
@@ -56,6 +58,8 @@ class AgentRunner:
                 step_context, started_at, turn = pending_steps.pop(0) if pending_steps else (
                     context.for_step(str(uuid4()), name), time.perf_counter(), None,
                 )
+                if allowed_tools is not None and name not in allowed_tools:
+                    return {"error": "This tool is unavailable in this workflow step."}
                 try:
                     result = await self._tools.execute(name, arguments, step_context)
                 except (RunnerCancelled, RunnerSteered):

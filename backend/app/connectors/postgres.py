@@ -5,6 +5,7 @@ import logging
 import ssl
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pglast import scan
 
 from sqlalchemy import URL, bindparam, create_engine, text
 from sqlalchemy.engine import Connection
@@ -13,7 +14,7 @@ from sqlalchemy.pool import NullPool
 
 from ..config import Settings
 from ..errors import APIError
-from .schemas import Column, PostgresSettings, QueryResult, SchemaList, TableDetails, TableList, TableSummary
+from .schemas import Column, PostgresSettings, QueryResult, SchemaList, TableDetails, TableList, TableSummary, TypedQueryResult
 from .security import application_schema, resolve_target, validate_sql
 
 CATALOG = """
@@ -140,7 +141,15 @@ class PostgresConnector:
                 raise APIError(504, "postgres_timeout", "PostgreSQL timed out. Try a smaller query.") from None
             if failure := self._connection_error(exc, stage):
                 raise failure from None
-            raise APIError(422, "postgres_query_failed", "PostgreSQL could not execute this query. Check the table names, columns and data types.") from None
+            hint = {
+                "42703": "PostgreSQL reported an unknown column.",
+                "42702": "PostgreSQL reported an ambiguous column. Qualify it with a table alias.",
+                "42P01": "PostgreSQL reported an unknown table or alias.",
+                "42803": "PostgreSQL reported an invalid grouping or aggregate expression.",
+                "42883": "PostgreSQL could not find a matching function or operator for the supplied types.",
+                "22012": "PostgreSQL reported division by zero.",
+            }.get(code, "PostgreSQL could not execute this query. Check the table names, columns and data types.")
+            raise APIError(422, "postgres_query_failed", hint, {"sqlstate": code} if code else None) from None
 
     def _schemas(self, allowed_only: bool) -> SchemaList:
         query = "SELECT DISTINCT n.nspname " + CATALOG
@@ -211,13 +220,39 @@ class PostgresConnector:
         return self.execute_readonly_query(f"SELECT * FROM {quote(schema)}.{quote(table)}", limit)
 
     def execute_readonly_query(self, sql: str, limit: int) -> QueryResult:
-        normalized, tables = validate_sql(sql, self.schemas)
+        return self._execute_query(sql, limit, [], include_types=False)
+
+    def execute_typed_query(self, sql: str, limit: int, bindings: list[str | int | float | bool | None]) -> TypedQueryResult:
+        result = self._execute_query(sql, limit, bindings, include_types=True)
+        assert isinstance(result, TypedQueryResult)
+        return result
+
+    def _execute_query(self, sql: str, limit: int, bindings: list, *, include_types: bool) -> QueryResult:
+        normalized, tables = validate_sql(sql, self.schemas, parameter_count=len(bindings))
+        values = []
+        if bindings:
+            # The scanner identifies parameters outside quoted strings. psycopg binds the values separately.
+            parts = []
+            position = 0
+            for token in scan(normalized):
+                if token.name == "PARAM":
+                    parts.extend([normalized[position:token.start].replace("%", "%%"), "%s"])
+                    values.append(bindings[int(normalized[token.start + 1:token.end + 1]) - 1])
+                    position = token.end + 1
+            parts.append(normalized[position:].replace("%", "%%"))
+            normalized = "".join(parts)
         with self._reader() as connection:
             for schema, table in sorted(tables):
                 self._table_oid(connection, schema, table)
-            raw = connection.execution_options(no_parameters=True)
-            with raw.exec_driver_sql(f"SELECT * FROM ({normalized}) AS dsai_result LIMIT 0") as result:
+            raw = connection.execution_options(no_parameters=not values)
+            with raw.exec_driver_sql(f"SELECT * FROM ({normalized}) AS dsai_result LIMIT 0", tuple(values) or None) as result:
                 columns = list(result.keys())
+                oids = [column.type_code for column in result.cursor.description] if include_types else []
+            types = list(raw.execute(text("""
+                SELECT pg_catalog.format_type(t.oid, NULL)
+                FROM pg_catalog.unnest(CAST(:oids AS oid[])) WITH ORDINALITY AS t(oid, position)
+                ORDER BY t.position
+            """), {"oids": oids}).scalars()) if oids else []
             size = len(json.dumps(columns, ensure_ascii=True))
             if len(columns) > 500 or size > MAX_RESULT_BYTES // 2:
                 raise APIError(422, "postgres_result_too_wide", "Select fewer columns.")
@@ -232,14 +267,19 @@ class PostgresConnector:
                 ) AS dsai_rows
             """
             rows: list[list[object]] = []
-            with raw.execution_options(stream_results=True, max_row_buffer=8).exec_driver_sql(query) as result:
+            truncated = False
+            with raw.execution_options(stream_results=True, max_row_buffer=8).exec_driver_sql(query, tuple(values) or None) as result:
                 for encoded in result.scalars():
                     if encoded is None or len(rows) == limit:
-                        return QueryResult(columns=columns, rows=rows, truncated=True)
+                        truncated = True
+                        break
                     # Preserve fractional precision and column order, including duplicate output names.
                     row = list(json.loads(encoded, parse_float=str, parse_int=_exact_integer).values())
                     size += len(json.dumps(row, ensure_ascii=True)) + 2
                     if size > MAX_RESULT_BYTES:
-                        return QueryResult(columns=columns, rows=rows, truncated=True)
+                        truncated = True
+                        break
                     rows.append(row)
-            return QueryResult(columns=columns, rows=rows, truncated=False)
+            if include_types:
+                return TypedQueryResult(columns=columns, column_types=types, rows=rows, truncated=truncated)
+            return QueryResult(columns=columns, rows=rows, truncated=truncated)

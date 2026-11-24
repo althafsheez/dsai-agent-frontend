@@ -37,6 +37,9 @@ class ToolContext:
     step_id: str | None = None
     tool_name: str | None = None
     input_resources: tuple[dict[str, Any], ...] = ()
+    transient_inputs: dict[str, "InputSource"] | None = None
+    workflow_run_id: str | None = None
+    workflow_step_id: str | None = None
 
     def for_step(self, step_id: str, tool_name: str) -> "ToolContext":
         return ToolContext(
@@ -47,6 +50,9 @@ class ToolContext:
             step_id=step_id,
             tool_name=tool_name,
             input_resources=self.input_resources,
+            transient_inputs=self.transient_inputs,
+            workflow_run_id=self.workflow_run_id,
+            workflow_step_id=self.workflow_step_id,
         )
 
 
@@ -117,6 +123,8 @@ class AgentExecution(Protocol):
         is_cancelled: Callable[[], bool],
         context: ToolContext | None = None,
         poll_steering: Callable[[str], list[str]] | None = None,
+        *,
+        allowed_tools: frozenset[str] | None = None,
     ) -> AsyncIterator[RunnerEvent]: ...
 
     async def close(self, context: ToolContext) -> None: ...

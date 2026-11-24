@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import aclosing
 import logging
 import os
 import time
@@ -23,6 +24,18 @@ logger = logging.getLogger("agentic.performance")
 def _is_transient(exc: Exception) -> bool:
     """Google's 'high demand' (503), rate limit (429) and brief 500s succeed when repeated."""
     return getattr(exc, "code", None) in (429, 500, 502, 503, 504)
+
+
+async def _response_chunks(stream: AsyncGenerator[Any, None], idle_timeout: float | None) -> AsyncIterator[Any]:
+    async with aclosing(stream):
+        while True:
+            try:
+                async with asyncio.timeout(idle_timeout):
+                    chunk = await anext(stream)
+            except StopAsyncIteration:
+                return
+            yield chunk
+
 
 PARALLEL_SAFE_TOOLS = frozenset({"read_file", "list_files", "web_search"})
 
@@ -264,6 +277,7 @@ class ReActAgent:
         execute_tool: Callable[[str, dict], Awaitable[dict]],
         is_cancelled: Callable[[], bool] | None = None,
         fallback_models: tuple[str, ...] = (),
+        response_idle_timeout: float | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Run tool turns followed by a tool-free synthesis if the budget is exhausted."""
         final_answer = []
@@ -295,7 +309,8 @@ class ReActAgent:
             while True:
                 requests_before_attempt = requests.count
                 try:
-                    async for chunk in requests.stream(client, model=model, contents=contents, config=turn_config):
+                    stream = requests.stream(client, model=model, contents=contents, config=turn_config)
+                    async for chunk in _response_chunks(stream, response_idle_timeout):
                         if first_response:
                             logger.info("gemini_first_response duration_ms=%.1f", (time.perf_counter() - start) * 1000)
                             first_response = False
@@ -319,9 +334,17 @@ class ReActAgent:
                                 yield {"type": "delta", "content": part.text}
                     break
                 except Exception as exc:
-                    if not model_parts and _is_transient(exc):
+                    stalled = response_idle_timeout is not None and isinstance(exc, TimeoutError)
+                    if not model_parts and (_is_transient(exc) or stalled):
+                        if stalled and pending_fallbacks and turn == 1:
+                            previous, model = model, pending_fallbacks.pop(0)
+                            attempt = 0
+                            yield {"type": "status", "content": f"No response from {previous}. Trying {model}…", "turn": turn}
+                            continue
                         if attempt < 2 and requests.count - requests_before_attempt < GEMINI_HTTP_ATTEMPTS:
                             attempt += 1
+                            if response_idle_timeout is not None:
+                                yield {"type": "status", "content": f"No usable response from {model}. Retrying analysis turn {turn}…", "turn": turn}
                             for _ in range(20 * attempt):
                                 if is_cancelled and is_cancelled():
                                     return

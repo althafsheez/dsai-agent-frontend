@@ -203,6 +203,7 @@ class GeminiProvider:
             client=self._client, model=model_id, contents=contents, config=config, fallback_models=fallbacks,
             max_turns=max_steps, execute_tool=reject_tool_for_greeting if greeting_only else execute_tool,
             is_cancelled=is_cancelled,
+            response_idle_timeout=35 if tool_context and tool_context.get("workflow") else None,
         ):
             kind = event["type"]
             if kind == "status":

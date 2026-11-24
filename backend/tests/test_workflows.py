@@ -100,15 +100,18 @@ async def test_condition_step_stops_quietly_when_not_met(client: AsyncClient) ->
 
 
 @pytest.mark.asyncio
-async def test_ai_step_uses_the_data_and_previous_output(client: AsyncClient, provider) -> None:
+@pytest.mark.parametrize("effort", [None, "low"])
+async def test_ai_step_uses_the_data_and_previous_output(client: AsyncClient, provider, effort: str | None) -> None:
     dataset = await upload(client)
     provider.chunks = ["North leads with 15."]
     steps = definition(dataset)["steps"]
-    steps.insert(2, {"id": "a", "kind": "ai", "title": "Summarise", "detail": "Summarise revenue by region", "config": {}})
+    config = {"effort": effort} if effort else {}
+    steps.insert(2, {"id": "a", "kind": "ai", "title": "Summarise", "detail": "Summarise revenue by region", "config": config})
     saved = (await client.put("/api/workflow-store", headers=OWNER, json=definition(dataset, steps))).json()
     run = await wait_for(client, (await client.post(f"/api/workflow-store/{saved['id']}/run", headers=OWNER)).json()["id"])
     assert run["results"][2]["output"] == {"text": "North leads with 15."}
     assert "North" in provider.calls[-1][0][0].content and "45" in provider.calls[-1][0][0].content
+    assert provider.calls[-1][1:] == (provider.default_model_id, effort or provider.model.default_effort)
     assert run["results"][3]["output"]["message"] == "North leads with 15."
 
 
@@ -207,3 +210,154 @@ async def test_ai_endpoints_validate_input(client: AsyncClient) -> None:
     assert (await client.post("/api/workflow-store/ai/plan", headers=OWNER, json={"prompt": "", "model_id": "gemini-test"})).status_code == 422
     assert (await client.post("/api/workflow-store/ai/plan", headers=OWNER, json={"prompt": "hello there", "model_id": "nope"})).status_code == 422
     assert (await client.post("/api/workflow-store/ai/build", headers=OWNER, json={"steps": [], "dataset_ids": [], "model_id": "gemini-test"})).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_draft_test_preserves_published_schedule_and_uses_submitted_snapshot(client: AsyncClient) -> None:
+    dataset = await upload(client)
+    body = definition(dataset, state="active", trigger={"kind": "schedule", "config": {"frequency": "daily"}})
+    saved = (await client.put("/api/workflow-store", headers=OWNER, json=body)).json()
+    draft_steps = definition(dataset)["steps"]
+    draft_steps[2]["title"] = "Preview only"
+    url = f"/api/workflow-store/{saved['id']}/test"
+    edit = await client.put("/api/workflow-store", headers=OWNER, json={**body, "id": saved["id"], "steps": draft_steps})
+    assert edit.status_code == 409
+    assert (await client.post(url, headers=OTHER, json={"steps": draft_steps})).status_code == 404
+    assert (await client.post(url, headers=OWNER, json={"steps": draft_steps + [draft_steps[0]]})).status_code == 422
+
+    started = await client.post(url, headers=OWNER, json={"steps": draft_steps})
+    assert started.status_code == 201, started.text
+    run = await wait_for(client, started.json()["id"])
+    assert run["trigger"] == "test" and run["status"] == "success"
+    assert run["results"][2]["title"] == "Preview only"
+    assert "delivered" not in run["results"][2]["output"]
+    assert "Skipped delivery" in run["results"][2]["logs"][0]
+    unchanged = (await client.get(f"/api/workflow-store/{saved['id']}", headers=OWNER)).json()
+    assert unchanged["steps"] == saved["steps"]
+    assert unchanged["state"] == "active" and unchanged["next_run_at"] == saved["next_run_at"]
+    assert unchanged["last_run_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_human_review_can_be_saved_but_blocks_execution(client: AsyncClient) -> None:
+    steps = [{"id": "review", "kind": "human", "title": "Human Review", "detail": "Check totals."}]
+    body = definition("", steps)
+    response = await client.put("/api/workflow-store", headers=OWNER, json=body)
+    assert response.status_code == 200
+    assert response.json()["steps"] == steps
+    url = f"/api/workflow-store/{response.json()['id']}"
+    attempts = [
+        await client.put("/api/workflow-store", headers=OWNER, json={**body, "state": "active"}),
+        await client.put(f"{url}/state", headers=OWNER, json={"state": "active"}),
+        await client.post(f"{url}/run", headers=OWNER),
+        await client.post(f"{url}/test", headers=OWNER, json={"steps": steps}),
+    ]
+    assert all(attempt.status_code == 422 and "human_review_unavailable" in attempt.text for attempt in attempts)
+
+
+@pytest.mark.asyncio
+async def test_saved_connection_step_is_draft_only(client: AsyncClient) -> None:
+    steps = [{"id": "source", "kind": "data", "title": "Read", "detail": "",
+              "config": {"connection_provider": "postgresql", "connection_id": "saved-source", "dataset_ids": ["existing"]}}]
+    body = definition("", steps)
+    saved = await client.put("/api/workflow-store", headers=OWNER, json=body)
+    assert saved.status_code == 200
+    assert saved.json()["steps"] == steps
+    url = f"/api/workflow-store/{saved.json()['id']}"
+    attempts = [
+        await client.put("/api/workflow-store", headers=OWNER, json={**body, "state": "active"}),
+        await client.put(f"{url}/state", headers=OWNER, json={"state": "active"}),
+        await client.post(f"{url}/run", headers=OWNER),
+        await client.post(f"{url}/test", headers=OWNER, json={"steps": steps}),
+    ]
+    assert all(attempt.status_code == 422 and "workflow_connector_unavailable" in attempt.text for attempt in attempts)
+
+
+@pytest.mark.asyncio
+async def test_ai_files_are_downloadable_and_forwarded_to_output(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import hashlib
+
+    from agentic.runtime.events import RunnerEvent
+    from app.services.agent_adapter import AgentToolAdapter
+
+    app = client._transport.app  # type: ignore[attr-defined]
+    adapter = AgentToolAdapter(app.state.session_factory, app.state.storage)
+    report = b"%PDF-1.4 demo report"
+
+    async def agent_run(messages, model_id, effort, cancelled, context, *, allowed_tools):
+        assert context.workflow_run_id and not context.chat_id
+        assert "execute_python" in allowed_tools
+        resource = adapter.register_output(
+            context.for_step("tool", "execute_python"), "/home/user/outputs/report.pdf",
+            "report.pdf", ".pdf", hashlib.sha256(report).hexdigest(), report,
+        )
+        yield RunnerEvent("tool.completed", {"summary": "Wrote PDF.", "resources": [resource]})
+        yield RunnerEvent("message.delta", {"text": "Report ready."})
+
+    monkeypatch.setattr(app.state.runner, "run", agent_run)
+    steps = [
+        {"id": "report", "kind": "ai", "title": "Report", "detail": "Generate a PDF"},
+        {"id": "result", "kind": "notify", "title": "Result", "detail": ""},
+    ]
+    saved = (await client.put("/api/workflow-store", headers=OWNER, json=definition("", steps))).json()
+    started = await client.post(f"/api/workflow-store/{saved['id']}/test", headers=OWNER, json={"steps": steps})
+    assert started.status_code == 201
+    run = await wait_for(client, started.json()["id"])
+    assert run["status"] == "success"
+    (file,) = run["results"][0]["output"]["resources"]
+    assert run["results"][1]["output"]["resources"] == [file]
+    url = f"/api/resources/{file['id']}/download"
+    assert (await client.get(url, headers=OWNER)).content == report
+    assert (await client.get(url, headers=OTHER)).status_code == 404
+
+    steps[1]["config"] = {"destination": "library"}
+    preview = await client.post(f"/api/workflow-store/{saved['id']}/test", headers=OWNER, json={"steps": steps})
+    preview_run = await wait_for(client, preview.json()["id"])
+    assert preview_run["status"] == "success"
+    assert "would save" in preview_run["results"][1]["output"]["message"]
+    assert (await client.get("/api/library", headers=OWNER)).json()["items"] == []
+
+    update = await client.put("/api/workflow-store", headers=OWNER, json=definition("", steps, id=saved["id"]))
+    assert update.status_code == 200
+    live = await client.post(f"/api/workflow-store/{saved['id']}/run", headers=OWNER)
+    live_run = await wait_for(client, live.json()["id"])
+    assert live_run["status"] == "success"
+    (file,) = live_run["results"][1]["output"]["resources"]
+    assert (await client.post(f"/api/resources/{file['id']}/library", headers=OWNER)).status_code == 201
+    assert [item["id"] for item in (await client.get("/api/library", headers=OWNER)).json()["items"]] == [file["id"]]
+
+
+@pytest.mark.asyncio
+async def test_ai_timeout_keeps_progress_input_and_generated_files(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentic.runtime.events import RunnerEvent
+
+    app = client._transport.app  # type: ignore[attr-defined]
+    file = {"id": "chart-id", "name": "stock.png"}
+
+    async def agent_run(*args, **kwargs):
+        yield RunnerEvent("progress", {"label": "Analysis turn 1 of 8"})
+        yield RunnerEvent("tool.started", {"name": "execute_python"})
+        yield RunnerEvent("tool.completed", {"summary": "Completed execute python.", "resources": [file]})
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(app.state.runner, "run", agent_run)
+    monkeypatch.setattr(workflow_engine, "AI_SECONDS", 1)
+    steps = [{"id": "analysis", "kind": "ai", "title": "Stock report", "detail": "Create a chart and PDF"}]
+    saved = (await client.put("/api/workflow-store", headers=OWNER, json=definition("", steps))).json()
+    started = await client.post(f"/api/workflow-store/{saved['id']}/test", headers=OWNER, json={"steps": steps})
+    run_id = started.json()["id"]
+    for _ in range(25):
+        running = (await client.get(f"/api/workflow-store/runs/{run_id}", headers=OWNER)).json()
+        step = running["results"][0]
+        if step.get("progress", "").startswith("Completed execute python."):
+            break
+        await asyncio.sleep(0.02)
+    assert step["status"] == "running"
+    assert step["input"]["prompt"] == "Create a chart and PDF"
+    assert step["output"]["resources"] == [file]
+    failed = await wait_for(client, run_id)
+    step = failed["results"][0]
+    assert step["status"] == "failed"
+    assert "reached its" in step["error"]
+    assert "Running execute python" in step["logs"]
+    assert step["output"]["resources"] == [file]

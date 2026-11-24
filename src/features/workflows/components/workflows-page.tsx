@@ -2,73 +2,92 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Play, Plus, Workflow as WorkflowIcon } from "lucide-react";
+import { Plus, Workflow as WorkflowIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import type { WorkflowRecordDto, WorkflowRunRecordDto } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { formatWhen } from "../logic/format";
-import { useRunNow, useSetWorkflowState, useWorkflowRuns, useWorkflows } from "../use-workflows";
-import { StatusBadge } from "./flow-parts";
-import { HistoryTable } from "./history-table";
+import { useSetWorkflowState, useWorkflowRuns, useWorkflows } from "../use-workflows";
+import { RunsTable } from "./runs-table";
 import { TemplateGallery } from "./template-gallery";
+import { WorkflowCard } from "./workflow-card";
 
-type Tab = "workflows" | "history";
+type Tab = "workflows" | "runs" | "templates";
+const statusFilters = {
+  all: "All",
+  active: "Active",
+  inactive: "Paused",
+  draft: "Draft",
+} satisfies Record<"all" | WorkflowRecordDto["state"], string>;
+type StatusFilter = keyof typeof statusFilters;
 
 export function WorkflowsPage() {
   const workflows = useWorkflows();
-  const runs = useWorkflowRuns();
-  const runNow = useRunNow();
+  const runsQuery = useWorkflowRuns();
   const setState = useSetWorkflowState();
   const [tab, setTab] = useState<Tab>("workflows");
+  const [status, setStatus] = useState<StatusFilter>("all");
   const items = workflows.data ?? [];
-  const history = runs.data ?? [];
-  const lastRun = (id: string) => history.find((run) => run.workflow_id === id);
-  const running = history.filter((run) => run.status === "running").length;
+  const visibleItems = status === "all" ? items : items.filter((workflow) => workflow.state === status);
+  const runs = [...(runsQuery.data ?? [])].sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at));
+  const latestRuns = new Map<string, WorkflowRunRecordDto>();
+  for (const run of runs) {
+    if (!latestRuns.has(run.workflow_id)) latestRuns.set(run.workflow_id, run);
+  }
+  const running = runs.filter((run) => run.status === "running").length;
 
   return (
-    <section className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 lg:py-10">
-      <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
+    <section className="mx-auto w-full max-w-[1200px] px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
+      <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-start gap-3.5">
           <div className="grid size-11 shrink-0 place-items-center rounded-xl border bg-raised text-slate"><WorkflowIcon className="size-5" strokeWidth={1.5} /></div>
-          <div><h1 className="text-xl font-semibold tracking-tight">Workflows</h1><p className="mt-1 text-xs text-muted-foreground">Tasks that run by themselves on a schedule, with every run kept in the history.</p></div>
+          <h1 className="self-center text-xl font-semibold tracking-tight">Workflows</h1>
         </div>
         <Button asChild><Link href="/workflows/new"><Plus />New workflow</Link></Button>
       </header>
 
       <div role="tablist" aria-label="Workflows view" className="flex w-fit rounded-lg border bg-surface p-1">
-        {([["workflows", `Workflows (${items.length})`], ["history", `History${running ? ` · ${running} running` : ""}`]] as const).map(([value, label]) => (
-          <button key={value} type="button" role="tab" aria-selected={tab === value} onClick={() => setTab(value)} className={cn("h-8 rounded-md px-3 text-xs font-medium text-muted-foreground hover:text-foreground", tab === value && "bg-raised text-foreground shadow-sm")}>{label}</button>
+        {([["workflows", `Saved workflows (${items.length})`], ["runs", `Runs${running ? ` · ${running} running` : ""}`], ["templates", "Templates"]] as const).map(([value, label]) => (
+          <button key={value} id={`workflow-tab-${value}`} type="button" role="tab" aria-selected={tab === value} onClick={() => setTab(value)} className={cn("h-8 rounded-md px-3 text-xs font-medium text-muted-foreground hover:text-foreground", tab === value && "bg-raised text-foreground shadow-sm")}>{label}</button>
         ))}
       </div>
 
-      {tab === "history" ? <div className="mt-4"><HistoryTable runs={history} empty="Nothing has run yet. Runs from schedules and from “Run now” appear here." /></div> : (
-        <div className="mt-4 grid gap-8">
-          {items.length ? (
-            <ul aria-label="Your workflows" className="grid gap-2">
-              {items.map((workflow) => {
-                const last = lastRun(workflow.id);
-                const active = workflow.state === "active";
-                const isRunning = last?.status === "running";
-                return (
-                  <li key={workflow.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border bg-surface/40 p-3.5">
-                    <div className="min-w-0 flex-1 basis-56">
-                      <Link href={`/workflows/${workflow.id}`} className="block truncate text-sm font-medium hover:underline">{workflow.name}</Link>
-                      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{workflow.schedule}{active && workflow.next_run_at ? ` · next ${formatWhen(workflow.next_run_at)}` : ""}</p>
-                    </div>
-                    <div className="flex min-w-24 items-center gap-2 text-[11px] text-muted-foreground">{last ? <><StatusBadge status={last.status} /></> : "Never run"}</div>
-                    <button type="button" role="switch" aria-checked={active} aria-label={`${active ? "Turn off" : "Turn on"} ${workflow.name}`} disabled={workflow.trigger.kind !== "schedule" || setState.isPending} title={workflow.trigger.kind === "schedule" ? (active ? "On: runs on schedule" : "Off") : "Pick a schedule to turn this on"} onClick={() => setState.mutate({ id: workflow.id, state: active ? "inactive" : "active" })}
-                      className={cn("relative h-5 w-9 shrink-0 rounded-full border transition-colors disabled:opacity-40", active ? "border-sky-300 bg-sky-300/30" : "bg-raised")}><span className={cn("absolute top-0.5 size-3.5 rounded-full bg-foreground transition-all", active ? "left-[18px]" : "left-0.5")} /></button>
-                    <button type="button" aria-label={`Run ${workflow.name} now`} title="Run now" disabled={isRunning || runNow.isPending} onClick={() => runNow.mutate(workflow.id)} className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40"><Play className="size-4" /></button>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : workflows.isLoading ? <p className="text-xs text-muted-foreground">Loading…</p> : (
-            <div className="rounded-xl border border-dashed px-6 py-10 text-center"><p className="text-sm font-medium">No workflows yet</p><p className="mt-1 text-xs text-muted-foreground">Describe one in a sentence, or start from a ready-made one below.</p></div>
+      {tab === "runs" ? (
+        <div className="mt-4 grid gap-5">
+          {runs.length > 0 && (
+            <RunsTable runs={runs} labelledBy="workflow-tab-runs" workflowNames={new Map(items.map((workflow) => [workflow.id, workflow.name]))} />
           )}
-          <div>
-            <h2 className="mb-3 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Start from a template</h2>
-            <TemplateGallery />
+          {runsQuery.isError ? <p role="alert" className="text-xs text-rose-300">Could not load runs.</p> : null}
+          {runsQuery.isLoading ? <p className="text-xs text-muted-foreground">Loading runs…</p> : null}
+          {runsQuery.isSuccess && !runs.length ? (
+            <p className="rounded-lg border border-dashed px-4 py-10 text-center text-xs text-muted-foreground">No runs yet. Runs from schedules and from “Run now” appear here.</p>
+          ) : null}
+        </div>
+      ) : tab === "templates" ? (
+        <div className="mt-4"><TemplateGallery /></div>
+      ) : (
+        <div className="mt-4">
+          <div role="group" aria-label="Filter by workflow status" className="mb-4 flex w-fit rounded-md border bg-surface p-0.5">
+            {(Object.keys(statusFilters) as StatusFilter[]).map((value) => (
+              <button key={value} type="button" aria-pressed={status === value} onClick={() => setStatus(value)}
+                className={cn("h-7 rounded px-2.5 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring", status === value && "bg-raised font-medium text-foreground")}>
+                {statusFilters[value]}
+              </button>
+            ))}
           </div>
+          {setState.isError && <p role="alert" className="mb-3 text-xs text-destructive">{setState.error.message || "Could not update workflow status."}</p>}
+          {visibleItems.length ? (
+            <ul aria-label="Saved workflows" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {visibleItems.map((workflow) => (
+                <WorkflowCard key={workflow.id} workflow={workflow} lastRun={latestRuns.get(workflow.id)}
+                  runsLoaded={runsQuery.isSuccess} statePending={setState.isPending}
+                  onToggleState={() => setState.mutate({ id: workflow.id, state: workflow.state === "active" ? "inactive" : "active" })} />
+              ))}
+            </ul>
+          ) : workflows.isLoading ? <p className="text-xs text-muted-foreground">Loading workflows…</p> : workflows.isError ? (
+            <p role="alert" className="text-xs text-destructive">Could not load workflows.</p>
+          ) : (
+            <div className="rounded-lg border border-dashed px-6 py-10 text-center"><p className="text-sm font-medium">{status === "all" ? "No saved workflows yet" : `No ${statusFilters[status].toLowerCase()} workflows`}</p></div>
+          )}
         </div>
       )}
     </section>
