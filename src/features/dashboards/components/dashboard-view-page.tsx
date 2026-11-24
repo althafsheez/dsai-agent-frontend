@@ -8,7 +8,7 @@ import type { CSSProperties } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSqlTables } from "@/lib/api";
 import { generatedSql } from "../logic/sql";
-import { ArrowLeft, Check, Database, Download, Info, Eye, LayoutDashboard, LoaderCircle, Merge, Pencil, Radio, Save, Share2, Trash2, Undo2, Wand2 } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, BarChart3, Check, Hash, PieChart, Database, Download, Info, Eye, LayoutDashboard, LoaderCircle, Merge, Pencil, Radio, Save, Share2, Trash2, Undo2, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { DriveBrowserDialog } from "@/features/connectors/components/drive-browser-dialog";
@@ -441,10 +441,20 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
                     </div>
                   </div>
                 ) : (
-                  <ul aria-label="Starting prompts" className="flex flex-1 flex-col justify-center gap-1.5 p-3">
-                    {tilePrompts(attachedDatasets[0] ?? datasets[0]).slice(0, 3).map((prompt) => (
-                      <li key={prompt}><button type="button" onClick={() => setFill({ text: prompt, n: Date.now() })} className="w-full rounded-lg border bg-surface/60 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground">{prompt}</button></li>
-                    ))}
+                  <ul aria-label="Starting prompts" className="flex flex-1 flex-col justify-end gap-2 p-3">
+                    {tilePrompts(attachedDatasets[0] ?? datasets[0]).slice(0, 3).map((prompt) => {
+                      const Icon = /pie/i.test(prompt) ? PieChart : /bar|line|histogram/i.test(prompt) ? BarChart3 : Hash;
+                      return (
+                        <li key={prompt}>
+                          <button type="button" onClick={() => setFill({ text: prompt, n: Date.now() })}
+                            className="group flex w-full items-center gap-2.5 rounded-xl border border-border/70 bg-gradient-to-br from-surface/80 to-surface/30 px-3 py-2.5 text-left text-xs text-muted-foreground shadow-sm transition-all hover:-translate-y-px hover:border-sage/50 hover:text-foreground hover:shadow-md">
+                            <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-sage/15 text-sage transition-colors group-hover:bg-sage/25"><Icon className="size-3.5" /></span>
+                            <span className="min-w-0 flex-1 leading-snug">{prompt}</span>
+                            <ArrowUpRight className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>
