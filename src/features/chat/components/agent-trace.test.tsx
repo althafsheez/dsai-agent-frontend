@@ -67,7 +67,7 @@ describe("AgentTrace component (Reasoning Trace)", () => {
     const user = userEvent.setup();
     const running: TraceStep = { ...mockSteps[2], status: "running", stdout: undefined, outputs: undefined };
     const { rerender } = render(<AgentTrace steps={[running]} isStreaming />);
-    expect(screen.getByText("Running…")).toBeVisible();
+    expect(screen.getByText("Executing code...")).toBeVisible();
     const failed: TraceStep = {
       ...running,
       status: "failed",
@@ -78,7 +78,7 @@ describe("AgentTrace component (Reasoning Trace)", () => {
       },
     };
     rerender(<AgentTrace steps={[failed]} />);
-    expect(screen.queryByText("Running…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Executing code...")).not.toBeInTheDocument();
     const step = within(document.getElementById(`trace-step-${failed.id}`)!);
     expect(step.getByText("Python execution failed", { selector: "p" })).toBeVisible();
     await user.click(step.getByText("Error Details"));
@@ -95,7 +95,7 @@ describe("AgentTrace component (Reasoning Trace)", () => {
 
     await user.click(screen.getByRole("button", { name: "Toggle Reasoning Trace" }));
     expect(screen.getByText("Load schema for sales.csv")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Expand Initial trend calculation attempt python block" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Expand Execute Python python block" })).toBeVisible();
   });
 
   it("opens while streaming and shows the reasoning ellipsis", () => {
@@ -116,11 +116,11 @@ describe("AgentTrace component (Reasoning Trace)", () => {
     render(<AgentTrace steps={mockSteps} isStreaming={true} />);
 
     expect(screen.queryByText("Processed 1,250 rows successfully")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Expand Self-corrected trend calculation python block" }));
+    await user.click(screen.getByRole("button", { name: "Expand Execute Python (Retry) python block" }));
     expect(screen.getByText("Processed 1,250 rows successfully")).toBeVisible();
     expect(screen.getByText("Output (success)")).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "Expand Initial trend calculation attempt python block" }));
+    await user.click(screen.getByRole("button", { name: "Expand Execute Python python block" }));
     expect(screen.getByText("Output (failed)")).toBeVisible();
     expect(screen.getByText("KeyError: 'revenue'")).toBeVisible();
   });
@@ -138,6 +138,32 @@ describe("AgentTrace component (Reasoning Trace)", () => {
     const failed: TraceStep[] = [{ ...mockSteps[0], status: "failed", error: "Dataset could not be read" }];
     render(<AgentTrace steps={failed} isStreaming={true} />);
     expect(screen.getByText("Dataset could not be read")).toBeVisible();
+  });
+
+  it("renders inline code in thoughts as reference code chips", () => {
+    render(<IndividualThoughtTextRenderer text={"Filter rows where `Volgur Comment` matches **Yes**"} />);
+    expect(screen.getByText("Volgur Comment", { selector: "code" })).toBeVisible();
+    expect(screen.getByText("Yes", { selector: "strong" })).toBeVisible();
+    expect(screen.queryByText(/`/)).not.toBeInTheDocument();
+  });
+
+  it("offers Copy, Edit and a disabled Run on code blocks", async () => {
+    const user = userEvent.setup();
+    render(<AgentTrace steps={[mockSteps[2]]} isStreaming />);
+
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const editor = screen.getByRole("textbox", { name: "Edit Execute Python (Retry) code" });
+    await user.clear(editor);
+    await user.type(editor, "print(1)");
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.getByText((_, element) => element?.textContent === "print(1)", { selector: "code" })).toBeVisible();
+  });
+
+  it("shows generated outputs as data pills", () => {
+    render(<AgentTrace steps={[mockSteps[2]]} isStreaming />);
+    const pill = screen.getByRole("button", { name: "Select revenue_trend.png" });
+    expect(pill).toHaveClass("rounded-full");
   });
 
   it("truncates long thought text at 250 characters and expands on toggle", async () => {
