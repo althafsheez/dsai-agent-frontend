@@ -1,6 +1,7 @@
 "use client";
 
-import { BarChart3, BookOpen, Check, Download, FileImage, FileText, FileType2 } from "lucide-react";
+import * as Collapsible from "@radix-ui/react-collapsible";
+import { BarChart3, BookOpen, Check, ChevronDown, Download, FileImage, FileText, FileType2 } from "lucide-react";
 import { downloadResource } from "@/lib/api";
 import { formatBytes } from "./resource-utils";
 import type { ArtifactKind, ArtifactResource } from "./types";
@@ -36,10 +37,12 @@ export function ArtifactsPanel({ artifacts, onFileSelect, onLibraryToggle, searc
       {groups.map((group) => {
         if (!group.items.length) return null;
         return (
-          <section key={group.label} aria-labelledby={`artifact-group-${group.label.toLowerCase()}`} className="mb-3 last:mb-0">
-            <h3 id={`artifact-group-${group.label.toLowerCase()}`} className="px-4 py-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+          <Collapsible.Root key={group.label} defaultOpen className="mb-3 last:mb-0">
+            <Collapsible.Trigger className="group flex h-10 w-full items-center gap-2 px-4 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground hover:bg-raised/60">
+              <ChevronDown aria-hidden="true" className="size-3.5 transition-transform group-data-[state=closed]:-rotate-90" />
               {group.label}
-            </h3>
+            </Collapsible.Trigger>
+            <Collapsible.Content>
             <ul>
               {group.items.map((artifact) => {
                 const saved = artifact.in_library ?? artifact.saved ?? false;
@@ -70,7 +73,8 @@ export function ArtifactsPanel({ artifacts, onFileSelect, onLibraryToggle, searc
                 );
               })}
             </ul>
-          </section>
+            </Collapsible.Content>
+          </Collapsible.Root>
         );
       })}
     </div>

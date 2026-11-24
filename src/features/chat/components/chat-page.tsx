@@ -8,7 +8,6 @@ import {
   BrainCircuit,
   Calculator,
   ChevronRight,
-  Link2,
   CornerDownRight,
   Database,
   FileSearch,
@@ -16,7 +15,6 @@ import {
   FileText,
   Folder,
   Github,
-  HardDrive,
   ListPlus,
   LoaderCircle,
   Mail,
@@ -38,6 +36,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { DriveBrowserDialog } from "@/features/connectors/components/drive-browser-dialog";
 import { useUiStore } from "@/stores/ui-store";
+import { DatabaseTablePreview, type DatabaseTable } from "@/features/context-sidebar/database-sources";
 import { ContextSidebar, FilePreviewSidebar, type ContextFile } from "@/features/context-sidebar";
 import {
   addResourceToLibrary,
@@ -52,6 +51,7 @@ import {
   getChatRuns,
   getChat,
   getDatasets,
+  getConnectors,
   getMessages,
   getRunEvents,
   getModels,
@@ -161,24 +161,23 @@ const chatFileExtensions = ".csv,.xls,.xlsx,.parquet,.png,.jpg,.jpeg,.pdf,.txt,.
 
 type ConnectorCategory = "all" | "skills" | "data" | "apps";
 
-const connectorItems: Array<{ name: string; description: string; category: Exclude<ConnectorCategory, "all">; icon: typeof Database; action?: "connectors" }> = [
-  { name: "Connectors", description: "Google Drive and other data sources", category: "data", icon: Link2, action: "connectors" },
+const connectorItems: Array<{ name: string; description: string; category: Exclude<ConnectorCategory, "all">; icon: typeof Database; logo?: string }> = [
   { name: "Data Cleaning", description: "Clean, validate, and prepare data for analysis", category: "skills" as const, icon: Sparkles },
   { name: "Data Visualization", description: "Create charts, plots, and interactive visuals", category: "skills" as const, icon: BarChart3 },
-  { name: "Google BigQuery", description: "Connect to and query data from BigQuery", category: "data" as const, icon: Database },
-  { name: "Snowflake", description: "Connect to your Snowflake data warehouse", category: "data" as const, icon: Snowflake },
+  { name: "Google BigQuery", logo: "googlebigquery", description: "Connect to and query data from BigQuery", category: "data" as const, icon: Database },
+  { name: "Snowflake", logo: "snowflake", description: "Connect to your Snowflake data warehouse", category: "data" as const, icon: Snowflake },
   { name: "Forecasting", description: "Forecast trends and future values", category: "skills" as const, icon: TrendingUp },
   { name: "Statistical Analysis", description: "Test hypotheses and measure relationships", category: "skills" as const, icon: Sigma },
   { name: "Anomaly Detection", description: "Find unusual values and patterns", category: "skills" as const, icon: FileSearch },
   { name: "Machine Learning", description: "Build and evaluate predictive models", category: "skills" as const, icon: BrainCircuit },
   { name: "Report Generation", description: "Turn analysis results into reports", category: "skills" as const, icon: FileText },
-  { name: "MySQL", description: "Connect to a MySQL database", category: "data" as const, icon: Database },
-  { name: "Google Sheets", description: "Import data from a Google spreadsheet", category: "data" as const, icon: FileSpreadsheet },
+  { name: "MySQL", logo: "mysql", description: "Connect to a MySQL database", category: "data" as const, icon: Database },
+  { name: "Google Sheets", logo: "googlesheets", description: "Import data from a Google spreadsheet", category: "data" as const, icon: FileSpreadsheet },
   { name: "Microsoft Excel", description: "Import data from an Excel workbook", category: "data" as const, icon: FileSpreadsheet },
-  { name: "Gmail", description: "Find relevant emails and attachments", category: "apps" as const, icon: Mail },
-  { name: "Slack", description: "Find messages and shared files", category: "apps" as const, icon: MessageSquare },
-  { name: "Notion", description: "Bring in pages and database content", category: "apps" as const, icon: NotebookTabs },
-  { name: "Jira", description: "Bring in issues and project details", category: "apps" as const, icon: PanelsTopLeft },
+  { name: "Gmail", logo: "gmail", description: "Find relevant emails and attachments", category: "apps" as const, icon: Mail },
+  { name: "Slack", logo: "slack", description: "Find messages and shared files", category: "apps" as const, icon: MessageSquare },
+  { name: "Notion", logo: "notion", description: "Bring in pages and database content", category: "apps" as const, icon: NotebookTabs },
+  { name: "Jira", logo: "jira", description: "Bring in issues and project details", category: "apps" as const, icon: PanelsTopLeft },
   { name: "GitHub", description: "Reference repositories and issues", category: "apps" as const, icon: Github },
   { name: "Zapier", description: "Connect to app automations", category: "apps" as const, icon: Workflow },
   { name: "Calculator", description: "Evaluate numerical expressions", category: "apps" as const, icon: Calculator },
@@ -248,13 +247,13 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const [selectedDatabaseTable, setSelectedDatabaseTable] = useState<DatabaseTable | null>(null);
   const [postgresSetup, setPostgresSetup] = useState(false);
   const [postgresSelection, setPostgresSelection] = useState<PostgresConnection | null>(null);
   const [libraryDialogOpen, setLibraryDialogOpen] = useState(false);
   const [driveDialogOpen, setDriveDialogOpen] = useState(false);
   const [connectorCategory, setConnectorCategory] = useState<ConnectorCategory>("all");
   const [connectorQuery, setConnectorQuery] = useState("");
-  const [connectorsExpanded, setConnectorsExpanded] = useState(false);
   const [modelId, setModelId] = useState("");
   const [effort, setEffort] = useState("");
   const [running, setRunning] = useState(false);
@@ -274,6 +273,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
     previewUrl: null,
   })), ...queueEdit.addedFiles] : attachments;
   const [traceEvents, setTraceEvents] = useState<ExecutionEvent[]>([]);
+  const connectedApps = useQuery({ queryKey: ["connectors"], queryFn: getConnectors, enabled: attachmentMenuOpen && connectorCategory === "all", retry: false });
   const datasetsQuery = useQuery({
     queryKey: ["chat", chatId, "datasets"],
     queryFn: () => getDatasets(chatId),
@@ -680,7 +680,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
       if (!rect.width && !rect.height) return;
       const above = rect.top > 56;
       setAskPill({
-        x: Math.max(8, Math.min(rect.left + rect.width / 2 - 40, window.innerWidth - 96)),
+        x: Math.max(8, Math.min(rect.left + rect.width / 2 - 100, window.innerWidth - 240)),
         y: above ? rect.top - 40 : rect.bottom + 8,
         text: text.slice(0, 2000),
       });
@@ -712,13 +712,14 @@ export function ChatPage({ chatId }: { chatId: string }) {
     window.addEventListener("scroll", hide, true);
     return () => { document.removeEventListener("selectionchange", onSelectionChange); window.removeEventListener("keydown", escape); window.removeEventListener("scroll", hide, true); };
   }, [askPill]);
-  function sendSelectionToQuickAssistant() {
-    if (!selectionMenu) return;
-    const quote = { text: selectionMenu.text, nonce: Date.now() };
+  function openQuickAssistantWithQuote(text: string) {
+    const quote = { text, nonce: Date.now() };
     setQuickAssistant((current) => current
       ? { ...current, minimized: false, quote }
       : { snapshotMessageId: messagesQuery.data?.items.at(-1)?.id ?? null, minimized: false, session: Date.now(), quote });
     setSelectionMenu(null);
+    setAskPill(null);
+    window.getSelection()?.removeAllRanges();
   }
   useEffect(() => {
     if (!selectionMenu) return;
@@ -870,6 +871,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
   }
 
   const selectFile = useCallback((file: ContextFile) => {
+    setSelectedDatabaseTable(null);
     setSelectedFile(file);
     setPreviewExpanded(false);
     setPanelOpen(true);
@@ -900,6 +902,11 @@ export function ChatPage({ chatId }: { chatId: string }) {
   }, [chatId, queryClient]);
 
   function togglePanel() {
+    if (selectedDatabaseTable) {
+      setSelectedDatabaseTable(null);
+      setPanelOpen(true);
+      return;
+    }
     setPanelOpen((open) => {
       if (open) setSelectedFile(null);
       return !open;
@@ -1489,13 +1496,13 @@ export function ChatPage({ chatId }: { chatId: string }) {
                         </button>
                       </div>
                       <div role="tablist" aria-label="Connector categories" className="flex flex-wrap gap-1 border-b pb-1.5">
-                        {([["all", "All"], ["skills", "Skills"], ["data", "Data Sources"], ["apps", "Apps & Tools"]] as const).map(([value, label]) => (
+                        {([["all", "My Connections"], ["skills", "Skills"], ["data", "Data Sources"], ["apps", "Apps & Tools"]] as const).map(([value, label]) => (
                           <button key={value} type="button" role="tab" aria-selected={connectorCategory === value} onClick={() => setConnectorCategory(value)} className={`h-8 rounded-md px-2 text-[11px] sm:px-4 ${connectorCategory === value ? "bg-raised text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>
                         ))}
                       </div>
                     </div>
                     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 sm:px-3">
-                      {showPostgres && <PostgresSources chatId={chatId} workspaceId={chatQuery.data?.workspace_id} selected={postgresSource ? [postgresSource] : []}
+                      {(connectorCategory === "all" || showPostgres) && <PostgresSources searchQuery={connectorCategory === "all" ? connectorQuery : ""} showAdd={connectorCategory !== "all"} showConnections={connectorCategory === "all"} chatId={chatId} workspaceId={chatQuery.data?.workspace_id} selected={postgresSource ? [postgresSource] : []}
                         onSelect={(source) => {
                           setPostgresSelection(source);
                           setAttachmentMenuOpen(false);
@@ -1505,30 +1512,15 @@ export function ChatPage({ chatId }: { chatId: string }) {
                           setAttachmentMenuOpen(false);
                           setPostgresSetup(true);
                         }} />}
-                      {visibleConnectors.map(({ name, description, icon: Icon, action }) => action === "connectors" ? (
-                        <div key={name} className="border-b last:border-b-0">
-                          <button type="button" data-attachment-action aria-expanded={connectorsExpanded} onClick={() => setConnectorsExpanded((open) => !open)} className="flex w-full items-center gap-3 px-2 py-2 text-left hover:bg-raised sm:px-3">
-                            <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-                            <span className="min-w-0 flex-1">
-                              <span className="block text-xs font-medium">{name}</span>
-                              <span className="block truncate text-[11px] text-muted-foreground">{description}</span>
-                            </span>
-                            <ChevronRight aria-hidden="true" className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${connectorsExpanded ? "rotate-90" : ""}`} />
-                          </button>
-                          {connectorsExpanded ? (
-                            <button type="button" data-attachment-action onClick={() => { setAttachmentMenuOpen(false); setDriveDialogOpen(true); }} className="flex w-full items-center gap-3 border-t py-2 pl-8 pr-2 text-left hover:bg-raised sm:pl-10 sm:pr-3">
-                              <HardDrive aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-                              <span className="min-w-0 flex-1">
-                                <span className="block text-xs font-medium">Google Drive</span>
-                                <span className="block truncate text-[11px] text-muted-foreground">Import files from your Google Drive</span>
-                              </span>
-                              <span className="shrink-0 rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-0.5 text-[9px] uppercase tracking-wide text-emerald-300">Import</span>
-                            </button>
-                          ) : null}
-                        </div>
-                      ) : (
+                      {connectorCategory === "all" && connectedApps.data?.items.some((item) => item.id === "google-drive" && item.status === "connected") && "google drive".includes(connectorQuery.trim().toLowerCase()) && (
+                        <button type="button" data-attachment-action onClick={() => { setAttachmentMenuOpen(false); setDriveDialogOpen(true); }} className="flex w-full items-center gap-2 rounded-md px-4 py-2 text-left text-xs hover:bg-raised">
+                          <Image src="/extension-logos/googledrive.svg" alt="" width={20} height={20} unoptimized /> Google Drive <span className="ml-auto text-muted-foreground">Import files</span>
+                        </button>
+                      )}
+                      {connectorCategory === "all" && connectedApps.isError && <p role="alert" className="px-3 py-2 text-xs text-red-300">Could not load connected apps.</p>}
+                      {connectorCategory !== "all" && visibleConnectors.map(({ name, description, icon: Icon, logo }) => (
                         <div key={name} aria-disabled="true" className="flex items-center gap-3 border-b px-2 py-2 last:border-b-0 sm:px-3">
-                          <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                          {logo ? <Image src={`/extension-logos/${logo}.svg`} alt="" width={20} height={20} unoptimized className="shrink-0" /> : <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />}
                           <span className="min-w-0 flex-1">
                             <span className="block text-xs font-medium">{name}</span>
                             <span className="block truncate text-[11px] text-muted-foreground">{description}</span>
@@ -1536,10 +1528,10 @@ export function ChatPage({ chatId }: { chatId: string }) {
                           <span className="shrink-0 rounded-full border bg-raised px-2 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground">Soon</span>
                         </div>
                       ))}
-                      {!showPostgres && !visibleConnectors.length ? <p className="px-3 py-4 text-xs text-muted-foreground">No matching connectors.</p> : null}
+                      {connectorCategory !== "all" && !showPostgres && !visibleConnectors.length ? <p className="px-3 py-4 text-xs text-muted-foreground">No matching connectors.</p> : null}
                     </div>
                     <div className="flex shrink-0 items-center justify-between gap-3 border-t px-2.5 py-2 text-[10px] text-muted-foreground sm:px-3">
-                      <span>Local files and Google Drive are available now. Other connectors are coming soon.</span>
+                      <button type="button" data-attachment-action onClick={() => { setAttachmentMenuOpen(false); router.push("/extensions"); }} className="rounded-md px-1 py-1 text-left text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">Manage connections in Extensions</button>
                       <span className="hidden shrink-0 gap-1 lg:flex">
                         <span className="rounded-md border px-1.5 py-0.5"><kbd>↑↓</kbd> to move</span>
                         <span className="rounded-md border px-1.5 py-0.5"><kbd>Enter</kbd> to select</span>
@@ -1713,16 +1705,18 @@ export function ChatPage({ chatId }: { chatId: string }) {
         />
       ) : null}
       {askPill ? (
-        <button
-          type="button"
+        <div
           style={{ left: askPill.x, top: askPill.y }}
-          // Keep the selection alive while the button is pressed.
           onMouseDown={(event) => event.preventDefault()}
-          onClick={askAboutSelection}
-          className="fixed z-[70] inline-flex h-8 animate-pop-in items-center gap-1.5 rounded-full border border-border-strong bg-raised px-3 text-xs font-medium text-foreground shadow-xl hover:bg-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+          className="fixed z-[70] inline-flex h-8 max-w-[calc(100vw-16px)] animate-pop-in items-center rounded-full border border-border-strong bg-raised p-0.5 text-xs font-medium text-foreground shadow-xl"
         >
-          <Sparkles className="size-3.5 text-sage" />Ask AI
-        </button>
+          <button type="button" onClick={askAboutSelection} className="flex h-full items-center gap-1.5 rounded-full px-2.5 hover:bg-surface focus-visible:outline focus-visible:outline-1 focus-visible:outline-ring">
+            <Sparkles className="size-3.5 text-sage" />Ask AI
+          </button>
+          <button type="button" onClick={() => openQuickAssistantWithQuote(askPill.text)} className="flex h-full items-center gap-1.5 rounded-full px-2.5 hover:bg-surface focus-visible:outline focus-visible:outline-1 focus-visible:outline-ring">
+            Ask Quick Assistant
+          </button>
+        </div>
       ) : null}
       {selectionMenu ? (
         <div
@@ -1731,7 +1725,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
           className="fixed z-[70] w-56 rounded-md border border-border-strong bg-raised p-1 shadow-xl"
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <button type="button" role="menuitem" onClick={sendSelectionToQuickAssistant} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs text-foreground hover:bg-surface">
+          <button type="button" role="menuitem" onClick={() => openQuickAssistantWithQuote(selectionMenu.text)} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs text-foreground hover:bg-surface">
             <Sparkles className="size-3.5 text-muted-foreground" />Ask Quick Assistant about this
           </button>
         </div>
@@ -1740,6 +1734,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
         <div ref={contextPanelRef} className="absolute inset-y-0 right-0 z-40 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:static xl:z-auto xl:w-[340px] xl:max-w-none xl:shrink-0 xl:shadow-none">
           <ContextSidebar
             workspaceId={chatQuery.data?.workspace_id ?? null}
+            databases={Array.from(new Map((messagesQuery.data?.items ?? []).flatMap((message) => message.connection_refs ?? []).map((source) => [source.id, source])).values())}
+            onDatabaseSelect={(table) => { setSelectedFile(null); setSelectedDatabaseTable(table); setPanelOpen(false); }}
             datasets={datasetsQuery.data?.items ?? []}
             artifacts={artifactsQuery.data?.items ?? []}
             onClose={() => { setSelectedFile(null); setPanelOpen(false); }}
@@ -1748,6 +1744,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
           />
         </div>
       ) : null}
+      {selectedDatabaseTable && <div className="absolute inset-y-0 right-0 z-50 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:max-w-none xl:w-[min(52vw,820px)]"><DatabaseTablePreview key={JSON.stringify(selectedDatabaseTable)} table={selectedDatabaseTable} onBack={() => { setSelectedDatabaseTable(null); setPanelOpen(true); }} onClose={() => setSelectedDatabaseTable(null)} /></div>}
       {selectedFile ? (
         <div ref={previewPanelRef} className={`absolute inset-y-0 right-0 z-50 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:max-w-none ${previewExpanded ? "xl:w-[min(75vw,1200px)]" : "xl:w-[min(52vw,820px)]"}`}>
           <FilePreviewSidebar

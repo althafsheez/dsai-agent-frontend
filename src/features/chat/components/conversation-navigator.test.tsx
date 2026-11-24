@@ -35,11 +35,11 @@ describe("ConversationNavigator", () => {
     expect(await screen.findByText("Answer 72")).toBeVisible();
   });
 
-  it("keeps each hover preview at a consistent size", async () => {
+  it("keeps hover previews bounded", async () => {
     render(<ConversationNavigator messages={conversation(4)} activeId="question-2" onNavigate={vi.fn()} />);
     await userEvent.hover(screen.getByRole("button", { name: "Go to question: Prompt 2" }));
     expect(await screen.findByText("Answer 2")).toBeVisible();
-    expect(screen.getByText("Answer 2").closest("div[class*='h-32']")).toHaveClass("w-72", "h-32");
+    expect(screen.getByText("Answer 2").closest("div[class*='h-32']")).toHaveClass("w-72", "max-h-64");
   });
 
   it("does not show a preview when the conversation rail scrolls", () => {

@@ -59,6 +59,8 @@ export function isDatasetResource(file: ContextFile): file is DatasetResource {
 }
 
 export interface ContextSidebarProps {
+  databases?: { id: string; name: string }[];
+  onDatabaseSelect?: (table: import("./database-sources").DatabaseTable) => void;
   workspaceId: string | null;
   datasets: DatasetResource[];
   artifacts: ArtifactResource[];

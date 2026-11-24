@@ -287,6 +287,9 @@ describe("live chat page", () => {
     await screen.findByText("Stored question");
     await user.click(screen.getByRole("button", { name: "Add files or connectors" }));
     await user.click(screen.getByRole("tab", { name: "Data Sources" }));
+    expect(screen.queryByRole("button", { name: /Production sales/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add PostgreSQL Connection" })).toBeVisible();
+    await user.click(screen.getByRole("tab", { name: "My Connections" }));
     await user.click(await screen.findByRole("button", { name: /Production sales/ }));
     expect(within(screen.getByLabelText("Selected databases")).getByText(postgres.name)).toBeVisible();
     const composer = screen.getByRole("combobox", { name: "Ask anything about your data" });
@@ -308,7 +311,7 @@ describe("live chat page", () => {
 
     await user.click(screen.getByRole("button", { name: "Add files or connectors" }));
     expect(screen.getByRole("dialog", { name: "Add files and connectors" })).toBeVisible();
-    expect(screen.getByText("Snowflake")).toBeVisible();
+    expect(screen.getByRole("tab", { name: "My Connections" })).toHaveAttribute("aria-selected", "true");
     await user.click(screen.getByRole("tab", { name: "Apps & Tools" }));
     expect(screen.getByText("Jira")).toBeVisible();
     expect(screen.getByText("Slack")).toBeVisible();

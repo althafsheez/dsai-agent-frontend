@@ -9,6 +9,8 @@ import type { ContextSidebarProps } from "./types";
 
 export function ContextSidebar({
   workspaceId,
+  databases = [],
+  onDatabaseSelect,
   datasets,
   artifacts,
   onClose,
@@ -71,6 +73,8 @@ export function ContextSidebar({
         {tab === "datasets" ? (
           <DatasetsPanel
             datasets={filteredDatasets}
+            databases={databases.filter((database) => database.name.toLowerCase().includes(normalizedQuery))}
+            onDatabaseSelect={onDatabaseSelect}
             workspaceId={workspaceId}
             onFileSelect={onFileSelect}
             onLibraryToggle={onLibraryToggle}
