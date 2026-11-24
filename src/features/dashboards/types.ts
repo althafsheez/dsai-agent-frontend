@@ -29,6 +29,8 @@ export interface DashboardWidget {
   script?: string;
   request?: string;
   datasets?: string[];
+  /** A hand-written (or generated) read-only SELECT over the dashboard's datasets; when set it replaces the x/y/agg query. */
+  sql?: string;
 }
 
 /** Every dataset a set of widgets reads (custom tiles can read several). */

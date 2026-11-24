@@ -76,7 +76,7 @@ async def sync_due(app: Any) -> dict[str, str]:
     report: dict[str, str] = {}
     with app.state.session_factory() as session:
         wanted: dict[str, int] = {}
-        for item in session.scalars(select(Dashboard).where(Dashboard.refresh_minutes > 0)):
+        for item in session.scalars(select(Dashboard).where(Dashboard.refresh_minutes > 0, Dashboard.status == "published")):
             for dataset_id in item.dataset_ids or []:
                 wanted[dataset_id] = min(wanted.get(dataset_id, item.refresh_minutes), item.refresh_minutes)
         for dataset_id, minutes in wanted.items():

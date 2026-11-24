@@ -15,6 +15,7 @@ from ..errors import APIError
 from ..models import Dashboard, FileObject, Resource, User
 from ..services import dashboard_ai
 from ..services import dataset_relations
+from ..services.dashboard_sql import SqlError, describe, run_sql
 from ..services.dashboard_preview import compute_preview
 from ..services.dashboard_script import ScriptError, run_script
 from ..services.dataset_preview import read_csv_rows
@@ -159,6 +160,37 @@ def run_custom_chart(data: RunRequest, request: Request, user: User = Depends(ge
         return {"result": run_script(data.script, loaded)}
     except ScriptError as exc:
         raise APIError(422, "dashboard_script_failed", str(exc)) from exc
+
+
+class SqlRunRequest(BaseModel):
+    sql: str = Field(max_length=4000)
+    dataset_ids: list[str] = Field(min_length=1, max_length=8)
+
+
+sql_router = APIRouter(prefix="/api/dashboards/sql", tags=["dashboards"])
+
+
+def _datasets_for_sql(request: Request, db: Session, user: User, dataset_ids: list[str]) -> list[dict]:
+    load = _loader(request, db, user)
+    loaded = [item for item in (load(dataset_id) for dataset_id in dict.fromkeys(dataset_ids)) if item]
+    if not loaded:
+        raise APIError(404, "dataset_not_found", "None of those datasets could be read.")
+    return loaded
+
+
+@sql_router.post("/tables")
+def sql_tables(data: SqlRunRequest, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    """The table (and column) names a query can use for these datasets."""
+    return {"tables": describe(_datasets_for_sql(request, db, user, data.dataset_ids))}
+
+
+@sql_router.post("/run")
+def sql_run(data: SqlRunRequest, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    """Runs one read-only SELECT over the chosen datasets."""
+    try:
+        return run_sql(data.sql, _datasets_for_sql(request, db, user, data.dataset_ids))
+    except SqlError as exc:
+        raise APIError(422, "dashboard_sql_failed", str(exc)) from exc
 
 
 class AnalyzeRequest(BaseModel):

@@ -2,10 +2,11 @@
 
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Funnel, FunnelChart, LabelList, Line, LineChart, PolarAngleAxis, PolarGrid, Pie, PieChart, Radar, RadarChart, ResponsiveContainer, Scatter, ScatterChart, Tooltip, Treemap, XAxis, YAxis, ZAxis } from "recharts";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowLeftRight, ArrowUp, Code2, GripVertical, LoaderCircle, Trash2 } from "lucide-react";
-import { runCustomChart } from "@/lib/api";
+import { ArrowDown, ArrowLeftRight, ArrowUp, Code2, GripVertical, LoaderCircle, Pencil, Trash2 } from "lucide-react";
+import { runCustomChart, runDashboardSql } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { CHART_LABEL, applyFilters, categoryColumns, formatNumber, numberLikeColumns, gaugeValue, groupedPoints, histogramBins, kpiValue, numericColumns, scatterPoints } from "../logic/aggregate";
+import { resultFromSql } from "../logic/sql";
 import { GROUPED_TYPES, NUMERIC_X_TYPES } from "../types";
 import type { CustomResult, DashboardWidget, DatasetLite, Filters, WidgetType } from "../types";
 import type { Reorder } from "../use-reorder";
@@ -125,19 +126,8 @@ function TreemapCell(props: { x?: number; y?: number; width?: number; height?: n
   );
 }
 
-/** A tile whose chart was written as a Python script by the AI. The server runs the script on the current rows. */
-function CustomBody({ widget, dataset }: { widget: DashboardWidget; dataset: DatasetLite | undefined }) {
-  const ids = widget.datasets?.length ? widget.datasets : [widget.dataset_id];
-  const run = useQuery({
-    queryKey: ["custom-run", widget.script, ids, dataset?.row_count ?? dataset?.rows.length ?? 0],
-    queryFn: () => runCustomChart(widget.script ?? "", ids),
-    enabled: Boolean(widget.script),
-    staleTime: 5 * 60_000,
-    retry: false,
-  });
-  if (run.isPending) return <p className="mt-6 flex items-center gap-2 text-xs text-muted-foreground" role="status"><LoaderCircle className="size-3.5 animate-spin" />Running the script…</p>;
-  if (run.isError || !run.data) return <p role="alert" className="mt-6 text-xs text-red-300">{run.error instanceof Error ? run.error.message : "The script could not run."} Ask the AI to rebuild this tile.</p>;
-  const result = run.data as CustomResult;
+/** Draws what a script or a query returned, using the same chart components as the preset tiles. */
+function ResultBody({ widget, result }: { widget: DashboardWidget; result: CustomResult }) {
   const named = (label: string, value: number) => ({ name: label, value });
   switch (result.kind) {
     case "kpi":
@@ -157,8 +147,42 @@ function CustomBody({ widget, dataset }: { widget: DashboardWidget; dataset: Dat
       return <ChartView type="scatter" title={widget.title} points={[]} dots={(result.points ?? []).map(([x, y]) => ({ x, y }))} xName="x" yName="y" />;
     default: {
       const points = (result.labels ?? []).map((label, index) => named(label, result.series?.[index] ?? 0));
-      return <ChartView type={result.kind as WidgetType} title={widget.title} points={points} emptyText="The script returned no data." />;
+      return <ChartView type={result.kind as WidgetType} title={widget.title} points={points} emptyText="The query returned no data." />;
     }
+  }
+}
+
+/** A tile whose chart was written as a Python script by the AI. The server runs the script on the current rows. */
+function CustomBody({ widget, dataset }: { widget: DashboardWidget; dataset: DatasetLite | undefined }) {
+  const ids = widget.datasets?.length ? widget.datasets : [widget.dataset_id];
+  const run = useQuery({
+    queryKey: ["custom-run", widget.script, ids, dataset?.row_count ?? dataset?.rows.length ?? 0],
+    queryFn: () => runCustomChart(widget.script ?? "", ids),
+    enabled: Boolean(widget.script),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  if (run.isPending) return <p className="mt-6 flex items-center gap-2 text-xs text-muted-foreground" role="status"><LoaderCircle className="size-3.5 animate-spin" />Running the script…</p>;
+  if (run.isError || !run.data) return <p role="alert" className="mt-6 text-xs text-red-300">{run.error instanceof Error ? run.error.message : "The script could not run."} Ask the AI to rebuild this tile.</p>;
+  return <ResultBody widget={widget} result={run.data as CustomResult} />;
+}
+
+/** A tile drawn from a read-only SQL query over the dashboard's datasets. */
+function SqlBody({ widget, dataset }: { widget: DashboardWidget; dataset: DatasetLite | undefined }) {
+  const ids = widget.datasets?.length ? widget.datasets : [widget.dataset_id];
+  const run = useQuery({
+    queryKey: ["sql-run", widget.sql, ids, dataset?.row_count ?? dataset?.rows.length ?? 0],
+    queryFn: () => runDashboardSql(widget.sql ?? "", ids),
+    enabled: Boolean(widget.sql),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  if (run.isPending) return <p className="mt-6 flex items-center gap-2 text-xs text-muted-foreground" role="status"><LoaderCircle className="size-3.5 animate-spin" />Running the query…</p>;
+  if (run.isError || !run.data) return <p role="alert" className="mt-6 text-xs text-red-300">{run.error instanceof Error ? run.error.message : "The query could not run."}</p>;
+  try {
+    return <ResultBody widget={widget} result={resultFromSql(widget, run.data)} />;
+  } catch (error) {
+    return <p role="alert" className="mt-6 text-xs text-red-300">{error instanceof Error ? error.message : "The query result cannot be drawn as this chart type."}</p>;
   }
 }
 
@@ -175,12 +199,17 @@ interface WidgetCardProps {
   onRemove?: () => void;
   /** Move buttons and drag handle (edit mode only). */
   reorder?: Reorder;
+  /** Opens this widget in the editor panel (edit mode). When given, the column pickers move into that panel. */
+  onOpen?: () => void;
+  /** This widget is the one open in the editor panel. */
+  active?: boolean;
 }
 
 const AGG_LABEL = { sum: "Sum of", avg: "Average of", count: "Count of rows" } as const;
 
 /** What the widget computes, in words, so a number can be checked against the data. */
 function describe(widget: DashboardWidget, dataset: DatasetLite | undefined): string {
+  if (widget.sql) return `SQL query${dataset ? ` · ${dataset.name}` : ""}`;
   if (widget.type === "custom") return widget.request ? `Python script · ${widget.request}` : "Python script";
   if (!dataset) return "";
   if (widget.type === "table") return `Rows of ${dataset.name}`;
@@ -190,7 +219,7 @@ function describe(widget: DashboardWidget, dataset: DatasetLite | undefined): st
 }
 
 /** Switching chart type keeps the columns that still make sense and picks sensible ones otherwise. */
-function retype(widget: DashboardWidget, type: WidgetType, dataset: DatasetLite): DashboardWidget {
+export function retype(widget: DashboardWidget, type: WidgetType, dataset: DatasetLite): DashboardWidget {
   const numbers = [...new Set([...numericColumns(dataset), ...numberLikeColumns(dataset)])];
   const categories = categoryColumns(dataset);
   const next: DashboardWidget = { ...widget, type };
@@ -202,7 +231,7 @@ function retype(widget: DashboardWidget, type: WidgetType, dataset: DatasetLite)
   return { ...next, x, y: widget.y ?? numbers[0], agg: widget.agg === "count" && !widget.y && widget.type !== "gauge" ? "count" : widget.type === "gauge" || NUMERIC_X_TYPES.includes(widget.type) ? "sum" : widget.agg };
 }
 
-export function WidgetCard({ widget, dataset, editable, filters = {}, span, onSelect, onChange, onRemove, reorder }: WidgetCardProps) {
+export function WidgetCard({ widget, dataset, editable, filters = {}, span, onSelect, onChange, onRemove, reorder, onOpen, active }: WidgetCardProps) {
   const next = (value: DashboardWidget["span"]) => (value === 3 ? 1 : ((value + 1) as DashboardWidget["span"]));
   const own = widget.x && GROUPED_TYPES.includes(widget.type) ? widget.x : undefined;
   const effective: Filters = own ? Object.fromEntries(Object.entries(filters).filter(([column]) => column !== own)) : filters;
@@ -215,7 +244,7 @@ export function WidgetCard({ widget, dataset, editable, filters = {}, span, onSe
   const allColumns = dataset?.columns.map((item) => item.name) ?? [];
   return (
     <article
-      className={cn("min-w-0 rounded-xl border bg-surface/50 p-3.5 transition-shadow", spanClass[span ?? widget.span], reorder?.state === "dragging" && "opacity-40", reorder?.state === "over" && "ring-2 ring-sage/70")}
+      className={cn("min-w-0 rounded-xl border bg-surface/50 p-3.5 transition-shadow", spanClass[span ?? widget.span], reorder?.state === "dragging" && "opacity-40", reorder?.state === "over" && "ring-2 ring-sage/70", active && "border-sage/70 ring-1 ring-sage/50")}
       aria-label={widget.title} {...(editable && reorder ? reorder.dragProps : {})}
     >
       <header className="flex items-center gap-2">
@@ -231,13 +260,14 @@ export function WidgetCard({ widget, dataset, editable, filters = {}, span, onSe
                 <button type="button" aria-label={`Move ${widget.title} later`} title="Move later" disabled={reorder.index === reorder.count - 1} onClick={() => reorder.onMove(1)} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-30"><ArrowDown className="size-3.5" /></button>
               </>
             ) : null}
+            {onOpen ? <button type="button" aria-label={`Edit ${widget.title}`} title="Edit this widget: tables, query, type" onClick={onOpen} className="inline-flex h-7 items-center gap-1 rounded px-1.5 text-[11px] text-muted-foreground hover:bg-raised hover:text-foreground"><Pencil className="size-3.5" />Edit</button> : null}
             <button type="button" aria-label={`Resize ${widget.title}`} title={`Width ${widget.span}/3, click to change`} onClick={() => onChange?.({ ...widget, span: next(widget.span) })} className="inline-flex h-7 items-center gap-1 rounded px-1.5 text-[11px] text-muted-foreground hover:bg-raised hover:text-foreground"><ArrowLeftRight className="size-3" />{widget.span}/3</button>
             <button type="button" aria-label={`Remove ${widget.title}`} onClick={onRemove} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-raised hover:text-red-300"><Trash2 className="size-3.5" /></button>
           </>
         ) : null}
       </header>
       {!editable && dataset ? <p className="truncate px-0.5 text-[10px] text-muted-foreground" title={describe(widget, dataset)}>{describe(widget, dataset)}</p> : null}
-      {editable && dataset && widget.type !== "kpi" && widget.type !== "table" && widget.type !== "custom" ? (
+      {editable && !onOpen && dataset && widget.type !== "kpi" && widget.type !== "table" && widget.type !== "custom" && !widget.sql ? (
         <div className="mt-2 flex flex-wrap gap-1.5">
           <select aria-label="Chart type" value={widget.type} onChange={(event) => onChange?.(retype(widget, event.target.value as WidgetType, dataset))} className="h-7 rounded border bg-surface px-1.5 text-[11px]">{types.map((type) => <option key={type} value={type}>{CHART_LABEL[type]}</option>)}</select>
           {grouped ? column("Category column", widget.x, allColumns, "x") : null}
@@ -248,7 +278,7 @@ export function WidgetCard({ widget, dataset, editable, filters = {}, span, onSe
           {widget.type === "gauge" ? column("Value column", widget.y, numeric, "y") : null}
         </div>
       ) : null}
-      {widget.type === "custom" ? (
+      {widget.sql ? <SqlBody widget={widget} dataset={dataset} /> : widget.type === "custom" ? (
         <>
           <details className="mt-1 text-[10px] text-muted-foreground">
             <summary className="inline-flex cursor-pointer items-center gap-1 hover:text-foreground"><Code2 className="size-3" />Built by an AI-written Python script</summary>

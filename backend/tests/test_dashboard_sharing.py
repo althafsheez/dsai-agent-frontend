@@ -245,7 +245,7 @@ async def test_server_pulls_changed_drive_files_for_dashboards_on_auto_refresh(c
         resource.metadata_json = {**resource.metadata_json, "source_connector": "google-drive", "drive_file_id": "f1", "refreshed_at": "2020-01-01T00:00:00+00:00"}
         session.commit()
     widgets = [{"id": "k", "type": "kpi", "title": "Revenue", "dataset_id": dataset_id, "y": "revenue", "agg": "sum", "span": 1}]
-    saved = (await put(client, OWNER, widgets=widgets, dataset_ids=[dataset_id], refresh_minutes=5)).json()
+    saved = (await put(client, OWNER, widgets=widgets, dataset_ids=[dataset_id], refresh_minutes=5, status="published")).json()
     assert saved["preview"]["tiles"][0]["value"] == "3"
     assert saved["sources"] == [{"name": "sales.csv", "provider": "google-drive", "refreshed_at": "2020-01-01T00:00:00+00:00", "error": None}]
 
@@ -262,6 +262,10 @@ async def test_server_pulls_changed_drive_files_for_dashboards_on_auto_refresh(c
     monkeypatch.setattr(dashboard_sync.drive, "require_connection", lambda *a, **k: object())
     monkeypatch.setattr(dashboard_sync.drive, "access_token", fake_token)
     monkeypatch.setattr(dashboard_sync.drive, "download_file", fake_download)
+
+    await put(client, OWNER, widgets=widgets, dataset_ids=[dataset_id], refresh_minutes=5, status="draft")
+    assert await dashboard_sync.sync_due(app) == {}  # a draft never uses compute, only a published dashboard is kept live
+    saved = (await put(client, OWNER, widgets=widgets, dataset_ids=[dataset_id], refresh_minutes=5, status="published")).json()
 
     assert await dashboard_sync.sync_due(app) == {"sales.csv": "updated"}
     after = (await client.get("/api/dashboards/db-share", headers=OWNER)).json()

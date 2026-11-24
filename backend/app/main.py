@@ -130,6 +130,7 @@ def create_app(
     app.include_router(connectors.sync_router)
     app.include_router(dashboards.router)
     app.include_router(dashboards.run_router)
+    app.include_router(dashboards.sql_router)
     app.include_router(dashboards.store_router)
     app.include_router(workflow_store.router)
     return app

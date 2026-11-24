@@ -685,6 +685,20 @@ export async function runCustomChart(script: string, datasetIds: string[]): Prom
   return body.result;
 }
 
+export interface SqlTable { dataset_id: string; dataset: string; table: string; columns: string[] }
+export interface SqlResult { columns: string[]; rows: Array<Array<string | number | null>>; truncated: boolean; tables: SqlTable[] }
+
+/** Runs one read-only SELECT over the chosen datasets (each dataset is a table named after its file). */
+export function runDashboardSql(sql: string, datasetIds: string[]): Promise<SqlResult> {
+  return requestJson("/dashboards/sql/run", { method: "POST", body: JSON.stringify({ sql, dataset_ids: datasetIds }) });
+}
+
+/** The table and column names a query can use for these datasets. */
+export async function getSqlTables(datasetIds: string[]): Promise<SqlTable[]> {
+  const body = await requestJson<{ tables: SqlTable[] }>("/dashboards/sql/tables", { method: "POST", body: JSON.stringify({ sql: "", dataset_ids: datasetIds }) });
+  return body.tables;
+}
+
 /** Where two or more datasets overlap, and where they disagree about the same quantity. */
 export function analyzeDatasets(datasetIds: string[]): Promise<DatasetRelations> {
   return requestJson("/dashboards/ai/analyze", { method: "POST", body: JSON.stringify({ dataset_ids: datasetIds }) });
