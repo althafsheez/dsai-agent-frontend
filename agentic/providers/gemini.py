@@ -53,7 +53,8 @@ class GeminiProvider:
             efforts = tuple(item.strip().lower() for item in effort_text.split("|") if item.strip())
             if not separator:
                 efforts = ()
-            default_effort = "medium" if "medium" in efforts else (efforts[0] if efforts else None)
+            # Lower reasoning effort answers much faster; people can raise it per question.
+            default_effort = next((level for level in ("low", "minimal", "medium") if level in efforts), efforts[0] if efforts else None)
             models.append(
                 ModelInfo(
                     id=model_id,
@@ -193,8 +194,13 @@ class GeminiProvider:
         async def reject_tool_for_greeting(_name: str, _arguments: dict[str, Any]) -> dict[str, Any]:
             return {"error": "This is a greeting. Reply directly without tools."}
 
+        # If the chosen model stays overloaded, try the other allowed models that support the same effort.
+        fallbacks = tuple(
+            model.id for model in self._models
+            if model.id != model_id and (effort is None or effort in model.supported_efforts)
+        )
         async for event in ReActAgent.stream_turns(
-            client=self._client, model=model_id, contents=contents, config=config,
+            client=self._client, model=model_id, contents=contents, config=config, fallback_models=fallbacks,
             max_turns=max_steps, execute_tool=reject_tool_for_greeting if greeting_only else execute_tool,
             is_cancelled=is_cancelled,
         ):

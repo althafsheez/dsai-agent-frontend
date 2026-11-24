@@ -887,7 +887,7 @@ async def test_chat_stream_runs_react_tool_turn_and_final_synthesis(tmp_path, de
 
 @pytest.mark.parametrize(("status", "category", "message", "retryable", "retries"), [
     (503, "unavailable", "Service unavailable", True, 2),
-    (429, "rate_limit", "Rate limit exceeded", True, 0),
+    (429, "rate_limit", "Rate limit exceeded", True, 2),
     (400, "invalid_request", "Invalid request", False, 0),
     (None, "timeout", "Request timed out", True, 2),
 ])

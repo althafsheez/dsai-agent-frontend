@@ -15,14 +15,14 @@ describe("SidebarUsageStats", () => {
     expect(screen.getByText("0 MB / 100 MB")).toBeInTheDocument();
     expect(screen.getByText("Compute Time")).toBeInTheDocument();
     expect(screen.getByText("42h / 100h")).toBeInTheDocument();
-    expect(screen.getByText("AI can make mistakes. Always verify important results.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View usage analytics (sample)" })).toHaveAttribute("href", "/settings?view=usage");
   });
 
   it("renders compact mode icon link with title", () => {
     render(<SidebarUsageStats compact={true} />);
 
     const link = screen.getByRole("link", { name: "View usage statistics" });
-    expect(link).toHaveAttribute("href", "/settings");
+    expect(link).toHaveAttribute("href", "/settings?view=usage");
     expect(link).toHaveAttribute("title", expect.stringContaining("65% used"));
   });
 });

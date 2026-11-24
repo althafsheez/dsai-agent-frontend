@@ -118,6 +118,11 @@ class ChatCreate(BaseModel):
     connection_ids: list[str] = Field(default_factory=list, max_length=5)
 
 
+class ChatBranch(BaseModel):
+    message_id: str = Field(min_length=1, max_length=36)
+    client_request_id: str = Field(min_length=1, max_length=100)
+
+
 class ChatUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     workspace_id: str | None = None
@@ -172,6 +177,10 @@ class MessageResponse(APIModel):
     connection_refs: list[MessageConnection] = Field(default_factory=list)
 
 
+class MessageEdit(BaseModel):
+    content: str = Field(min_length=1, max_length=100_000)
+
+
 class MessageCreate(BaseModel):
     content: str = Field(min_length=1, max_length=100_000)
     client_request_id: str = Field(min_length=1, max_length=100)
@@ -188,10 +197,12 @@ class QuickMessageCreate(BaseModel):
     client_request_id: str = Field(min_length=1, max_length=100)
     # Main-chat messages after this one are hidden from Quick Assistant: it sees the chat as it was when opened.
     context_until_message_id: str | None = Field(default=None, max_length=100)
+    thread_id: str = Field(default="main", min_length=1, max_length=36, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class QuickMessageResponse(APIModel):
     id: str
+    thread_id: str
     context_type: Literal["chat", "workspace"]
     context_id: str
     role: Literal["user", "assistant"]

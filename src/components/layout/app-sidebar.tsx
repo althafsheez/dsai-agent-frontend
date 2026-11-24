@@ -41,7 +41,7 @@ export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
             <Brand />
           </Link>
         )}
-        {!compact && !mobile && <SearchDialog sidebar />}
+        {!compact && !mobile && <SearchDialog />}
         <Button
           variant="ghost"
           size="icon"

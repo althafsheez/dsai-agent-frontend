@@ -385,3 +385,69 @@ async def test_workspace_dataset_zip(client: AsyncClient, demo_headers: dict[str
     with ZipFile(BytesIO(response.content)) as archive:
         assert sorted(archive.namelist()) == ["iris (2).csv", "iris.csv"]
         assert {archive.read(name) for name in archive.namelist()} == {b"value\n0\n", b"value\n1\n"}
+
+
+async def test_library_dataset_zip(client: AsyncClient, demo_headers: dict[str, str]) -> None:
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    workspace = (await client.post("/api/workspaces", headers=demo_headers, json={"name": "Folder"})).json()
+    url = "/api/library/datasets/download"
+    assert (await client.get(url, headers=demo_headers)).status_code == 404
+    for index, name in enumerate(["a.csv", "b.csv"]):
+        upload = await client.post("/api/resources/upload", headers=demo_headers, data={
+            "scope_type": "workspace" if index == 0 else "chat", "scope_id": workspace["id"] if index == 0 else
+            (await client.post("/api/chats", headers=demo_headers, json={"content": "x", "client_request_id": "lib-zip"})).json()["chat"]["id"],
+            "client_upload_id": f"lib-{index}",
+        }, files={"file": (name, f"v\n{index}\n".encode(), "text/csv")})
+        assert upload.status_code == 201, upload.text
+        resource_id = upload.json()["resource"]["id"]
+        assert (await client.post(f"/api/resources/{resource_id}/library", headers=demo_headers)).status_code == 201
+
+    response = await client.get(url, headers=demo_headers)
+    assert response.headers["content-type"] == "application/zip"
+    with ZipFile(BytesIO(response.content)) as archive:
+        assert sorted(archive.namelist()) == ["a.csv", "b.csv"]
+    folder = await client.get(f"{url}?workspace_id={workspace['id']}", headers=demo_headers)
+    with ZipFile(BytesIO(folder.content)) as archive:
+        assert archive.namelist() == ["a.csv"]
+
+
+async def test_branching_copies_only_messages_up_to_the_branch_point(
+    client: AsyncClient, demo_headers: dict[str, str]
+) -> None:
+    created = await create_chat(client, demo_headers)
+    chat_id = created["chat"]["id"]
+    for index in (2, 3):
+        posted = await client.post(
+            f"/api/chats/{chat_id}/messages", headers=demo_headers,
+            json={"content": f"Follow-up {index}", "client_request_id": f"message-{index}"},
+        )
+        assert posted.status_code == 201
+    second = (await client.get(f"/api/chats/{chat_id}/messages", headers=demo_headers)).json()["items"][1]
+
+    branched = await client.post(
+        f"/api/chats/{chat_id}/branch", headers=demo_headers,
+        json={"message_id": second["id"], "client_request_id": "branch-1"},
+    )
+    assert branched.status_code == 201, branched.text
+    branch = branched.json()
+    assert branch["id"] != chat_id
+    assert branch["title"].startswith("Branch:")
+    copied = (await client.get(f"/api/chats/{branch['id']}/messages", headers=demo_headers)).json()["items"]
+    assert [message["content"] for message in copied] == ["Analyze revenue", "Follow-up 2"]
+    assert {message["id"] for message in copied}.isdisjoint({created["message"]["id"], second["id"]})
+
+    repeated = await client.post(
+        f"/api/chats/{chat_id}/branch", headers=demo_headers,
+        json={"message_id": second["id"], "client_request_id": "branch-1"},
+    )
+    assert repeated.json()["id"] == branch["id"]
+    original = (await client.get(f"/api/chats/{chat_id}/messages", headers=demo_headers)).json()["items"]
+    assert len(original) == 3
+
+    bad = await client.post(
+        f"/api/chats/{chat_id}/branch", headers=demo_headers,
+        json={"message_id": "nope", "client_request_id": "branch-2"},
+    )
+    assert bad.status_code == 422

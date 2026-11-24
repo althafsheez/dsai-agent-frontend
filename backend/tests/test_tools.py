@@ -148,6 +148,10 @@ async def test_python_without_files_initializes_one_sandbox_and_uploads_nothing(
         try:
             assert (await pool.execute("private-run-id", "print(42)", 10))["success"]
             assert (await pool.execute("private-run-id", "print(43)", 10))["success"]
+            sandbox.commands.run.assert_not_called()
+            assert (await pool.execute("private-run-id", "import reportlab", 10))["success"]
+            assert (await pool.execute("private-run-id", "import reportlab", 10))["success"]
+            sandbox.commands.run.assert_called_once()
         finally:
             await pool.close("private-run-id")
     create.assert_called_once()

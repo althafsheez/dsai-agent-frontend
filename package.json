@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --turbopack",
     "dev:backend": "backend/.venv/bin/uvicorn backend.app.main:app --reload --port 8000",
     "build": "next build",
     "start": "next start",

@@ -7,18 +7,22 @@ from sqlalchemy.orm import Session
 from ..dependencies import get_current_user, get_db
 from ..models import AgentRun, Chat, User
 from ..schemas import (
+    ChatBranch,
     ChatCreate,
     ChatCreateResponse,
     ChatResponse,
     ChatPresence,
     ChatUpdate,
     MessageCreate,
+    MessageEdit,
     MessageResponse,
 )
 from ..services.records import (
+    branch_chat,
     create_chat,
     create_message,
     delete_chat,
+    edit_user_message,
     list_chats,
     list_messages,
     message_response,
@@ -59,6 +63,27 @@ async def post_chat(
         chat=_chat_response(session, chat),
         message=message_response(session, message),
     )
+
+
+@router.patch("/{chat_id}/messages/{message_id}", response_model=MessageResponse)
+async def patch_message(
+    chat_id: str,
+    message_id: str,
+    data: MessageEdit,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MessageResponse:
+    return message_response(session, edit_user_message(session, user, chat_id, message_id, data))
+
+
+@router.post("/{chat_id}/branch", response_model=ChatResponse, status_code=status.HTTP_201_CREATED)
+async def post_branch(
+    chat_id: str,
+    data: ChatBranch,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ChatResponse:
+    return _chat_response(session, branch_chat(session, user, chat_id, data))
 
 
 @router.get("/{chat_id}", response_model=ChatResponse)

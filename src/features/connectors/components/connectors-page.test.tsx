@@ -45,11 +45,11 @@ describe("connectors page", () => {
       const path = new URL(url).pathname;
       if (path.endsWith("/workspaces")) return Response.json({ items: [] });
       if (path.endsWith("/postgresql/test")) return Response.json({ schemas: { items: ["public", "analytics"] } });
-      if (path.endsWith("/connectors") && init?.method === "POST") {
+      if (path.endsWith("/connectors/postgresql") && init?.method === "POST") {
         saved = true;
         return Response.json(connection, { status: 201 });
       }
-      if (path.endsWith("/connectors")) return Response.json({ items: saved ? [connection] : [] });
+      if (path.endsWith("/connectors/postgresql")) return Response.json({ items: saved ? [connection] : [] });
       if (path.endsWith("/schemas")) return Response.json({ items: ["analytics"] });
       if (path.endsWith("/tables")) return Response.json({ items: [{ schema_name: "analytics", name: "orders" }] });
       if (path.endsWith("/tables/analytics/orders")) return Response.json({
@@ -71,7 +71,7 @@ describe("connectors page", () => {
     expect(await setup.findByText("Connected to PostgreSQL")).toBeVisible();
     await user.click(setup.getByRole("checkbox", { name: "analytics" }));
     await user.click(setup.getByRole("button", { name: "Save Connection" }));
-    const save = fetchMock.mock.calls.find(([url, init]) => url.endsWith("/connectors") && init?.method === "POST");
+    const save = fetchMock.mock.calls.find(([url, init]) => url.endsWith("/connectors/postgresql") && init?.method === "POST");
     expect(JSON.parse(String(save?.[1]?.body))).toMatchObject({ schema_filter: ["public", "analytics"], ssl_mode: "verify-full", port: 5432 });
     await user.click(await screen.findByRole("button", { name: "Browse tables" }));
     const browser = within(screen.getByRole("dialog", { name: connection.name }));

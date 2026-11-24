@@ -8,6 +8,7 @@ import {
   BrainCircuit,
   Calculator,
   ChevronRight,
+  Link2,
   CornerDownRight,
   Database,
   FileSearch,
@@ -35,10 +36,13 @@ import {
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import { DriveBrowserDialog } from "@/features/connectors/components/drive-browser-dialog";
 import { useUiStore } from "@/stores/ui-store";
 import { ContextSidebar, FilePreviewSidebar, type ContextFile } from "@/features/context-sidebar";
 import {
   addResourceToLibrary,
+  branchChat,
+  editChatMessage,
   createMessage,
   downloadResource,
   cancelQueuedRun,
@@ -157,7 +161,8 @@ const chatFileExtensions = ".csv,.xls,.xlsx,.parquet,.png,.jpg,.jpeg,.pdf,.txt,.
 
 type ConnectorCategory = "all" | "skills" | "data" | "apps";
 
-const connectorItems = [
+const connectorItems: Array<{ name: string; description: string; category: Exclude<ConnectorCategory, "all">; icon: typeof Database; action?: "connectors" }> = [
+  { name: "Connectors", description: "Google Drive and other data sources", category: "data", icon: Link2, action: "connectors" },
   { name: "Data Cleaning", description: "Clean, validate, and prepare data for analysis", category: "skills" as const, icon: Sparkles },
   { name: "Data Visualization", description: "Create charts, plots, and interactive visuals", category: "skills" as const, icon: BarChart3 },
   { name: "Google BigQuery", description: "Connect to and query data from BigQuery", category: "data" as const, icon: Database },
@@ -170,7 +175,6 @@ const connectorItems = [
   { name: "MySQL", description: "Connect to a MySQL database", category: "data" as const, icon: Database },
   { name: "Google Sheets", description: "Import data from a Google spreadsheet", category: "data" as const, icon: FileSpreadsheet },
   { name: "Microsoft Excel", description: "Import data from an Excel workbook", category: "data" as const, icon: FileSpreadsheet },
-  { name: "Google Drive", description: "Browse and import files from Google Drive", category: "data" as const, icon: HardDrive },
   { name: "Gmail", description: "Find relevant emails and attachments", category: "apps" as const, icon: Mail },
   { name: "Slack", description: "Find messages and shared files", category: "apps" as const, icon: MessageSquare },
   { name: "Notion", description: "Bring in pages and database content", category: "apps" as const, icon: NotebookTabs },
@@ -212,7 +216,10 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   // Holds the main-chat snapshot taken when Quick Assistant opened; null means closed.
-  const [quickAssistant, setQuickAssistant] = useState<{ snapshotMessageId: string | null; minimized: boolean; autoAsk?: string; session: number } | null>(null);
+  const [quickAssistant, setQuickAssistant] = useState<{ snapshotMessageId: string | null; minimized: boolean; autoAsk?: string; session: number; quote?: { text: string; nonce: number } } | null>(null);
+  const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string } | null>(null);
+  // Small "Ask AI" pill that follows a text selection inside the conversation.
+  const [askPill, setAskPill] = useState<{ x: number; y: number; text: string } | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
   // The draft the user pressed Escape on; the picker stays closed until the draft changes.
   const [slashDismissedFor, setSlashDismissedFor] = useState<string | null>(null);
@@ -220,14 +227,34 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
   const [selectedFile, setSelectedFile] = useState<ContextFile | null>(null);
   const [previewExpanded, setPreviewExpanded] = useState(false);
+  // Quick Assistant is a floating window, so it needs to know how much of the right edge the open panel occupies.
+  const contextPanelRef = useRef<HTMLDivElement>(null);
+  const previewPanelRef = useRef<HTMLDivElement>(null);
+  const [rightInset, setRightInset] = useState(0);
+  // True while the Quick Assistant is docked on the left of the chat instead of floating.
+  const [quickSplit, setQuickSplit] = useState(false);
+  useEffect(() => {
+    const panels = [previewPanelRef.current, contextPanelRef.current];
+    const measure = () => {
+      const panel = panels[0] ?? panels[1];
+      setRightInset(panel?.getBoundingClientRect().width ?? 0);
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    panels.forEach((panel) => panel && observer?.observe(panel));
+    window.addEventListener("resize", measure);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", measure); };
+  }, [panelOpen, selectedFile, previewExpanded]);
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [postgresSetup, setPostgresSetup] = useState(false);
   const [postgresSelection, setPostgresSelection] = useState<PostgresConnection | null>(null);
   const [libraryDialogOpen, setLibraryDialogOpen] = useState(false);
+  const [driveDialogOpen, setDriveDialogOpen] = useState(false);
   const [connectorCategory, setConnectorCategory] = useState<ConnectorCategory>("all");
   const [connectorQuery, setConnectorQuery] = useState("");
+  const [connectorsExpanded, setConnectorsExpanded] = useState(false);
   const [modelId, setModelId] = useState("");
   const [effort, setEffort] = useState("");
   const [running, setRunning] = useState(false);
@@ -634,6 +661,74 @@ export function ChatPage({ chatId }: { chatId: string }) {
       ? { ...current, minimized: !current.minimized }
       : { snapshotMessageId: messagesQuery.data?.items.at(-1)?.id ?? null, minimized: false, session: Date.now() });
   }
+  function openSelectionMenu(event: React.MouseEvent) {
+    const text = window.getSelection()?.toString().trim() ?? "";
+    if (!text) return;
+    event.preventDefault();
+    setSelectionMenu({ x: event.clientX, y: event.clientY, text: text.slice(0, 2000) });
+  }
+  function showAskPill() {
+    window.setTimeout(() => {
+      const selection = window.getSelection();
+      const text = selection?.toString().trim() ?? "";
+      const viewport = conversationScroll.viewportRef.current;
+      if (!selection || !text || selection.rangeCount === 0 || !viewport?.contains(selection.anchorNode) || !viewport.contains(selection.focusNode)) {
+        setAskPill(null);
+        return;
+      }
+      const rect = selection.getRangeAt(0).getBoundingClientRect();
+      if (!rect.width && !rect.height) return;
+      const above = rect.top > 56;
+      setAskPill({
+        x: Math.max(8, Math.min(rect.left + rect.width / 2 - 40, window.innerWidth - 96)),
+        y: above ? rect.top - 40 : rect.bottom + 8,
+        text: text.slice(0, 2000),
+      });
+    }, 0);
+  }
+  // Quote the selection into the composer so the user can add their own words before sending.
+  function askAboutSelection() {
+    if (!askPill) return;
+    const quote = `${askPill.text.split("\n").map((line) => `> ${line}`).join("\n")}\n\n`;
+    setDraft((current) => (current.trim() ? `${current.replace(/\s*$/, "")}\n\n${quote}` : quote));
+    setAskPill(null);
+    window.getSelection()?.removeAllRanges();
+    window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      resizeComposer(textarea);
+      textarea.focus();
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+      textarea.scrollTop = textarea.scrollHeight;
+    });
+  }
+  useEffect(() => {
+    if (!askPill) return;
+    const hide = () => setAskPill(null);
+    const onSelectionChange = () => { if (!window.getSelection()?.toString().trim()) setAskPill(null); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") hide(); };
+    document.addEventListener("selectionchange", onSelectionChange);
+    window.addEventListener("keydown", escape);
+    window.addEventListener("scroll", hide, true);
+    return () => { document.removeEventListener("selectionchange", onSelectionChange); window.removeEventListener("keydown", escape); window.removeEventListener("scroll", hide, true); };
+  }, [askPill]);
+  function sendSelectionToQuickAssistant() {
+    if (!selectionMenu) return;
+    const quote = { text: selectionMenu.text, nonce: Date.now() };
+    setQuickAssistant((current) => current
+      ? { ...current, minimized: false, quote }
+      : { snapshotMessageId: messagesQuery.data?.items.at(-1)?.id ?? null, minimized: false, session: Date.now(), quote });
+    setSelectionMenu(null);
+  }
+  useEffect(() => {
+    if (!selectionMenu) return;
+    const close = () => setSelectionMenu(null);
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", escape);
+    window.addEventListener("scroll", close, true);
+    return () => { window.removeEventListener("pointerdown", close); window.removeEventListener("keydown", escape); window.removeEventListener("scroll", close, true); };
+  }, [selectionMenu]);
   const minimizeQuickAssistant = useCallback(() => setQuickAssistant((current) => current && { ...current, minimized: true }), []);
   const restoreQuickAssistant = useCallback(() => setQuickAssistant((current) => current && { ...current, minimized: false }), []);
   const closeQuickAssistant = useCallback(() => setQuickAssistant(null), []);
@@ -1130,6 +1225,38 @@ export function ChatPage({ chatId }: { chatId: string }) {
     }
   }
 
+  async function branchFrom(messageId: string) {
+    if (running) return;
+    setError(null);
+    try {
+      const branch = await branchChat(chatId, messageId);
+      void queryClient.invalidateQueries({ queryKey: ["sidebar", "recent-chats"] });
+      void queryClient.invalidateQueries({ queryKey: ["history"] });
+      router.push(`/chat/${branch.id}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not branch this chat.");
+    }
+  }
+
+  // Rewrite a question, drop everything after it, then answer it again from the context above.
+  const editQuestion = useCallback(async (messageId: string, content: string) => {
+    if (running) return;
+    setError(null);
+    try {
+      const saved = await editChatMessage(chatId, messageId, content);
+      setMessages((current) => {
+        const index = current.findIndex((message) => message.id === messageId);
+        return current.slice(0, index + 1).map((message) => message.id === messageId && message.role === "user" ? { ...message, content: saved.content } : message);
+      });
+      void queryClient.invalidateQueries({ queryKey: ["chat", chatId] });
+      void queryClient.invalidateQueries({ queryKey: ["history"] });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not edit this question.");
+      throw caught;
+    }
+    void runMessage({ type: "message", userMessageId: messageId, modelId, effort: effort || null, clientRequestId: crypto.randomUUID() });
+  }, [chatId, effort, modelId, queryClient, running, runMessage]);
+
   const handleRetry = useCallback((failedMessage: AssistantMessage) => {
     if (running) return;
     const assistantIndex = messages.findIndex((m) => m.id === failedMessage.id);
@@ -1169,8 +1296,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
 
   return (
     <section className="relative flex min-h-0 flex-1 overflow-hidden">
-      <div className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] bg-background">
-        <div className="col-span-2 row-start-1">
+      <div className={`grid min-w-0 flex-1 ${quickSplit ? "grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]" : "grid-cols-[minmax(0,0fr)_auto_minmax(0,1fr)]"} grid-rows-[auto_minmax(0,1fr)_auto] bg-background`}>
+        <div className="col-span-full row-start-1">
           <ChatHeader
             title={chatQuery.data?.title ?? "Loading conversation…"}
             workspaceName={workspaceName}
@@ -1190,8 +1317,11 @@ export function ChatPage({ chatId }: { chatId: string }) {
         <div
           ref={conversationScroll.viewportRef}
           aria-label="Conversation messages"
-          className="col-start-2 row-start-2 min-h-0 overflow-y-auto"
+          className="col-start-3 row-start-2 min-h-0 overflow-y-auto"
           onScroll={conversationScroll.onScroll}
+          onContextMenu={openSelectionMenu}
+          onMouseUp={showAskPill}
+          onKeyUp={(event) => { if (event.shiftKey || event.key.startsWith("Arrow")) showAskPill(); }}
         >
           {messagesQuery.isError ? (
             <div role="alert" className="mx-auto max-w-3xl px-5 py-10 text-sm text-red-300">
@@ -1201,6 +1331,10 @@ export function ChatPage({ chatId }: { chatId: string }) {
             <MessageList
               messages={messages}
               runs={runsQuery.data?.items}
+              onRetry={handleRetry}
+              onBranch={running ? undefined : (messageId) => void branchFrom(messageId)}
+              onEdit={running || !modelId ? undefined : editQuestion}
+              availableResources={availableResources}
               onFileSelect={selectFileById}
               onFileDownload={downloadFileById}
               resources={resources}
@@ -1209,7 +1343,24 @@ export function ChatPage({ chatId }: { chatId: string }) {
             />
           )}
         </div>
-        <form className="col-start-2 row-start-3 bg-background p-3 sm:p-4" onSubmit={submit}>
+        {quickAssistant ? (
+          <QuickAssistantPopup
+            quote={quickAssistant.quote}
+            key={`${chatId}:${quickAssistant.session}`}
+            autoAsk={quickAssistant.autoAsk}
+            chatId={chatId}
+            snapshotMessageId={quickAssistant.snapshotMessageId}
+            resources={[...(datasetsQuery.data?.items ?? []), ...(artifactsQuery.data?.items ?? [])]}
+            onFileSelect={selectFile}
+            minimized={quickAssistant.minimized || Boolean(selectedFile)}
+            onMinimize={minimizeQuickAssistant}
+            onRestore={restoreQuickAssistant}
+            onClose={closeQuickAssistant}
+            rightInset={rightInset}
+            onSplitChange={setQuickSplit}
+          />
+        ) : null}
+        <form className="col-start-2 col-span-2 row-start-3 bg-background p-3 sm:p-4" onSubmit={submit}>
           <QueuedQuestions
             items={queuedQuestions}
             editingId={queueEdit?.runId}
@@ -1354,7 +1505,28 @@ export function ChatPage({ chatId }: { chatId: string }) {
                           setAttachmentMenuOpen(false);
                           setPostgresSetup(true);
                         }} />}
-                      {visibleConnectors.map(({ name, description, icon: Icon }) => (
+                      {visibleConnectors.map(({ name, description, icon: Icon, action }) => action === "connectors" ? (
+                        <div key={name} className="border-b last:border-b-0">
+                          <button type="button" data-attachment-action aria-expanded={connectorsExpanded} onClick={() => setConnectorsExpanded((open) => !open)} className="flex w-full items-center gap-3 px-2 py-2 text-left hover:bg-raised sm:px-3">
+                            <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-xs font-medium">{name}</span>
+                              <span className="block truncate text-[11px] text-muted-foreground">{description}</span>
+                            </span>
+                            <ChevronRight aria-hidden="true" className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${connectorsExpanded ? "rotate-90" : ""}`} />
+                          </button>
+                          {connectorsExpanded ? (
+                            <button type="button" data-attachment-action onClick={() => { setAttachmentMenuOpen(false); setDriveDialogOpen(true); }} className="flex w-full items-center gap-3 border-t py-2 pl-8 pr-2 text-left hover:bg-raised sm:pl-10 sm:pr-3">
+                              <HardDrive aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-xs font-medium">Google Drive</span>
+                                <span className="block truncate text-[11px] text-muted-foreground">Import files from your Google Drive</span>
+                              </span>
+                              <span className="shrink-0 rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-0.5 text-[9px] uppercase tracking-wide text-emerald-300">Import</span>
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : (
                         <div key={name} aria-disabled="true" className="flex items-center gap-3 border-b px-2 py-2 last:border-b-0 sm:px-3">
                           <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
                           <span className="min-w-0 flex-1">
@@ -1367,6 +1539,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
                       {!showPostgres && !visibleConnectors.length ? <p className="px-3 py-4 text-xs text-muted-foreground">No matching connectors.</p> : null}
                     </div>
                     <div className="flex shrink-0 items-center justify-between gap-3 border-t px-2.5 py-2 text-[10px] text-muted-foreground sm:px-3">
+                      <span>Local files and Google Drive are available now. Other connectors are coming soon.</span>
                       <span className="hidden shrink-0 gap-1 lg:flex">
                         <span className="rounded-md border px-1.5 py-0.5"><kbd>↑↓</kbd> to move</span>
                         <span className="rounded-md border px-1.5 py-0.5"><kbd>Enter</kbd> to select</span>
@@ -1511,6 +1684,18 @@ export function ChatPage({ chatId }: { chatId: string }) {
 
         {postgresSetup && <PostgresSetup open workspaceId={chatQuery.data?.workspace_id} onClose={() => setPostgresSetup(false)}
           onSaved={(source) => { if (source.include_schema_for_ai) setPostgresSelection(source); }} />}
+        <DriveBrowserDialog
+          open={driveDialogOpen}
+          onOpenChange={setDriveDialogOpen}
+          onReauth={() => router.push("/connectors")}
+          target={{ scopeType: "chat", scopeId: chatId, label: "this chat" }}
+          onImported={(result) => {
+            void queryClient.invalidateQueries({ queryKey: ["chat", chatId] });
+            setAttachments((current) => [...current, ...result.imported
+              .filter((item) => !current.some((attachment) => attachment.resourceId === item.resource.id))
+              .map<DraftAttachment>((item) => ({ id: `drive-${item.resource.id}-${crypto.randomUUID()}`, resourceId: item.resource.id, name: item.resource.name, size: item.resource.size_bytes ?? 0, previewUrl: null }))]);
+          }}
+        />
         <LibraryImportDialog
           open={libraryDialogOpen}
           onClose={() => setLibraryDialogOpen(false)}
@@ -1527,23 +1712,32 @@ export function ChatPage({ chatId }: { chatId: string }) {
           subject="chat"
         />
       ) : null}
-      {quickAssistant ? (
-        <QuickAssistantPopup
-          key={`${chatId}:${quickAssistant.session}`}
-          autoAsk={quickAssistant.autoAsk}
-          chatId={chatId}
-          snapshotMessageId={quickAssistant.snapshotMessageId}
-          resources={[...(datasetsQuery.data?.items ?? []), ...(artifactsQuery.data?.items ?? [])]}
-          onFileSelect={selectFile}
-          minimized={quickAssistant.minimized}
-          onMinimize={minimizeQuickAssistant}
-          onRestore={restoreQuickAssistant}
-          onClose={closeQuickAssistant}
-          contextOpen={panelOpen}
-        />
+      {askPill ? (
+        <button
+          type="button"
+          style={{ left: askPill.x, top: askPill.y }}
+          // Keep the selection alive while the button is pressed.
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={askAboutSelection}
+          className="fixed z-[70] inline-flex h-8 animate-pop-in items-center gap-1.5 rounded-full border border-border-strong bg-raised px-3 text-xs font-medium text-foreground shadow-xl hover:bg-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <Sparkles className="size-3.5 text-sage" />Ask AI
+        </button>
+      ) : null}
+      {selectionMenu ? (
+        <div
+          role="menu"
+          style={{ left: Math.min(selectionMenu.x, window.innerWidth - 240), top: Math.min(selectionMenu.y, window.innerHeight - 56) }}
+          className="fixed z-[70] w-56 rounded-md border border-border-strong bg-raised p-1 shadow-xl"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button type="button" role="menuitem" onClick={sendSelectionToQuickAssistant} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs text-foreground hover:bg-surface">
+            <Sparkles className="size-3.5 text-muted-foreground" />Ask Quick Assistant about this
+          </button>
+        </div>
       ) : null}
       {panelOpen ? (
-        <div className="absolute inset-y-0 right-0 z-40 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:static xl:z-auto xl:w-[340px] xl:max-w-none xl:shrink-0 xl:shadow-none">
+        <div ref={contextPanelRef} className="absolute inset-y-0 right-0 z-40 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:static xl:z-auto xl:w-[340px] xl:max-w-none xl:shrink-0 xl:shadow-none">
           <ContextSidebar
             workspaceId={chatQuery.data?.workspace_id ?? null}
             datasets={datasetsQuery.data?.items ?? []}
@@ -1555,7 +1749,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
         </div>
       ) : null}
       {selectedFile ? (
-        <div className={`absolute inset-y-0 right-0 z-50 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:max-w-none ${previewExpanded ? "xl:w-[min(75vw,1200px)]" : "xl:w-[min(52vw,820px)]"}`}>
+        <div ref={previewPanelRef} className={`absolute inset-y-0 right-0 z-50 w-full bg-sidebar shadow-2xl sm:max-w-[360px] xl:max-w-none ${previewExpanded ? "xl:w-[min(75vw,1200px)]" : "xl:w-[min(52vw,820px)]"}`}>
           <FilePreviewSidebar
             file={selectedFile}
             chatId={chatId}

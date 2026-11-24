@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import "@fontsource-variable/inter";
-import "@univerjs/preset-sheets-core/lib/index.css";
 import "./globals.css";
 import { Providers } from "./providers";
 

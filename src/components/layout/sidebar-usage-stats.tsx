@@ -21,7 +21,7 @@ export function SidebarUsageStats({ compact = false, className }: SidebarUsageSt
   if (compact) {
     return (
       <Link
-        href="/settings"
+        href="/settings?view=usage"
         title={`Usage: ${OVERALL_PERCENT}% used`}
         aria-label="View usage statistics"
         className={cn(
@@ -42,7 +42,7 @@ export function SidebarUsageStats({ compact = false, className }: SidebarUsageSt
           <span className="text-[11px] text-muted-foreground">{OVERALL_PERCENT}% used</span>
         </div>
         <div className="mt-3 space-y-3">
-          {stats.map((stat) => (
+          {stats.map((stat, index) => (
             <div key={stat.label}>
               <div className="flex items-center justify-between text-xs">
                 <span className="font-medium text-foreground">{stat.label}</span>
@@ -57,12 +57,16 @@ export function SidebarUsageStats({ compact = false, className }: SidebarUsageSt
                   aria-valuemax={100}
                   className="mt-1.5 h-1 w-full"
                 >
-                  <div className={cn("h-full rounded-full", stat.barClass)} style={{ width: `${stat.percent}%` }} />
+                  <div
+                    className={cn("h-full origin-left rounded-full transition-transform duration-700 ease-spring motion-reduce:transition-none scale-x-0 group-hover/user:scale-x-100 group-focus-within/user:scale-x-100", stat.barClass)}
+                    style={{ width: `${stat.percent}%`, transitionDelay: `${120 + index * 90}ms` }}
+                  />
                 </div>
               )}
             </div>
           ))}
         </div>
+        <Link href="/settings?view=usage" className="mt-3 inline-block text-xs text-muted-foreground hover:text-foreground">View usage analytics (sample)</Link>
       </section>
     </div>
   );

@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Database, Download, FileText, Folder, MessageSquare, Plus, Search, Workflow, X } from "lucide-react";
+import { ChevronRight, Database, Download, FileText, Folder, HardDrive, Link2, MessageSquare, Paperclip, Plus, Search, Workflow, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   createWorkspaceWorkflow,
@@ -18,6 +18,7 @@ import {
   uploadResource,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { DriveBrowserDialog } from "@/features/connectors/components/drive-browser-dialog";
 import type { DatasetResource } from "@/features/context-sidebar/types";
 import { HistoryToolbar } from "@/features/history/components/history-toolbar";
 import { filterHistory } from "@/features/history/logic/filter-history";
@@ -47,6 +48,10 @@ function formatDate(value: string) {
 export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("chats");
+  const [driveOpen, setDriveOpen] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [connectorsOpen, setConnectorsOpen] = useState(false);
+  const datasetFileRef = useRef<HTMLInputElement>(null);
   const [chatFilters, setChatFilters] = useState<HistoryFilters>({
     status: "active",
     ownership: "all",
@@ -224,20 +229,45 @@ export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
                   className="h-9 w-48 rounded-md border bg-background pl-9 pr-3 text-xs outline-none"
                 />
               </label>
-              <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
-                <Plus className="size-4" />
-                Add Dataset
+              <div className="relative" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setAddMenuOpen(false); }}>
+                <button type="button" aria-haspopup="menu" aria-expanded={addMenuOpen} onClick={() => setAddMenuOpen((open) => !open)} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+                  <Plus className="size-4" />
+                  Add Dataset
+                </button>
                 <input
+                  ref={datasetFileRef}
                   type="file"
                   accept=".csv,.tsv,.xlsx,.xls,.parquet"
                   className="sr-only"
+                  tabIndex={-1}
+                  aria-label="Choose a dataset file"
                   onChange={(event) => {
                     const file = event.target.files?.[0];
                     if (file) uploadDatasetMutation.mutate(file);
                     event.currentTarget.value = "";
                   }}
                 />
-              </label>
+                {addMenuOpen ? (
+                  <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-72 animate-pop-in overflow-hidden rounded-xl border border-border-strong bg-sidebar p-1.5 shadow-2xl">
+                    <button type="button" role="menuitem" onClick={() => { setAddMenuOpen(false); datasetFileRef.current?.click(); }} className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-raised">
+                      <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#b8cef0] text-[#172033]"><Paperclip className="size-4" /></span>
+                      <span className="min-w-0"><span className="block text-xs font-semibold">Add files</span><span className="block text-[10px] text-muted-foreground">From your device</span></span>
+                    </button>
+                    <button type="button" role="menuitem" aria-expanded={connectorsOpen} onClick={() => setConnectorsOpen((open) => !open)} className="mt-0.5 flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-raised">
+                      <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#c2d9b8] text-[#172e18]"><Link2 className="size-4" /></span>
+                      <span className="min-w-0 flex-1"><span className="block text-xs font-semibold">Connectors</span><span className="block text-[10px] text-muted-foreground">Google Drive and other data sources</span></span>
+                      <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", connectorsOpen && "rotate-90")} />
+                    </button>
+                    {connectorsOpen ? (
+                      <button type="button" role="menuitem" onClick={() => { setAddMenuOpen(false); setDriveOpen(true); }} className="mt-0.5 flex w-full items-center gap-3 rounded-lg py-2 pl-9 pr-2 text-left hover:bg-raised">
+                        <HardDrive className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1"><span className="block text-xs font-medium">Google Drive</span><span className="block truncate text-[10px] text-muted-foreground">Import files from your Google Drive</span></span>
+                        <span className="shrink-0 rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-0.5 text-[9px] uppercase tracking-wide text-emerald-300">Import</span>
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             </div>
 
             {visibleDatasets.length ? (
@@ -389,6 +419,7 @@ export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
       )}
       {tab === "workflows" && <section><div className="mb-4 flex items-center justify-between"><div><h3 className="text-xl font-semibold">Workflows</h3><p className="mt-1 text-xs text-muted-foreground">Automation owned by this workspace.</p></div><Button type="button" onClick={() => setCreatingWorkflow(true)}><Plus/>Create Workflow</Button></div>{creatingWorkflow && <form onSubmit={(event) => { event.preventDefault(); if (workflowName.trim()) createWorkflowMutation.mutate(); }} className="mb-4 flex gap-2 rounded-lg border bg-surface p-3"><input autoFocus value={workflowName} onChange={(event) => setWorkflowName(event.target.value)} placeholder="Workflow name" className="h-9 min-w-0 flex-1 rounded border bg-background px-3 text-sm outline-none"/><Button type="submit" disabled={!workflowName.trim() || createWorkflowMutation.isPending}>{createWorkflowMutation.isPending ? "Creating…" : "Create"}</Button><Button type="button" variant="ghost" onClick={() => setCreatingWorkflow(false)}>Cancel</Button></form>}{workflows.data?.items.length ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{workflows.data.items.map((workflow) => <article key={workflow.id} className="rounded-lg border bg-surface p-4"><div className="flex items-start gap-3"><div className="grid size-9 place-items-center rounded border bg-raised"><Workflow className="size-4"/></div><div className="min-w-0"><h4 className="truncate text-sm font-medium">{workflow.name}</h4><p className="mt-1 text-xs text-muted-foreground">{workflow.description || "No description"}</p></div></div><div className="mt-4 flex items-center justify-between border-t pt-3 text-xs"><span className="capitalize text-muted-foreground">{workflow.status}</span><span className="text-muted-foreground">Updated {formatDate(workflow.updated_at)}</span></div></article>)}</div> : <div className="rounded-lg border border-dashed px-6 py-16 text-center"><Workflow className="mx-auto size-7 text-muted-foreground"/><p className="mt-3 text-sm font-medium">No workflows in this workspace</p><p className="mt-1 text-xs text-muted-foreground">Create a workflow to keep this workspace’s recurring work together.</p></div>}</section>}
       {tab === "context" && <section className="grid min-h-[520px] overflow-hidden rounded-lg border md:grid-cols-[280px_minmax(0,1fr)]"><aside className="border-b p-3 md:border-b-0 md:border-r"><div className="mb-3 flex items-center justify-between"><p className="text-xs font-medium">Context files</p><Button size="icon" variant="ghost" type="button" aria-label="New context file" onClick={() => { setSelectedContextId(null); setContextDraft(""); }}><Plus/></Button></div><div className="space-y-1">{(contextFiles.data?.items ?? []).map((file) => <button key={file.id} type="button" onClick={() => { setSelectedContextId(file.id); setContextDraft(file.content); }} className={cn("flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs", selectedContextId === file.id ? "bg-raised text-foreground" : "text-muted-foreground hover:bg-surface")}><FileText className="size-3.5"/><span className="truncate">{file.name}</span></button>)}</div></aside><div className="flex min-w-0 flex-col"><div className="flex h-12 items-center justify-between border-b px-4"><input value={selectedContext?.name ?? (selectedContextId ? "" : "notes.md")} onChange={(event) => { if (selectedContext) updateWorkspaceContextFile(workspaceId, selectedContext.id, { name: event.target.value }).then(() => queryClient.invalidateQueries({ queryKey: ["workspace", workspaceId, "context-files"] })); }} disabled={!selectedContext} className="min-w-0 bg-transparent text-sm font-medium outline-none disabled:text-foreground"/><div className="flex gap-2">{selectedContext && <Button size="sm" variant="ghost" type="button" onClick={() => deleteContextMutation.mutate(selectedContext.id)}><X/>Delete</Button>}<Button size="sm" type="button" onClick={() => saveContextMutation.mutate()} disabled={saveContextMutation.isPending}>{saveContextMutation.isPending ? "Saving…" : "Save"}</Button></div></div><textarea value={contextDraft} onChange={(event) => setContextDraft(event.target.value)} placeholder="# Workspace instructions\n\nAdd durable instructions for future analyses…" className="min-h-[440px] flex-1 resize-none bg-background p-5 font-mono text-sm leading-6 outline-none"/>{saveContextMutation.isError && <p className="border-t px-4 py-2 text-xs text-red-300">Could not save this context file.</p>}</div></section>}
+      <DriveBrowserDialog open={driveOpen} onOpenChange={setDriveOpen} onReauth={() => { window.location.href = "/connectors"; }} target={{ scopeType: "workspace", scopeId: workspaceId, label: workspace.data?.name ?? "this workspace" }} />
     </div>
   </section>;
 }

@@ -17,7 +17,7 @@ from ..dependencies import get_current_user, get_db
 from ..errors import APIError
 from ..models import Chat, FileObject, LibraryEntry, Message, Resource, ResourceLink, User, Workspace
 from ..services.records import require_chat, require_workspace
-from ..services.dataset_preview import MAX_PREVIEW_ROWS
+from ..services.dataset_preview import MAX_DASHBOARD_ROWS, MAX_PREVIEW_ROWS, read_csv_rows
 from ..services.resource_uploads import CODE_EXTENSIONS, read_upload, register_upload
 from ..storage import LocalFileStorage
 router = APIRouter(prefix="/api/resources", tags=["resources"])
@@ -45,8 +45,11 @@ async def upload_resource(
         require_workspace(session, user, scope_id)
         if message_id is not None:
             raise APIError(422, "invalid_message", "Workspace uploads cannot reference a chat message.")
+    elif scope_type == "library":
+        # Stand-alone file saved straight to the user's Library, not part of any chat or workspace.
+        scope_id = user.id
     else:
-        raise APIError(422, "invalid_scope", "Resource scope must be chat or workspace.")
+        raise APIError(422, "invalid_scope", "Resource scope must be chat, workspace or library.")
     existing = session.scalar(select(ResourceLink).where(
         ResourceLink.scope_type == scope_type,
         ResourceLink.scope_id == scope_id,
@@ -61,6 +64,8 @@ async def upload_resource(
         user_id=user.id, scope_type=scope_type, scope_id=scope_id, message_id=message_id,
         client_upload_id=client_upload_id,
     )
+    if scope_type == "library":
+        session.add(LibraryEntry(user_id=user.id, resource_id=resource.id))
     session.commit()
     session.refresh(resource)
     return {"resource": _summary(resource), "link_id": link.id}
@@ -181,12 +186,42 @@ def download_workspace_datasets(
     rows = _workspace_datasets(session, workspace_id)
     if not rows:
         raise APIError(404, "no_datasets", "This workspace has no datasets.")
+    return _zip_datasets(request, [(resource, file_object) for resource, file_object, _ in rows], f"{workspace.name}-datasets.zip")
+
+
+@catalog_router.get("/library/datasets/download")
+def download_library_datasets(
+    request: Request,
+    workspace_id: str | None = None,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Zip the signed-in user's saved Library datasets, optionally only those in one workspace folder."""
+    rows = session.execute(
+        select(Resource, FileObject)
+        .join(LibraryEntry, LibraryEntry.resource_id == Resource.id)
+        .join(FileObject, FileObject.id == Resource.file_object_id)
+        .where(LibraryEntry.user_id == user.id, Resource.created_by == user.id, Resource.resource_type == "dataset")
+        .order_by(LibraryEntry.created_at.desc(), LibraryEntry.id.desc())
+    ).all()
+    label = "library"
+    if workspace_id:
+        workspace = require_workspace(session, user, workspace_id)
+        in_workspace = _library_workspaces(session, user, [resource.id for resource, _ in rows])
+        rows = [(resource, file_object) for resource, file_object in rows if in_workspace.get(resource.id) and in_workspace[resource.id].id == workspace_id]
+        label = workspace.name
+    if not rows:
+        raise APIError(404, "no_datasets", "There are no saved datasets to download.")
+    return _zip_datasets(request, list(rows), f"{label}-datasets.zip")
+
+
+def _zip_datasets(request: Request, rows: list[tuple[Resource, FileObject]], archive_name: str) -> Response:
     storage: LocalFileStorage = request.app.state.storage
     used_names: set[str] = set()
     archive = TemporaryFile()
     try:
         with ZipFile(archive, "w", compression=ZIP_DEFLATED, compresslevel=1) as bundle:
-            for resource, file_object, _ in rows:
+            for resource, file_object in rows:
                 original = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", resource.name).strip(" .") or "dataset"
                 path = Path(original)
                 name = original
@@ -197,7 +232,7 @@ def download_workspace_datasets(
                 used_names.add(name.casefold())
                 bundle.writestr(name, storage.read_bytes(file_object.relative_storage_path))
         archive.seek(0)
-        filename = quote(f"{workspace.name}-datasets.zip", safe="")
+        filename = quote(archive_name, safe="")
         return StreamingResponse(
             iter(lambda: archive.read(65536), b""), media_type="application/zip",
             headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
@@ -259,6 +294,10 @@ async def list_library(
         .order_by(LibraryEntry.created_at.desc(), LibraryEntry.id.desc())
     ).all()
     workspaces = _library_workspaces(session, user, [resource.id for _, resource, _ in rows])
+    library_ids = {resource.id for _, resource, _ in rows}
+    direct = set(session.scalars(
+        select(ResourceLink.resource_id).where(ResourceLink.resource_id.in_(library_ids), ResourceLink.scope_type == "library")
+    )) if library_ids else set()
     items = []
     for entry, resource, file_object in rows:
         item = _catalog_item(resource, file_object, "library", True)
@@ -267,6 +306,7 @@ async def list_library(
             **item,
             "resource_type": resource.resource_type,
             "library_category": _library_category(resource),
+            "uploaded_in_library": resource.id in direct,
             "library_created_at": entry.created_at,
             "workspace_id": workspace.id if workspace else None,
             "workspace_name": workspace.name if workspace else None,
@@ -357,6 +397,39 @@ async def preview_dataset(
         "columns": metadata.get("columns", []),
         "rows": rows[:limit],
         "truncated": metadata.get("row_count") is None or len(rows) < (metadata.get("row_count") or 0),
+    }
+
+
+@catalog_router.get("/datasets/{resource_id}/rows")
+async def dataset_rows(
+    resource_id: str,
+    request: Request,
+    limit: int = Query(default=MAX_DASHBOARD_ROWS, ge=1, le=MAX_DASHBOARD_ROWS),
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Up to 6,000 rows of a CSV dataset, for dashboard charts and filters."""
+    from ..services.google_drive import PROVIDER as drive_provider
+    from .dashboards import can_view_dataset  # a dashboard shared with the user makes its datasets readable
+
+    row = session.execute(
+        select(Resource, FileObject).join(FileObject, FileObject.id == Resource.file_object_id).where(Resource.id == resource_id)
+    ).one_or_none()
+    if row is None or (row[0].created_by != user.id and not can_view_dataset(session, user, resource_id)):
+        raise APIError(404, "resource_not_found", "Resource not found.")
+    resource, file_object = row
+    if resource.resource_type != "dataset":
+        raise APIError(404, "dataset_not_found", "Dataset not found.")
+    storage: LocalFileStorage = request.app.state.storage
+    data = read_csv_rows(resource.name, storage.read_bytes(file_object.relative_storage_path), limit)
+    if data is None:
+        raise APIError(422, "rows_unavailable", "Rows can only be read from CSV or XLSX datasets.")
+    metadata = resource.metadata_json or {}
+    return {
+        "name": resource.name, **data,
+        "refreshed_at": metadata.get("refreshed_at") or resource.created_at.isoformat(),
+        "version": file_object.content_hash[:12],
+        "syncable": metadata.get("source_connector") == drive_provider and resource.created_by == user.id and bool(metadata.get("drive_file_id")),
     }
 
 

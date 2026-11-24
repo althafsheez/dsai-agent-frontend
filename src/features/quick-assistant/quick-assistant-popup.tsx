@@ -1,8 +1,9 @@
 "use client";
 
-import { ArrowUp, Database, FileText, LoaderCircle, Maximize2, Minimize2, Minus, Sparkles, X } from "lucide-react";
+import { ArrowUp, Expand, LoaderCircle, Maximize2, Minimize2, Minus, Plus, Shrink, Sparkles, X } from "lucide-react";
 import { FormEvent, useEffect, useId, useRef, useState } from "react";
-import { getModels, getQuickAssistantMessages, streamQuickAssistantMessage, type ExecutionEvent } from "@/lib/api";
+import { useFloatingFrame } from "./use-floating-frame";
+import { deleteQuickAssistantThread, getModels, getQuickAssistantMessages, streamQuickAssistantMessage, type ExecutionEvent } from "@/lib/api";
 import type { ContextFile } from "@/features/context-sidebar";
 
 interface QuickAssistantPopupProps {
@@ -16,10 +17,14 @@ interface QuickAssistantPopupProps {
   onMinimize: () => void;
   onRestore: () => void;
   onClose: () => void;
-  /** The context panel is open on the right; the popup moves left of it instead of covering it. */
-  contextOpen?: boolean;
+  /** Width in px of the context/file panel open on the right; the popup stays clear of it. */
+  rightInset?: number;
+  /** Reports when the window docks into the left half of the chat area, so the page can make room. */
+  onSplitChange?: (split: boolean) => void;
   /** Asked once as soon as the assistant is ready, e.g. from the `/btw` slash command. */
   autoAsk?: string;
+  /** Selected chat text sent here from the right-click menu; it is quoted into the draft, not sent. */
+  quote?: { text: string; nonce: number };
 }
 interface QuickMessage { id: string; role: "user" | "assistant"; content: string; status: string; }
 
@@ -32,7 +37,7 @@ function compactText(content: string) {
     : part.startsWith("`") && part.endsWith("`") ? <code key={index} className="rounded bg-raised px-1 font-mono text-[11px]">{part.slice(1, -1)}</code> : part);
 }
 
-export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFileSelect, minimized, onMinimize, onRestore, onClose, autoAsk, contextOpen = false }: QuickAssistantPopupProps) {
+export function QuickAssistantPopup({ chatId, snapshotMessageId, minimized, onMinimize, onRestore, onClose, autoAsk, quote, rightInset = 0, onSplitChange }: QuickAssistantPopupProps) {
   const inputId = useId();
   const titleId = useId();
   const [draft, setDraft] = useState("");
@@ -45,6 +50,8 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
   const [sentThisSession, setSentThisSession] = useState(false);
   const [selectedModel, setSelectedModel] = useState<{ id: string; default_effort: string | null } | null>(null);
   const [unseenAnswer, setUnseenAnswer] = useState(false);
+  const [tabs, setTabs] = useState<string[]>(["main"]);
+  const [activeTab, setActiveTab] = useState("main");
   const minimizedRef = useRef(minimized);
   const controller = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -56,7 +63,12 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
     setLoadingHistory(true);
     void Promise.all([getQuickAssistantMessages("chat", chatId), getModels()]).then(([history, modelData]) => {
       if (!active) return;
-      setMessages(history.items.map((message) => ({ id: message.id, role: message.role, content: message.content, status: message.status })));
+      const threads = [...new Set(history.items.map((message) => message.thread_id))];
+      if (!threads.length) threads.push("main");
+      const first = threads[0];
+      setTabs(threads);
+      setActiveTab(first);
+      setMessages(history.items.filter((message) => message.thread_id === first).map((message) => ({ id: message.id, role: message.role, content: message.content, status: message.status })));
       const models = modelData.models;
       setSelectedModel(models.find((model) => model.id === modelData.default_model_id) ?? models[0] ?? null);
     }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Quick Assistant is unavailable."); }).finally(() => { if (active) setLoadingHistory(false); });
@@ -87,10 +99,55 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [minimized, onMinimize]);
 
+  async function switchTab(threadId: string, isNew = false) {
+    if (running || threadId === activeTab) return;
+    setActiveTab(threadId);
+    setError(null);
+    setDraft("");
+    if (isNew) { setMessages([]); return; }
+    setLoadingHistory(true);
+    try {
+      const history = await getQuickAssistantMessages("chat", chatId, threadId);
+      setMessages(history.items.map((message) => ({ id: message.id, role: message.role, content: message.content, status: message.status })));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load this conversation.");
+    } finally {
+      setLoadingHistory(false);
+    }
+  }
+
+  function addTab() {
+    if (running) return;
+    const threadId = `tab-${crypto.randomUUID().slice(0, 8)}`;
+    setTabs((current) => [...current, threadId]);
+    void switchTab(threadId, true);
+  }
+
+  async function closeTab(threadId: string) {
+    if (running) return;
+    const remaining = tabs.filter((id) => id !== threadId);
+    try { await deleteQuickAssistantThread("chat", chatId, threadId); } catch { /* unsaved tabs have nothing to delete */ }
+    setTabs(remaining.length ? remaining : ["main"]);
+    if (threadId !== activeTab) return;
+    const next = remaining[0] ?? "main";
+    setActiveTab("");
+    if (remaining.length) await switchTab(next);
+    else { setActiveTab("main"); setMessages([]); setDraft(""); setError(null); }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await ask(draft.trim());
   }
+
+  const lastQuote = useRef<number | null>(null);
+  useEffect(() => {
+    if (!quote || lastQuote.current === quote.nonce) return;
+    lastQuote.current = quote.nonce;
+    const quoted = quote.text.split("\n").map((line) => `> ${line}`).join("\n");
+    setDraft((current) => `${current ? `${current}\n\n` : ""}${quoted}\n\n`);
+    inputRef.current?.focus();
+  }, [quote]);
 
   const autoAsked = useRef(false);
   useEffect(() => {
@@ -118,6 +175,7 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
         effort: selectedModel.default_effort ?? undefined,
         client_request_id: requestId,
         context_until_message_id: snapshotMessageId ?? undefined,
+        thread_id: activeTab,
       }, (event: ExecutionEvent) => {
         const messageId = typeof event.data.message_id === "string" ? event.data.message_id : null;
         if (event.type === "message.created" && messageId) { assistantId = messageId; setMessages((current) => current.map((message) => message.id === temporaryAssistantId ? { ...message, id: messageId } : message)); }
@@ -134,6 +192,13 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
   }
 
   const expanded = expandedOverride ?? (sentThisSession || draft.length > LONG_DRAFT_CHARS || draft.includes("\n"));
+  const frame = useFloatingFrame({ ref: popupRef, rightInset, expanded });
+  // Full screen docks this window into the left half of the chat area, between the top bar and the composer.
+  const split = frame.fullscreen && frame.canSplit && !minimized;
+  useEffect(() => {
+    onSplitChange?.(split);
+    return () => onSplitChange?.(false);
+  }, [split, onSplitChange]);
 
   return (
     <>
@@ -143,24 +208,48 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
       aria-modal="false"
       aria-labelledby={titleId}
       data-expanded={expanded}
+      data-fullscreen={frame.fullscreen}
       aria-hidden={minimized || undefined}
       inert={minimized || undefined}
-      className={`fixed right-4 top-16 z-[70] flex origin-top-right ${contextOpen ? "sm:right-[calc(360px+1rem)] xl:right-[calc(340px+1rem)] sm:max-w-[calc(100vw-360px-2rem)] xl:max-w-none" : ""} animate-pop-in flex-col overflow-hidden rounded-xl border border-border-strong bg-sidebar shadow-2xl transition-[width,height,opacity,transform,visibility] duration-300 ease-spring ${expanded ? "h-[min(640px,calc(100dvh-6rem))] w-[min(560px,calc(100vw-2rem))]" : "h-[min(440px,calc(100dvh-6rem))] w-[min(360px,calc(100vw-2rem))]"} ${minimized ? "invisible translate-y-2 scale-95 opacity-0" : "visible opacity-100"}`}
+      style={split ? undefined : frame.style}
+      className={`${split ? "relative col-start-1 row-span-2 row-start-2 flex min-h-0 min-w-[360px] flex-col overflow-hidden border-r border-border-strong bg-sidebar " : "absolute z-[70] flex origin-top-left animate-pop-in flex-col overflow-hidden rounded-xl border border-border-strong bg-sidebar shadow-2xl "}${frame.interacting ? "" : "transition-[left,top,width,height,opacity,transform,visibility] duration-300 ease-spring"} ${minimized ? "invisible translate-y-2 scale-95 opacity-0" : "visible opacity-100"}`}
     >
-      <header className="flex shrink-0 items-start gap-2 border-b px-4 py-3">
-        <Sparkles className="mt-0.5 size-4 shrink-0 text-sage" />
-        <div className="min-w-0 flex-1">
-          <h2 id={titleId} className="text-sm font-medium text-foreground">Quick Assistant</h2>
-          <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">Side questions about this chat so far. Not added to the main chat.</p>
+      <header {...frame.dragProps} className={`flex shrink-0 touch-none select-none items-center gap-2 border-b px-3 py-1.5 ${frame.fullscreen ? "" : "cursor-grab active:cursor-grabbing"}`}>
+        <Sparkles className="size-4 shrink-0 text-sage" />
+        <h2 id={titleId} title="Side questions about this chat so far. Not added to the main chat." className="sr-only">Quick Assistant</h2>
+        <div role="tablist" aria-label="Quick Assistant conversations" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]">
+          {tabs.map((threadId, index) => (
+            <span key={threadId} className={`group flex shrink-0 items-center rounded-md transition-colors ${threadId === activeTab ? "bg-raised text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+              <button type="button" role="tab" aria-selected={threadId === activeTab} disabled={running && threadId !== activeTab} onClick={() => void switchTab(threadId)} className="rounded-md py-1 pl-2.5 pr-1 text-[11px] font-medium disabled:opacity-50">
+                Chat {index + 1}
+              </button>
+              <button type="button" onClick={() => void closeTab(threadId)} disabled={running} aria-label={`Close Chat ${index + 1}`} title="Close this chat" className="mr-1 grid size-4 place-items-center rounded text-muted-foreground hover:bg-background/60 hover:text-foreground disabled:opacity-40">
+                <X className="size-3" />
+              </button>
+            </span>
+          ))}
+          <button type="button" onClick={addTab} disabled={running} aria-label="New Quick Assistant conversation" title="New conversation" className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40">
+            <Plus className="size-3.5" />
+          </button>
         </div>
         <button
           type="button"
-          onClick={() => setExpandedOverride(!expanded)}
+          onClick={() => { setExpandedOverride(!expanded); frame.resetSize(); }}
           aria-label={expanded ? "Shrink Quick Assistant" : "Expand Quick Assistant"}
           title={expanded ? "Shrink" : "Expand"}
           className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground"
         >
           {expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+        </button>
+        <button
+          type="button"
+          onClick={frame.toggleFullscreen}
+          aria-label={frame.fullscreen ? "Exit full screen" : "Open Quick Assistant full screen"}
+          title={frame.fullscreen ? "Close split view" : "Split screen"}
+          aria-pressed={frame.fullscreen}
+          className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground"
+        >
+          {frame.fullscreen ? <Shrink className="size-3.5" /> : <Expand className="size-3.5" />}
         </button>
         <button type="button" onClick={onMinimize} aria-label="Minimize Quick Assistant" title="Minimize" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground">
           <Minus className="size-4" />
@@ -169,16 +258,6 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
           <X className="size-4" />
         </button>
       </header>
-      {resources.length ? (
-        <div className="flex shrink-0 gap-1.5 overflow-x-auto px-4 pt-2 [scrollbar-width:none]" aria-label="Available context files">
-          {resources.slice(0, 4).map((resource) => (
-            <button key={resource.id} type="button" onClick={() => onFileSelect(resource)} className="inline-flex max-w-36 shrink-0 items-center gap-1 rounded border bg-surface px-1.5 py-1 text-[11px] text-muted-foreground hover:border-border-strong hover:text-foreground" title={`Open ${resource.name}`}>
-              {"scope_type" in resource ? <Database className="size-3 text-sage" /> : <FileText className="size-3 text-slate" />}
-              <span className="truncate">{resource.name}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-4 py-3" aria-live="polite">
         {loadingHistory ? <p className="text-[13px] text-muted-foreground">Loading saved questions…</p> : null}
         {!loadingHistory && messages.length === 0 ? <p className="text-[13px] text-muted-foreground">Ask a quick question about this analysis, dataset, or artifact.</p> : null}
@@ -206,9 +285,17 @@ export function QuickAssistantPopup({ chatId, snapshotMessageId, resources, onFi
           <ArrowUp className="size-4" />
         </button>
       </form>
+      {frame.fullscreen ? null : (
+        <div
+          {...frame.resizeProps}
+          role="separator"
+          aria-label="Resize Quick Assistant"
+          className="absolute bottom-0 right-0 size-4 cursor-nwse-resize touch-none after:absolute after:bottom-1 after:right-1 after:size-2 after:rounded-br-sm after:border-b-2 after:border-r-2 after:border-muted-foreground/60"
+        />
+      )}
     </section>
     {minimized ? (
-      <div className={`fixed right-4 top-16 z-[70] flex animate-pop-in items-center gap-1 rounded-full border border-border-strong bg-sidebar py-1 pl-1 pr-1.5 shadow-xl ${contextOpen ? "sm:right-[calc(360px+1rem)] xl:right-[calc(340px+1rem)]" : ""}`}>
+      <div style={{ left: frame.box.left, top: frame.box.top }} className="absolute z-[70] flex animate-pop-in items-center gap-1 rounded-full border border-border-strong bg-sidebar py-1 pl-1 pr-1.5 shadow-xl">
         <button type="button" onClick={onRestore} aria-label="Restore Quick Assistant" className="inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-xs text-foreground hover:bg-raised">
           {running ? <LoaderCircle className="size-3.5 animate-spin text-sage" /> : <Sparkles className="size-3.5 text-sage" />}
           Quick Assistant

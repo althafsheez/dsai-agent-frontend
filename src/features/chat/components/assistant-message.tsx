@@ -1,5 +1,6 @@
+import dynamic from "next/dynamic";
 import React, { useMemo } from "react";
-import { AlertTriangle, RotateCcw, Sparkles } from "lucide-react";
+import { AlertTriangle, GitBranch, RotateCcw, Sparkles } from "lucide-react";
 import Image from "next/image";
 import type { AgentRunDto } from "@/lib/api";
 import type { ContextFile } from "@/features/context-sidebar";
@@ -8,11 +9,14 @@ import type { AssistantMessage as AssistantMessageType, MessageBlock } from "../
 import { diagnosticHeadline } from "../execution-diagnostic";
 import { ErrorDetails } from "./error-details";
 import { AgentTrace } from "./agent-trace";
-import { ChartBlock } from "./chart-block";
 import { CodeBlock } from "./code-block";
 import { FileBlock } from "./file-block";
 import { TableBlock } from "./table-block";
+import { parseMarkdownTable } from "../markdown-table";
 import { renderRichText, type DataReferenceResource } from "./data-reference";
+import { blocksToText, CopyButton } from "./copy-button";
+
+const ChartBlock = dynamic(() => import("./chart-block").then((m) => m.ChartBlock), { ssr: false });
 
 function StreamingCursor() {
   return (
@@ -52,6 +56,8 @@ function MarkdownText({
         const isLastParagraph = isLast && index === paragraphs.length - 1;
         const cursor = isStreaming && isLastParagraph ? <StreamingCursor /> : null;
 
+        const table = parseMarkdownTable(paragraph);
+        if (table) return <TableBlock key={index} columns={table.columns} rows={table.rows} />;
         if (paragraph.startsWith("## ")) {
           return (
             <h2 key={index} className="pt-1 text-base font-medium tracking-tight text-foreground">
@@ -234,6 +240,7 @@ export function AssistantMessage({
   run,
   availableResources,
   onRetry,
+  onBranch,
   onFileSelect,
   onFileDownload,
 }: {
@@ -243,6 +250,7 @@ export function AssistantMessage({
   run?: AgentRunDto;
   availableResources?: DataReferenceResource[];
   onRetry?: (message: AssistantMessageType) => void;
+  onBranch?: (messageId: string) => void;
   onFileSelect?: (id: string) => void;
   onFileDownload?: (id: string) => void;
 }) {
@@ -355,9 +363,17 @@ export function AssistantMessage({
           </div>
         )}
 
-        <time dateTime={message.createdAt} className="mt-3 block text-[10px] text-muted-foreground">
-          {new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-        </time>
+        <div className="mt-3 flex items-center gap-3 text-[10px] text-muted-foreground">
+          <time dateTime={message.createdAt}>
+            {new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </time>
+          {message.status === "completed" && blocksToText(message.blocks) ? <CopyButton label="Copy response" getText={() => blocksToText(message.blocks)} /> : null}
+          {onBranch && message.status === "completed" ? (
+            <button type="button" onClick={() => onBranch(message.id)} className="inline-flex items-center gap-1 hover:text-foreground">
+              <GitBranch className="size-3" />Branch from here
+            </button>
+          ) : null}
+        </div>
       </div>
     </div>
   );

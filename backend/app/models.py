@@ -174,6 +174,8 @@ class QuickMessage(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(24), default="completed")
     position: Mapped[int] = mapped_column(Integer)
     client_request_id: Mapped[str | None] = mapped_column(String(100))
+    # One context can hold several independent conversations (tabs); positions stay unique across all of them.
+    thread_id: Mapped[str] = mapped_column(String(36), default="main", server_default="main", index=True)
 
 
 class AgentRun(Base):
@@ -289,3 +291,71 @@ class AgentMemory(TimestampMixin, Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     key: Mapped[str] = mapped_column(String(100))
     value: Mapped[str] = mapped_column(Text)
+
+
+class ConnectorConnection(TimestampMixin, Base):
+    """A user's OAuth link to an external data source. Tokens are stored encrypted and never returned by the API."""
+
+    __tablename__ = "connector_connections"
+    __table_args__ = (UniqueConstraint("user_id", "provider", name="uq_connector_user_provider"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    account_email: Mapped[str | None] = mapped_column(String(320))
+    scopes: Mapped[str] = mapped_column(Text, default="")
+    access_token_enc: Mapped[str] = mapped_column(Text)
+    refresh_token_enc: Mapped[str | None] = mapped_column(Text)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Dashboard(TimestampMixin, Base):
+    __tablename__ = "dashboards"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    slicers: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    dataset_ids: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    widgets: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    # [{"user_id": str, "role": "viewer" | "editor"}]; a published dashboard is also visible to the whole team (view only).
+    shares: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    # 0 = manual refresh only; otherwise the minutes between automatic data refreshes while the dashboard is open.
+    refresh_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    # Users who pinned it (pins are personal), and the small KPI + chart shown on the listing card, computed when it is saved.
+    pinned_by: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    preview: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class WorkflowDefinition(TimestampMixin, Base):
+    __tablename__ = "workflow_definitions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str] = mapped_column(Text, default="")
+    state: Mapped[str] = mapped_column(String(16), default="draft")
+    trigger: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    steps: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    prompt: Mapped[str] = mapped_column(Text, default="")
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WorkflowRunRecord(TimestampMixin, Base):
+    __tablename__ = "workflow_run_records"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=new_id)
+    workflow_id: Mapped[str] = mapped_column(String(64), index=True)
+    workflow_name: Mapped[str] = mapped_column(String(160))
+    trigger: Mapped[str] = mapped_column(String(16), default="manual")
+    plan: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), default="running")
+    results: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str] = mapped_column(Text, default="")

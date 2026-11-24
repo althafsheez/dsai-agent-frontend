@@ -67,7 +67,7 @@ def _local_host(url: str) -> bool:
 async def protect_local_connector_api(request: Request) -> None:
     settings: Settings = request.app.state.settings
     path = request.scope["path"]
-    is_connector = path == "/api/connectors" or path.startswith("/api/connectors/")
+    is_connector = path == "/api/connectors/postgresql" or path.startswith("/api/connectors/postgresql/")
     # Local chat history and persisted run IDs also grant access to connector data.
     local_backend = settings.environment in LOCAL_ENVIRONMENTS and settings.connector_encryption_key
     if not is_connector and not (local_backend and path.startswith("/api/")):

@@ -1,6 +1,8 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   BarChart3,
@@ -26,10 +28,12 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth";
 import { cn } from "@/lib/utils";
 
-type Detail = "profile" | "api" | "authentication" | "plan";
+const UsageAnalytics = dynamic(() => import("@/features/usage/usage-analytics").then((m) => m.UsageAnalytics), { ssr: false });
+
+type Detail = "profile" | "api" | "authentication" | "plan" | "usage";
 
 const settingsCards: Array<{
-  view: Detail | "usage";
+  view: Detail;
   title: string;
   description: string;
   icon: typeof UserRound;
@@ -38,17 +42,17 @@ const settingsCards: Array<{
   { view: "profile", title: "Profile and preferences", description: "Manage your identity, role, and personalization details.", icon: UserRound },
   { view: "api", title: "API configuration", description: "Review backend-managed model provider configuration.", icon: KeyRound },
   { view: "plan", title: "Your plan", description: "View the current preview plan, usage limits, and available tiers.", icon: CreditCard },
-  { view: "usage", title: "Usage analytics", description: "Explore workspace analyses, data, and compute usage.", icon: BarChart3, badge: "Admin only" },
+  { view: "usage", title: "Usage analytics", description: "Explore AI credits, disk space, and compute time.", icon: BarChart3, badge: "Sample data" },
 ];
 
-const tabs: Array<{ value: Exclude<Detail, "plan">; label: string }> = [
+const tabs: Array<{ value: Exclude<Detail, "plan" | "usage">; label: string }> = [
   { value: "profile", label: "Profile" },
   { value: "api", label: "API keys" },
   { value: "authentication", label: "Authentication" },
 ];
 
 function DetailTabs({ view, onChange }: { view: Detail; onChange: (view: Detail) => void }) {
-  if (view === "plan") return null;
+  if (view === "plan" || view === "usage") return null;
   return (
     <div role="tablist" aria-label="Account settings" className="mt-6 flex gap-1 overflow-x-auto border-b">
       {tabs.map((tab) => (
@@ -343,7 +347,8 @@ function PlanPanel() {
 
 export function SettingsPage() {
   const { user } = useAuth();
-  const [view, setView] = useState<"overview" | Detail>("overview");
+  const requested = useSearchParams().get("view");
+  const [view, setView] = useState<"overview" | Detail>(requested === "usage" ? "usage" : "overview");
 
   const initials = (user?.name ?? "Demo User")
     .split(" ")
@@ -372,10 +377,8 @@ export function SettingsPage() {
             <button
               key={target}
               type="button"
-              disabled={target === "usage"}
-              title={target === "usage" ? "Usage analytics is not available in this preview" : undefined}
-              onClick={() => target !== "usage" && setView(target)}
-              className="flex w-full items-center gap-4 rounded-xl border bg-surface/50 p-4 text-left transition-colors hover:border-border-strong hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => setView(target)}
+              className="flex w-full items-center gap-4 rounded-xl border bg-surface/50 p-4 text-left transition-colors hover:border-border-strong hover:bg-surface"
             >
               <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-raised text-slate">
                 <Icon className="size-5" />
@@ -401,7 +404,7 @@ export function SettingsPage() {
     );
   }
 
-  const title = view === "plan" ? "Your plan" : "Settings";
+  const title = view === "plan" ? "Your plan" : view === "usage" ? "Usage analytics" : "Settings";
   return (
     <section className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
       <Button
@@ -419,7 +422,7 @@ export function SettingsPage() {
         </span>
         <div>
           <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-          {view !== "plan" && (
+          {view !== "plan" && view !== "usage" && (
             <p className="mt-0.5 text-xs text-muted-foreground">{user?.name ?? "Demo user"}</p>
           )}
         </div>
@@ -429,6 +432,7 @@ export function SettingsPage() {
       {view === "api" && <ApiKeysPanel />}
       {view === "authentication" && <AuthenticationPanel />}
       {view === "plan" && <PlanPanel />}
+      {view === "usage" && <UsageAnalytics />}
     </section>
   );
 }

@@ -1,0 +1,71 @@
+import pandas as pd
+import numpy as np
+import glob
+import os
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+def main():
+    # Load heart dataset
+    files = glob.glob('/home/user/inputs/*heart.csv')
+    if not files:
+        raise FileNotFoundError("heart.csv not found in inputs directory.")
+    df = pd.read_csv(files[0])
+    
+    # Prepare features for clustering (exclude target)
+    feature_cols = [c for c in df.columns if c != 'target']
+    X = df[feature_cols]
+    
+    # Standardize features
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    # K-Means clustering with 4 clusters
+    kmeans = KMeans(n_clusters=4, random_state=42, n_init=10)
+    df['cluster'] = kmeans.fit_predict(X_scaled)
+    
+    # Compute cluster profiles
+    cluster_summary = df.groupby('cluster').mean()
+    print("Cluster Summary (Means):")
+    print(cluster_summary[['age', 'trestbps', 'chol', 'thalach', 'oldpeak', 'target']])
+    
+    # Dimensionality reduction via PCA for 2D visualization
+    pca = PCA(n_components=2, random_state=42)
+    X_pca = pca.fit_transform(X_scaled)
+    df['pca1'] = X_pca[:, 0]
+    df['pca2'] = X_pca[:, 1]
+    
+    # Plotting clusters
+    plt.figure(figsize=(10, 7))
+    sns.scatterplot(
+        x='pca1', y='pca2',
+        hue='cluster',
+        palette='Set1',
+        data=df,
+        alpha=0.8,
+        s=60,
+        edgecolor='w'
+    )
+    plt.title('K-Means Clustering of Heart Disease Patients (k=4)\nPCA Feature Reduction', fontsize=14, fontweight='bold')
+    plt.xlabel(f'Principal Component 1 ({pca.explained_variance_ratio_[0]*100:.1f}% Variance)', fontsize=12)
+    plt.ylabel(f'Principal Component 2 ({pca.explained_variance_ratio_[1]*100:.1f}% Variance)', fontsize=12)
+    plt.legend(title='Cluster', bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.tight_layout()
+    
+    os.makedirs('/home/user/outputs', exist_ok=True)
+    plot_path = '/home/user/outputs/kmeans_clusters_4.png'
+    plt.savefig(plot_path, dpi=300)
+    plt.close()
+    print(f"Saved cluster visualization to {plot_path}")
+    
+    # Save cluster summary CSV
+    summary_path = '/home/user/outputs/kmeans_cluster_summary.csv'
+    cluster_summary.to_csv(summary_path)
+    print(f"Saved cluster summary to {summary_path}")
+
+if __name__ == '__main__':
+    main()

@@ -8,7 +8,7 @@ import type { DataReferenceResource } from "./data-reference";
 import type { ContextFile } from "@/features/context-sidebar";
 import { UserMessage } from "./user-message";
 
-export const MessageList = memo(function MessageList({ messages, runs, onRetry, onFileSelect, onFileDownload, registerSection, resources, onLibraryToggle }: { messages: ChatMessage[]; runs?: AgentRunDto[]; onRetry?: (message: AssistantMessageType) => void; onFileSelect: (id: string) => void; onFileDownload?: (id: string) => void; registerSection: (id: string, node: HTMLElement | null) => void; resources?: Map<string, ContextFile>; onLibraryToggle?: (file: ContextFile) => Promise<void> }) {
+export const MessageList = memo(function MessageList({ messages, runs, onRetry, onBranch, onEdit, availableResources, onFileSelect, onFileDownload, registerSection, resources, onLibraryToggle }: { messages: ChatMessage[]; runs?: AgentRunDto[]; onRetry?: (message: AssistantMessageType) => void; onBranch?: (messageId: string) => void; onEdit?: (messageId: string, content: string) => Promise<void>; availableResources?: DataReferenceResource[]; onFileSelect: (id: string) => void; onFileDownload?: (id: string) => void; registerSection: (id: string, node: HTMLElement | null) => void; resources?: Map<string, ContextFile>; onLibraryToggle?: (file: ContextFile) => Promise<void> }) {
   // Server refreshes and live SSE can race. Render each message identity once so a
   // transient duplicate never makes React reuse or omit a chat row.
   const uniqueMessages = useMemo(() => {
@@ -21,7 +21,7 @@ export const MessageList = memo(function MessageList({ messages, runs, onRetry, 
   }, [messages]);
   return <div className="mx-auto w-full max-w-4xl space-y-10 px-5 py-10 sm:px-8 sm:py-14">
     {uniqueMessages.map((message) => <article key={message.id} id={`message-${message.id}`} ref={message.role === "user" ? (node) => registerSection(message.id, node) : undefined} className="scroll-mt-20">
-      {message.role === "user" ? <UserMessage message={message} onFileSelect={onFileSelect} resources={resources} onLibraryToggle={onLibraryToggle} /> : <AssistantMessage message={message} run={runs?.find((run) => run.assistant_message_id === message.id)} onRetry={onRetry} onFileSelect={onFileSelect} onFileDownload={onFileDownload} resources={resources} onLibraryToggle={onLibraryToggle} />}
+      {message.role === "user" ? <UserMessage message={message} onFileSelect={onFileSelect} resources={resources} onLibraryToggle={onLibraryToggle} onEdit={message.id.startsWith("user-pending") ? undefined : onEdit} /> : <AssistantMessage message={message} run={runs?.find((run) => run.assistant_message_id === message.id)} onRetry={onRetry} onBranch={onBranch} availableResources={availableResources} onFileSelect={onFileSelect} onFileDownload={onFileDownload} resources={resources} onLibraryToggle={onLibraryToggle} />}
     </article>)}
   </div>;
 });

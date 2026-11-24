@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 import logging
 import os
@@ -14,9 +15,16 @@ if TYPE_CHECKING:
     from agentic.engine.python_worker import WarmPythonWorker
 
 from agentic.agent.prompts import SYSTEM_PROMPT
-from agentic.runtime.diagnostics import GeminiRequests, diagnostic, gemini_diagnostic
+from agentic.runtime.diagnostics import GEMINI_HTTP_ATTEMPTS, GeminiRequests, diagnostic, gemini_diagnostic
 
 logger = logging.getLogger("agentic.performance")
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Google's 'high demand' (503), rate limit (429) and brief 500s succeed when repeated."""
+    return getattr(exc, "code", None) in (429, 500, 502, 503, 504)
+
+PARALLEL_SAFE_TOOLS = frozenset({"read_file", "list_files", "web_search"})
 
 GEMINI_TOOLS = [
     types.Tool(
@@ -255,9 +263,11 @@ class ReActAgent:
         config: types.GenerateContentConfig, max_turns: int,
         execute_tool: Callable[[str, dict], Awaitable[dict]],
         is_cancelled: Callable[[], bool] | None = None,
+        fallback_models: tuple[str, ...] = (),
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Run tool turns followed by a tool-free synthesis if the budget is exhausted."""
         final_answer = []
+        pending_fallbacks = list(fallback_models)
         start = time.perf_counter()
         first_response = True
         for turn in range(1, max_turns + 2):
@@ -281,37 +291,54 @@ class ReActAgent:
             seen_ids = set()
             model_parts = []
             requests = GeminiRequests()
-            try:
-                async for chunk in requests.stream(client, model=model, contents=contents, config=turn_config):
-                    if first_response:
-                        logger.info("gemini_first_response duration_ms=%.1f", (time.perf_counter() - start) * 1000)
-                        first_response = False
-                    if is_cancelled and is_cancelled():
-                        return
-                    if not chunk.candidates or not chunk.candidates[0].content:
-                        continue
-                    for part in chunk.candidates[0].content.parts or []:
-                        call = part.function_call
-                        if call is not None:
-                            if call.id and call.id in seen_ids:
-                                continue
-                            if call.id:
-                                seen_ids.add(call.id)
-                            calls.append(call)
-                        model_parts.append(part)
-                        if part.text and not part.thought:
-                            if not final_answer:
-                                logger.info("gemini_first_text duration_ms=%.1f", (time.perf_counter() - start) * 1000)
-                            final_answer.append(part.text)
-                            yield {"type": "delta", "content": part.text}
-            except Exception as exc:
-                error = gemini_diagnostic(
-                    exc, turn=turn, stage="final_synthesis" if synthesis else "model_generation",
-                    duration_ms=round((time.perf_counter() - model_started) * 1000), requests=requests.count,
-                )
-                logger.warning("gemini_generation_failed turn=%d code=%s", turn, error["code"])
-                yield {"type": "error", "content": error["message"], "diagnostic": error}
-                return
+            attempt = 0
+            while True:
+                requests_before_attempt = requests.count
+                try:
+                    async for chunk in requests.stream(client, model=model, contents=contents, config=turn_config):
+                        if first_response:
+                            logger.info("gemini_first_response duration_ms=%.1f", (time.perf_counter() - start) * 1000)
+                            first_response = False
+                        if is_cancelled and is_cancelled():
+                            return
+                        if not chunk.candidates or not chunk.candidates[0].content:
+                            continue
+                        for part in chunk.candidates[0].content.parts or []:
+                            call = part.function_call
+                            if call is not None:
+                                if call.id and call.id in seen_ids:
+                                    continue
+                                if call.id:
+                                    seen_ids.add(call.id)
+                                calls.append(call)
+                            model_parts.append(part)
+                            if part.text and not part.thought:
+                                if not final_answer:
+                                    logger.info("gemini_first_text duration_ms=%.1f", (time.perf_counter() - start) * 1000)
+                                final_answer.append(part.text)
+                                yield {"type": "delta", "content": part.text}
+                    break
+                except Exception as exc:
+                    if not model_parts and _is_transient(exc):
+                        if attempt < 2 and requests.count - requests_before_attempt < GEMINI_HTTP_ATTEMPTS:
+                            attempt += 1
+                            for _ in range(20 * attempt):
+                                if is_cancelled and is_cancelled():
+                                    return
+                                await asyncio.sleep(0.1)
+                            continue
+                        if pending_fallbacks and turn == 1:
+                            previous, model = model, pending_fallbacks.pop(0)
+                            attempt = 0
+                            yield {"type": "status", "content": f"{previous} is busy, switching to {model}…", "turn": turn}
+                            continue
+                    error = gemini_diagnostic(
+                        exc, turn=turn, stage="final_synthesis" if synthesis else "model_generation",
+                        duration_ms=round((time.perf_counter() - model_started) * 1000), requests=requests.count,
+                    )
+                    logger.warning("gemini_generation_failed turn=%d code=%s", turn, error["code"])
+                    yield {"type": "error", "content": error["message"], "diagnostic": error}
+                    return
             if (synthesis and calls) or (not calls and not any(part.text and not part.thought for part in model_parts)):
                 error = diagnostic(
                     "Agent" if synthesis else "Gemini API",
@@ -327,14 +354,33 @@ class ReActAgent:
                 break
             contents.append(types.Content(role="model", parts=model_parts))
             responses = []
-            for index, call in enumerate(calls, 1):
-                if is_cancelled and is_cancelled():
-                    return
-                name = str(call.name or "")
-                args = dict(call.args or {})
-                call_id = call.id or f"turn-{turn}-call-{index}"
-                yield {"type": "tool_call", "tool": name, "arguments": args, "tool_call_id": call_id, "turn": turn}
-                result = await execute_tool(name, args)
+            prepared_calls = [
+                (call, str(call.name or ""), dict(call.args or {}), call.id or f"turn-{turn}-call-{index}")
+                for index, call in enumerate(calls, 1)
+            ]
+            parallel = len(prepared_calls) > 1 and all(name in PARALLEL_SAFE_TOOLS for _, name, _, _ in prepared_calls)
+            results = []
+            if parallel:
+                for _, name, args, call_id in prepared_calls:
+                    if is_cancelled and is_cancelled():
+                        return
+                    yield {"type": "tool_call", "tool": name, "arguments": args, "tool_call_id": call_id, "turn": turn}
+                tasks = [asyncio.create_task(execute_tool(name, args)) for _, name, args, _ in prepared_calls]
+                try:
+                    results = await asyncio.gather(*tasks)
+                finally:
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+            for index, (call, name, args, call_id) in enumerate(prepared_calls):
+                if parallel:
+                    result = results[index]
+                else:
+                    if is_cancelled and is_cancelled():
+                        return
+                    yield {"type": "tool_call", "tool": name, "arguments": args, "tool_call_id": call_id, "turn": turn}
+                    result = await execute_tool(name, args)
                 yield {"type": "tool_result", "tool": name, "result": result, "tool_call_id": call_id, "turn": turn}
                 responses.append(types.Part(function_response=types.FunctionResponse(
                     name=name, id=call.id, response=result,

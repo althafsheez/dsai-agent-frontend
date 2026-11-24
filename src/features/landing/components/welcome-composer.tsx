@@ -24,9 +24,11 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { createChat, getModels, getWorkspaces, uploadResource, type PostgresConnection } from "@/lib/api";
+import { createChat, getModels, getWorkspaces, importDriveFiles, uploadResource, type PostgresConnection } from "@/lib/api";
 import { PostgresChips, PostgresSources } from "@/features/connectors/components/postgres-sources";
 import { PostgresSetup } from "@/features/connectors/components/postgres-setup";
+import type { DriveFileDto } from "@/lib/api";
+import { DriveBrowserDialog } from "@/features/connectors/components/drive-browser-dialog";
 import { cn } from "@/lib/utils";
 import { savePendingRun } from "@/features/chat/pending-run";
 
@@ -68,6 +70,8 @@ export function WelcomeComposer({ initialWorkspaceId = null }: { initialWorkspac
   const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
   const [postgresSelection, setPostgresSelection] = useState<PostgresConnection | null>(null);
   const [postgresDialog, setPostgresDialog] = useState<"select" | "setup" | null>(null);
+  const [driveOpen, setDriveOpen] = useState(false);
+  const [driveFiles, setDriveFiles] = useState<DriveFileDto[]>([]);
   const [workspaceId, setWorkspaceId] = useState<string | null>(initialWorkspaceId);
   const [modelId, setModelId] = useState("");
   const [effort, setEffort] = useState("");
@@ -192,6 +196,10 @@ export function WelcomeComposer({ initialWorkspaceId = null }: { initialWorkspac
           clientUploadId: attachment.id,
         });
       }
+      if (driveFiles.length) {
+        const imported = await importDriveFiles({ fileIds: driveFiles.map((file) => file.id), scopeType: "chat", scopeId: result.chat.id, messageId: result.message.id });
+        if (imported.failed.length) throw new Error(`Chat created, but ${imported.failed.length} Drive file(s) could not be imported: ${imported.failed[0].message}`);
+      }
       savePendingRun({
         chatId: result.chat.id,
         userMessageId: result.message.id,
@@ -208,6 +216,10 @@ export function WelcomeComposer({ initialWorkspaceId = null }: { initialWorkspac
 
   return <div className="w-full" ref={composerRef}>
     <div className="relative overflow-visible rounded-[14px] border border-border-strong bg-[#181a1d] shadow-[0_18px_55px_rgba(0,0,0,0.12)] transition-colors focus-within:border-ring">
+      {driveFiles.length > 0 && <div aria-label="Google Drive files" className="flex flex-wrap gap-2 px-3 pt-3">
+        {driveFiles.map((file) => <span key={file.id} className="inline-flex max-w-[240px] items-center gap-1.5 rounded-lg border bg-raised px-2 py-1.5 text-[11px]"><FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /><span className="truncate">{file.name}</span><span className="text-[10px] text-muted-foreground">Drive</span>
+          <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setDriveFiles((current) => current.filter((item) => item.id !== file.id))} className="ml-1 text-muted-foreground hover:text-foreground">×</button></span>)}
+      </div>}
       {attachments.length > 0 && <div aria-label="Selected attachments" className="flex gap-2 overflow-x-auto px-3 pt-3 sm:flex-wrap sm:overflow-visible">
         {attachments.map((attachment) => <div key={attachment.id} className="group relative flex min-w-[180px] max-w-[240px] items-center gap-2.5 rounded-lg border bg-raised p-2 pr-8">
           <div className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md border bg-surface text-[9px] font-medium text-muted-foreground">
@@ -266,6 +278,7 @@ export function WelcomeComposer({ initialWorkspaceId = null }: { initialWorkspac
             <button role="menuitem" type="button" onClick={() => { setOpenMenu(null); fileInputRef.current?.click(); }} className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs hover:bg-surface"><FilePlus2 className="size-4 text-muted-foreground" />Upload file</button>
             <button role="menuitem" type="button" onClick={() => { setOpenMenu(null); datasetInputRef.current?.click(); }} className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs hover:bg-surface"><Database className="size-4 text-muted-foreground" />Add dataset</button>
             <button role="menuitem" type="button" onClick={() => { setOpenMenu(null); setPostgresDialog("select"); }} className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs hover:bg-surface"><Link2 className="size-4 text-muted-foreground" />Data Sources</button>
+            <button role="menuitem" type="button" onClick={() => { setOpenMenu(null); setDriveOpen(true); }} className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs hover:bg-surface"><Link2 className="size-4 text-muted-foreground" />Google Drive<span className="ml-auto rounded-full border border-emerald-400/40 px-1.5 text-[9px] uppercase text-emerald-300">Import</span></button>
             <button role="menuitem" type="button" disabled className="flex w-full cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs text-muted-foreground opacity-60"><Sparkles className="size-4" />Add skill<span className="ml-auto text-[9px] uppercase">Soon</span></button>
           </div>}
         </div>
@@ -337,6 +350,8 @@ export function WelcomeComposer({ initialWorkspaceId = null }: { initialWorkspac
               ? <p role="alert" className="text-amber-200">{modelsQuery.data.configuration_status}</p>
         : <p id="composer-hint"><span className="hidden sm:inline">Enter to send · Shift + Enter for a new line</span><span className="sm:hidden">Add files, choose a workspace, then send</span></p>}
     </div>
+
+    <DriveBrowserDialog open={driveOpen} onOpenChange={setDriveOpen} onReauth={() => router.push("/connectors")} onPick={(files) => setDriveFiles((current) => [...current, ...files.filter((file) => !current.some((item) => item.id === file.id))])} />
 
     <div className="mt-3 flex flex-wrap justify-center gap-2">
       {suggestions.map(({ icon: Icon, label, prompt }) => <button key={label} type="button" onClick={() => { setDraft(prompt); setError(null); inputRef.current?.focus(); }}

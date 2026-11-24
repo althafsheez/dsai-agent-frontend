@@ -4,9 +4,9 @@ import json
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_current_user, get_db
@@ -29,11 +29,13 @@ def _require_context(session: Session, user: User, context_type: str, context_id
     raise APIError(422, "invalid_context", "Quick Assistant needs a chat or workspace context.")
 
 
-def _messages(session: Session, user: User, context_type: str, context_id: str) -> list[QuickMessage]:
+def _messages(session: Session, user: User, context_type: str, context_id: str, thread_id: str | None = None) -> list[QuickMessage]:
     _require_context(session, user, context_type, context_id)
+    query = select(QuickMessage).where(QuickMessage.context_type == context_type, QuickMessage.context_id == context_id, QuickMessage.user_id == user.id)
+    if thread_id is not None:
+        query = query.where(QuickMessage.thread_id == thread_id)
     return list(session.scalars(
-        select(QuickMessage)
-        .where(QuickMessage.context_type == context_type, QuickMessage.context_id == context_id, QuickMessage.user_id == user.id)
+        query
         .order_by(QuickMessage.position, QuickMessage.id)
     ))
 
@@ -122,7 +124,7 @@ async def _stream_answer(request: Request, user: User, data: QuickMessageCreate,
             assistant = session.get(QuickMessage, assistant_id)
             if assistant is None:
                 return
-            history = _messages(session, user, data.context_type, data.context_id)
+            history = _messages(session, user, data.context_type, data.context_id, data.thread_id)
             resources = _resource_context(session, user, data.context_type, data.context_id, chat)
             main_chat = _main_chat_context(session, chat, data.context_until_message_id)
             assistant.status = "running"
@@ -174,10 +176,29 @@ async def _stream_answer(request: Request, user: User, data: QuickMessageCreate,
 async def get_quick_messages(
     context_type: str,
     context_id: str,
+    thread_id: str | None = None,
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    return {"items": [QuickMessageResponse.model_validate(item) for item in _messages(session, user, context_type, context_id)], "next_cursor": None}
+    return {"items": [QuickMessageResponse.model_validate(item) for item in _messages(session, user, context_type, context_id, thread_id)], "next_cursor": None}
+
+
+@router.delete("/threads", status_code=204)
+async def delete_quick_thread(
+    context_type: str,
+    context_id: str,
+    thread_id: str,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Close one Quick Assistant conversation (tab) and remove its messages."""
+    _require_context(session, user, context_type, context_id)
+    session.execute(delete(QuickMessage).where(
+        QuickMessage.context_type == context_type, QuickMessage.context_id == context_id,
+        QuickMessage.user_id == user.id, QuickMessage.thread_id == thread_id,
+    ))
+    session.commit()
+    return Response(status_code=204)
 
 
 @router.post("/messages/stream")
@@ -206,8 +227,8 @@ async def stream_quick_message(
         QuickMessage.context_type == data.context_type, QuickMessage.context_id == data.context_id,
         QuickMessage.user_id == user.id,
     )) or 0) + 1
-    question = QuickMessage(context_type=data.context_type, context_id=data.context_id, user_id=user.id, role="user", content=data.content.strip(), status="completed", position=position, client_request_id=data.client_request_id)
-    answer = QuickMessage(context_type=data.context_type, context_id=data.context_id, user_id=user.id, role="assistant", content="", status="queued", position=position + 1, client_request_id=f"assistant:{data.client_request_id}")
+    question = QuickMessage(context_type=data.context_type, context_id=data.context_id, user_id=user.id, role="user", content=data.content.strip(), status="completed", position=position, client_request_id=data.client_request_id, thread_id=data.thread_id)
+    answer = QuickMessage(context_type=data.context_type, context_id=data.context_id, user_id=user.id, role="assistant", content="", status="queued", position=position + 1, client_request_id=f"assistant:{data.client_request_id}", thread_id=data.thread_id)
     session.add_all((question, answer))
     session.commit()
     return StreamingResponse(_stream_answer(request, user, data, answer.id), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

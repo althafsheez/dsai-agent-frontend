@@ -1,0 +1,13 @@
+employee_id,name,department,location,salary,years_experience
+E-101,Aarav Mehta,Engineering,Bengaluru,92000,6
+E-102,Isha Kapoor,Marketing,Mumbai,64000,4
+E-103,Rohan Das,Sales,Delhi,58000,3
+E-104,Meera Nair,Engineering,Bengaluru,105000,9
+E-105,Kabir Singh,Finance,Pune,71000,7
+E-106,Ananya Rao,Support,Chennai,45000,2
+E-107,Vikram Patel,Sales,Mumbai,62000,5
+E-108,Diya Sharma,Engineering,Hyderabad,98000,8
+E-109,Arjun Iyer,Marketing,Bengaluru,59000,3
+E-110,Sana Khan,Finance,Delhi,76000,10
+E-111,Neel Joshi,Support,Pune,47000,1
+E-112,Tara Menon,Engineering,Chennai,87000,5

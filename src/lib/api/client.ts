@@ -1,5 +1,13 @@
 import type {
   ApiList,
+  ConnectorStatusDto,
+  DriveFilesPage,
+  DashboardAiDataset,
+  DashboardAiResult,
+  DashboardCustomResult,
+  DatasetRelations,
+  DashboardAiWidget,
+  DriveImportResult,
   ChatDto,
   CreateChatResponse,
   ExecutionEvent,
@@ -89,10 +97,10 @@ export function getPostgresConnections(scope?: { chatId?: string; workspaceId?: 
   if (scope) params.set("for_analysis", "true");
   if (scope?.chatId) params.set("chat_id", scope.chatId);
   if (scope?.workspaceId) params.set("workspace_id", scope.workspaceId);
-  return requestJson(`/connectors${params.size ? `?${params}` : ""}`);
+  return requestJson(`/connectors/postgresql${params.size ? `?${params}` : ""}`);
 }
 
-const connectionPath = (id: string) => `/connectors/${encodeURIComponent(id)}`;
+const connectionPath = (id: string) => `/connectors/postgresql/${encodeURIComponent(id)}`;
 
 export function testPostgresConnection(input: PostgresConnectionInput, id?: string): Promise<{ schemas: PostgresSchemaList }> {
   return requestJson(id ? `${connectionPath(id)}/test` : "/connectors/postgresql/test", {
@@ -101,7 +109,7 @@ export function testPostgresConnection(input: PostgresConnectionInput, id?: stri
 }
 
 export function savePostgresConnection(input: PostgresConnectionInput, id?: string): Promise<PostgresConnection> {
-  return requestJson(id ? connectionPath(id) : "/connectors", {
+  return requestJson(id ? connectionPath(id) : "/connectors/postgresql", {
     method: id ? "PATCH" : "POST", body: JSON.stringify(input),
   });
 }
@@ -232,6 +240,21 @@ export function getActivity(): Promise<ApiList<ChatDto>> {
   return requestJson<ApiList<ChatDto>>("/chats/activity/list");
 }
 
+export function branchChat(chatId: string, messageId: string): Promise<ChatDto> {
+  return requestJson<ChatDto>(`/chats/${encodeURIComponent(chatId)}/branch`, {
+    method: "POST",
+    body: JSON.stringify({ message_id: messageId, client_request_id: crypto.randomUUID() }),
+  });
+}
+
+/** Rewrites a question and deletes every later turn; the caller then re-runs the question. */
+export function editChatMessage(chatId: string, messageId: string, content: string): Promise<MessageDto> {
+  return requestJson<MessageDto>(`/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ content }),
+  });
+}
+
 export function updateChat(chatId: string, input: { title?: string; workspace_id?: string | null; archived?: boolean; pinned?: boolean; is_unread?: boolean }): Promise<ChatDto> {
   return requestJson<ChatDto>(`/chats/${encodeURIComponent(chatId)}`, {
     method: "PATCH",
@@ -259,7 +282,7 @@ export async function deleteChat(chatId: string): Promise<void> {
 
 export async function uploadResource(input: {
   file: File;
-  scopeType: "chat" | "workspace";
+  scopeType: "chat" | "workspace" | "library";
   scopeId: string;
   messageId?: string;
   clientUploadId: string;
@@ -283,6 +306,12 @@ export function downloadWorkspaceDatasets(workspaceId: string, workspaceName: st
   return downloadResource(`/workspaces/${encodeURIComponent(workspaceId)}/datasets/download`, `${workspaceName}-datasets.zip`);
 }
 
+/** Zips the saved Library datasets; pass a workspace to download only that folder. */
+export function downloadLibraryDatasets(workspace?: { id: string; name: string }): Promise<void> {
+  const query = workspace ? `?workspace_id=${encodeURIComponent(workspace.id)}` : "";
+  return downloadResource(`/library/datasets/download${query}`, `${workspace?.name ?? "library"}-datasets.zip`);
+}
+
 export function getWorkspaceDatasets(workspaceId: string): Promise<ApiList<DatasetResource>> {
   return requestJson<ApiList<DatasetResource>>(`/datasets?workspace_id=${encodeURIComponent(workspaceId)}`);
 }
@@ -297,6 +326,8 @@ export type LibraryCategory = "dataset" | "visual" | "code" | "report" | "other"
 type LibraryFields = {
   library_category: LibraryCategory;
   library_created_at: string;
+  /** Added straight to the Library (local upload or Drive), not from any chat or workspace. */
+  uploaded_in_library?: boolean;
   /** The live workspace the file belongs to, directly or through a workspace chat; null for standalone chats. */
   workspace_id: string | null;
   workspace_name: string | null;
@@ -355,8 +386,14 @@ export function getMessages(chatId: string): Promise<ApiList<MessageDto>> {
   return requestJson<ApiList<MessageDto>>(`/chats/${encodeURIComponent(chatId)}/messages`);
 }
 
-export function getQuickAssistantMessages(contextType: "chat" | "workspace", contextId: string): Promise<ApiList<QuickMessageDto>> {
-  return requestJson<ApiList<QuickMessageDto>>(`/quick-assistant/messages?context_type=${contextType}&context_id=${encodeURIComponent(contextId)}`);
+export function getQuickAssistantMessages(contextType: "chat" | "workspace", contextId: string, threadId?: string): Promise<ApiList<QuickMessageDto>> {
+  const thread = threadId ? `&thread_id=${encodeURIComponent(threadId)}` : "";
+  return requestJson<ApiList<QuickMessageDto>>(`/quick-assistant/messages?context_type=${contextType}&context_id=${encodeURIComponent(contextId)}${thread}`);
+}
+
+export async function deleteQuickAssistantThread(contextType: "chat" | "workspace", contextId: string, threadId: string): Promise<void> {
+  const response = await fetch(`${API_ROOT}/quick-assistant/threads?context_type=${contextType}&context_id=${encodeURIComponent(contextId)}&thread_id=${encodeURIComponent(threadId)}`, { method: "DELETE", headers: requestHeaders() });
+  if (!response.ok) throw await apiError(response);
 }
 
 export function getChatRuns(chatId: string): Promise<ApiList<AgentRunDto>> {
@@ -541,6 +578,7 @@ export async function streamQuickAssistantMessage(
     effort?: string;
     client_request_id: string;
     context_until_message_id?: string;
+    thread_id?: string;
   },
   onEvent: (event: ExecutionEvent) => void,
   signal?: AbortSignal,
@@ -587,4 +625,202 @@ export async function resumeChatQueue(
   }
   parser.push(decoder.decode());
   parser.finish();
+}
+
+export function getConnectors(): Promise<{ items: ConnectorStatusDto[] }> {
+  return requestJson("/connectors/google-drive/status");
+}
+
+/** Returns the Google consent URL; the caller navigates the browser there. */
+export async function startGoogleDriveAuth(): Promise<string> {
+  const { authorization_url } = await requestJson<{ authorization_url: string }>("/connectors/google-drive/authorize", { method: "POST" });
+  return authorization_url;
+}
+
+export async function disconnectGoogleDrive(): Promise<void> {
+  const response = await fetch(`${API_ROOT}/connectors/google-drive`, { method: "DELETE", headers: requestHeaders() });
+  if (!response.ok) throw await apiError(response);
+}
+
+export function listDriveFiles(input: { folderId?: string | null; query?: string; pageToken?: string | null }): Promise<DriveFilesPage> {
+  const params = new URLSearchParams();
+  if (input.folderId) params.set("folder_id", input.folderId);
+  if (input.query) params.set("q", input.query);
+  if (input.pageToken) params.set("page_token", input.pageToken);
+  return requestJson(`/connectors/google-drive/files${params.size ? `?${params}` : ""}`);
+}
+
+export function importDriveFiles(input: { fileIds: string[]; scopeType: "chat" | "workspace" | "library"; scopeId: string; messageId?: string }): Promise<DriveImportResult> {
+  return requestJson("/connectors/google-drive/import", {
+    method: "POST",
+    body: JSON.stringify({ file_ids: input.fileIds, scope_type: input.scopeType, scope_id: input.scopeId, message_id: input.messageId }),
+  });
+}
+
+export function generateDashboardWithAi(input: { prompt: string; datasets: DashboardAiDataset[]; modelId: string; context?: string }): Promise<DashboardAiResult> {
+  return requestJson("/dashboards/ai/generate", {
+    method: "POST",
+    body: JSON.stringify({ prompt: input.prompt, datasets: input.datasets, model_id: input.modelId, context: input.context ?? "" }),
+  });
+}
+
+export function tuneDashboardWithAi(input: { instruction: string; widgets: DashboardAiWidget[]; slicers: string[]; name: string; datasets: DashboardAiDataset[]; modelId: string; context?: string }): Promise<DashboardAiResult> {
+  return requestJson("/dashboards/ai/tune", {
+    method: "POST",
+    body: JSON.stringify({ instruction: input.instruction, widgets: input.widgets, slicers: input.slicers, name: input.name, datasets: input.datasets, model_id: input.modelId, context: input.context ?? "" }),
+  });
+}
+
+/** A chart no preset covers: the AI writes a Python script, the server runs it, and the working tile comes back. */
+export function buildCustomChartWithAi(input: { request: string; title?: string; datasetIds: string[]; modelId: string }): Promise<{ widget: DashboardAiWidget; result: DashboardCustomResult }> {
+  return requestJson("/dashboards/ai/custom", {
+    method: "POST",
+    body: JSON.stringify({ request: input.request, title: input.title ?? "", dataset_ids: input.datasetIds, model_id: input.modelId }),
+  });
+}
+
+/** Runs a saved tile script on the current rows. */
+export async function runCustomChart(script: string, datasetIds: string[]): Promise<DashboardCustomResult> {
+  const body = await requestJson<{ result: DashboardCustomResult }>("/dashboards/custom/run", { method: "POST", body: JSON.stringify({ script, dataset_ids: datasetIds }) });
+  return body.result;
+}
+
+/** Where two or more datasets overlap, and where they disagree about the same quantity. */
+export function analyzeDatasets(datasetIds: string[]): Promise<DatasetRelations> {
+  return requestJson("/dashboards/ai/analyze", { method: "POST", body: JSON.stringify({ dataset_ids: datasetIds }) });
+}
+
+export function reviewDashboardWithAi(input: { widgets: DashboardAiWidget[]; datasets: DashboardAiDataset[]; modelId: string }): Promise<DashboardAiResult> {
+  return requestJson("/dashboards/ai/review", {
+    method: "POST",
+    body: JSON.stringify({ widgets: input.widgets, datasets: input.datasets, model_id: input.modelId }),
+  });
+}
+
+export interface DatasetRowsDto {
+  name: string;
+  columns: Array<{ name: string; data_type: string }>;
+  rows: Array<Array<string | number | boolean | null>>;
+  total_rows: number;
+  truncated: boolean;
+  /** When the data was last replaced (upload time, or the last Google Drive re-sync). */
+  refreshed_at?: string;
+  /** Changes whenever the data changes. */
+  version?: string;
+  /** True when the signed-in user can re-sync this dataset from Google Drive. */
+  syncable?: boolean;
+}
+
+/** Up to 6,000 rows of a CSV or XLSX dataset, for dashboards. */
+export function getDatasetRows(resourceId: string, limit = 6000): Promise<DatasetRowsDto> {
+  return requestJson(`/datasets/${encodeURIComponent(resourceId)}/rows?limit=${limit}`);
+}
+
+/** One widget of the listing card, in the dashboard's own order, type and width. */
+export interface PreviewTileDto {
+  type: string; title: string; span: 1 | 2 | 3;
+  value?: string; max?: string; ratio?: number;
+  labels?: string[]; series?: number[]; points?: Array<[number, number]>;
+  columns?: string[]; rows?: string[][];
+}
+export interface DashboardPreviewDto { tiles: PreviewTileDto[]; total: number }
+export interface DashboardShareDto { user_id: string; role: "viewer" | "editor"; name?: string }
+export interface DashboardRecordDto {
+  id: string; name: string; description: string; status: "draft" | "published"; pinned: boolean;
+  slicers: string[]; dataset_ids: string[]; widgets: unknown[]; owner: string; ownership: "owned" | "shared"; created_at: string; updated_at: string;
+  role: "owner" | "editor" | "viewer"; refresh_minutes: number;
+  /** The first KPI and a small version of the first chart, computed by the backend when the dashboard is saved. */
+  preview?: DashboardPreviewDto;
+  /** Google Drive files feeding this dashboard; the server re-downloads them when the dashboard has automatic refresh on. */
+  sources?: Array<{ name: string; provider: "google-drive"; refreshed_at: string | null; error: string | null }>;
+  /** Only sent to the owner. */
+  shares?: DashboardShareDto[];
+}
+export type DashboardSaveBody = Pick<DashboardRecordDto, "name" | "description" | "status" | "slicers" | "dataset_ids" | "widgets"> & { pinned?: boolean; id?: string; refresh_minutes?: number; shares?: DashboardShareDto[] };
+
+export interface DashboardPersonDto { id: string; name: string; initials: string }
+export async function listDashboardPeople(): Promise<DashboardPersonDto[]> {
+  return (await requestJson<{ items: DashboardPersonDto[] }>("/dashboards/people")).items;
+}
+/** Re-downloads a Google Drive dataset; resolves with "unchanged" when the file did not change. */
+export function syncDatasetFromDrive(resourceId: string): Promise<{ status: "updated" | "unchanged"; refreshed_at: string }> {
+  return requestJson(`/datasets/${encodeURIComponent(resourceId)}/sync`, { method: "POST" });
+}
+
+export async function listDashboardRecords(): Promise<DashboardRecordDto[]> {
+  return (await requestJson<{ items: DashboardRecordDto[] }>("/dashboards")).items;
+}
+export function getDashboardRecord(id: string): Promise<DashboardRecordDto> {
+  return requestJson(`/dashboards/${encodeURIComponent(id)}`);
+}
+export function saveDashboardRecord(body: DashboardSaveBody): Promise<DashboardRecordDto> {
+  return requestJson("/dashboards", { method: "PUT", body: JSON.stringify(body) });
+}
+export function pinDashboardRecord(id: string, pinned: boolean): Promise<DashboardRecordDto> {
+  return requestJson(`/dashboards/${encodeURIComponent(id)}/pin`, { method: "PUT", body: JSON.stringify({ pinned }) });
+}
+export async function deleteDashboardRecord(id: string): Promise<void> {
+  const response = await fetch(`${API_ROOT}/dashboards/${encodeURIComponent(id)}`, { method: "DELETE", headers: requestHeaders() });
+  if (!response.ok) throw await apiError(response);
+}
+
+export type WorkflowStepKind = "data" | "script" | "ai" | "condition" | "notify";
+export interface WorkflowStepDto { id: string; kind: WorkflowStepKind | string; title: string; detail: string; config?: Record<string, unknown> }
+export interface WorkflowTriggerDto { kind: "manual" | "schedule"; config?: { frequency?: string; time?: string; day?: string; day_of_month?: string | number } }
+export interface WorkflowRecordDto {
+  id: string; name: string; description: string; prompt: string; state: "active" | "inactive" | "draft";
+  trigger: WorkflowTriggerDto; steps: WorkflowStepDto[]; schedule: string;
+  next_run_at: string | null; last_run_at: string | null; created_at: string; updated_at: string;
+}
+export type WorkflowSaveBody = Pick<WorkflowRecordDto, "name" | "description" | "prompt" | "state" | "trigger" | "steps"> & { id?: string };
+export type WorkflowStepStatus = "pending" | "running" | "success" | "failed" | "skipped" | "cancelled";
+export interface WorkflowStepResultDto {
+  step_id: string; title: string; kind: string; status: WorkflowStepStatus; input: unknown; output: unknown;
+  logs: string[]; error: string; started_at: string | null; finished_at: string | null;
+}
+export interface WorkflowRunRecordDto {
+  id: string; workflow_id: string; workflow_name: string; trigger: "manual" | "schedule";
+  status: "running" | "success" | "failed" | "cancelled"; results: WorkflowStepResultDto[]; error: string;
+  started_at: string; finished_at: string | null; cancelled_at: string | null;
+}
+
+export async function listWorkflowRecords(): Promise<WorkflowRecordDto[]> {
+  return (await requestJson<{ items: WorkflowRecordDto[] }>("/workflow-store")).items;
+}
+export function getWorkflowRecord(id: string): Promise<WorkflowRecordDto> {
+  return requestJson(`/workflow-store/${encodeURIComponent(id)}`);
+}
+export function saveWorkflowRecord(body: WorkflowSaveBody): Promise<WorkflowRecordDto> {
+  return requestJson("/workflow-store", { method: "PUT", body: JSON.stringify(body) });
+}
+export function setWorkflowRecordState(id: string, state: WorkflowRecordDto["state"]): Promise<WorkflowRecordDto> {
+  return requestJson(`/workflow-store/${encodeURIComponent(id)}/state`, { method: "PUT", body: JSON.stringify({ state }) });
+}
+export async function deleteWorkflowRecord(id: string): Promise<void> {
+  const response = await fetch(`${API_ROOT}/workflow-store/${encodeURIComponent(id)}`, { method: "DELETE", headers: requestHeaders() });
+  if (!response.ok) throw await apiError(response);
+}
+export async function listWorkflowRunRecords(workflowId?: string): Promise<WorkflowRunRecordDto[]> {
+  const query = workflowId ? `?workflow_id=${encodeURIComponent(workflowId)}` : "";
+  return (await requestJson<{ items: WorkflowRunRecordDto[] }>(`/workflow-store/runs${query}`)).items;
+}
+export function getWorkflowRunRecord(id: string): Promise<WorkflowRunRecordDto> {
+  return requestJson(`/workflow-store/runs/${encodeURIComponent(id)}`);
+}
+export function runWorkflowNow(id: string): Promise<WorkflowRunRecordDto> {
+  return requestJson(`/workflow-store/${encodeURIComponent(id)}/run`, { method: "POST" });
+}
+export function cancelWorkflowRunRecord(id: string): Promise<WorkflowRunRecordDto> {
+  return requestJson(`/workflow-store/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+}
+export interface WorkflowAiBody { prompt?: string; datasetIds: string[]; steps?: WorkflowStepDto[]; modelId: string }
+const aiBody = (body: WorkflowAiBody) => JSON.stringify({ prompt: body.prompt ?? "", dataset_ids: body.datasetIds, steps: body.steps ?? [], model_id: body.modelId });
+export async function rephraseWorkflowPrompt(body: WorkflowAiBody): Promise<string> {
+  return (await requestJson<{ prompt: string }>("/workflow-store/ai/rephrase", { method: "POST", body: aiBody(body) })).prompt;
+}
+export function planWorkflowWithAi(body: WorkflowAiBody): Promise<{ name: string; description: string; prompt: string; steps: WorkflowStepDto[] }> {
+  return requestJson("/workflow-store/ai/plan", { method: "POST", body: aiBody(body) });
+}
+export function buildWorkflowScripts(body: WorkflowAiBody): Promise<{ steps: WorkflowStepDto[]; notes: string[] }> {
+  return requestJson("/workflow-store/ai/build", { method: "POST", body: aiBody(body) });
 }

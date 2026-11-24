@@ -1,163 +1,168 @@
 from __future__ import annotations
 
-from typing import Annotated
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Query, Request, Response
-from sqlalchemy import or_
+import httpx
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi.responses import RedirectResponse, Response
+from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..connectors.schemas import (
-    ConnectionCreate, ConnectionID, ConnectionList, ConnectionResponse, ConnectionTest,
-    ConnectionUpdate, Identifier, PostgresSettings, QueryRequest, QueryResult, SchemaList, TableDetails, TableList,
-)
-from ..connectors.service import ConnectionService, owned_connections, require_connection, require_workspace_owner
-from ..connectors.security import require_local_postgres
 from ..dependencies import get_current_user, get_db
 from ..errors import APIError
-from ..models import DataConnection, User, utc_now
-from ..services.records import require_chat
+from ..models import LibraryEntry, Message, ResourceLink, Resource, User
+from ..services import dashboard_sync, google_drive as drive
+from ..services.records import require_chat, require_workspace
+from ..services.dataset_preview import inspect_dataset
+from ..services.resource_uploads import register_upload, store_file_object
+from .resources import _summary
 
-router = APIRouter(tags=["connectors"])
-
-DB = Annotated[Session, Depends(get_db)]
-
-async def local_owner(request: Request, user: Annotated[User, Depends(get_current_user)]) -> User:
-    require_local_postgres(request.app.state.settings, user.id)
-    return user
+router = APIRouter(prefix="/api/connectors", tags=["connectors"])
 
 
-Actor = Annotated[User, Depends(local_owner)]
+def _http(request: Request) -> httpx.AsyncClient:
+    return request.app.state.connector_http
 
 
-def service(request: Request) -> ConnectionService:
-    return request.app.state.connections
+@router.get("/google-drive/status")
+def list_connectors(request: Request, session: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    connection = drive.get_connection(session, user.id)
+    configured = request.app.state.settings.google_drive_configured
+    return {"items": [{
+        "id": drive.PROVIDER,
+        "status": "connected" if connection else ("disconnected" if configured else "unavailable"),
+        "configured": configured,
+        "account_email": connection.account_email if connection else None,
+        "connected_at": connection.created_at if connection else None,
+    }]}
 
 
-Connections = Annotated[ConnectionService, Depends(service)]
+@router.post("/google-drive/authorize")
+def authorize(request: Request, user: User = Depends(get_current_user)) -> dict:
+    return {"authorization_url": drive.authorization_url(request.app.state.settings, user.id)}
 
 
-@router.post("/api/connectors/postgresql/test", response_model=ConnectionTest)
-async def test_postgres(data: PostgresSettings, user: Actor, db: DB, connections: Connections) -> ConnectionTest:
-    connections.check_configuration()
-    if data.workspace_id:
-        require_workspace_owner(db, user, data.workspace_id)
-    return ConnectionTest(schemas=await connections.perform(data, lambda adapter: adapter.test_connection()))
+@router.get("/google-drive/callback", include_in_schema=False)
+async def callback(
+    request: Request, code: str | None = None, state: str | None = None, error: str | None = None,
+    session: Session = Depends(get_db),
+) -> RedirectResponse:
+    """Google redirects the browser here. The user is identified by the signed state, not a header."""
+    settings = request.app.state.settings
 
+    def back(**params: str) -> RedirectResponse:
+        return RedirectResponse(f"{settings.frontend_url.rstrip('/')}/connectors?{urlencode(params)}", status_code=303)
 
-@router.post("/api/connectors", response_model=ConnectionResponse, status_code=201)
-async def create(data: ConnectionCreate, user: Actor, db: DB, connections: Connections) -> ConnectionResponse:
-    connections.check_configuration()
-    if data.workspace_id:
-        require_workspace_owner(db, user, data.workspace_id)
-    await connections.perform(data, lambda adapter: adapter.test_connection())
-    return connections.response(connections.save(db, user, data), user)
-
-
-@router.get("/api/connectors", response_model=ConnectionList)
-async def list_connections(
-    user: Actor, db: DB, connections: Connections,
-    chat_id: str | None = Query(default=None, max_length=36),
-    workspace_id: str | None = Query(default=None, max_length=36),
-    for_analysis: bool = False,
-) -> ConnectionList:
-    query = owned_connections(db, user)
-    if chat_id:
-        workspace_id = require_chat(db, user, chat_id).workspace_id
-    elif workspace_id:
-        require_workspace_owner(db, user, workspace_id)
-    if for_analysis or chat_id or workspace_id:
-        query = query.where(
-            or_(DataConnection.workspace_id.is_(None), DataConnection.workspace_id == workspace_id),
-            DataConnection.include_schema_for_ai.is_(True),
-        )
-    return ConnectionList(items=[
-        connections.response(item, user)
-        for item in db.scalars(query.order_by(DataConnection.name, DataConnection.id))
-    ])
-
-
-@router.get("/api/connectors/{connection_id}", response_model=ConnectionResponse)
-async def detail(connection_id: ConnectionID, user: Actor, db: DB, connections: Connections) -> ConnectionResponse:
-    return connections.response(require_connection(db, user, connection_id), user)
-
-
-@router.post("/api/connectors/{connection_id}/test", response_model=ConnectionTest)
-async def test_saved(connection_id: ConnectionID, data: ConnectionUpdate, user: Actor, db: DB, connections: Connections) -> ConnectionTest:
-    record = require_connection(db, user, connection_id)
-    config = connections.merge(record, data)
-    if config.workspace_id:
-        require_workspace_owner(db, user, config.workspace_id)
-    return ConnectionTest(schemas=await connections.perform(config, lambda adapter: adapter.test_connection()))
-
-
-@router.patch("/api/connectors/{connection_id}", response_model=ConnectionResponse)
-async def update(connection_id: ConnectionID, data: ConnectionUpdate, user: Actor, db: DB, connections: Connections) -> ConnectionResponse:
-    record = require_connection(db, user, connection_id)
-    config = connections.merge(record, data)
-    if config.workspace_id:
-        require_workspace_owner(db, user, config.workspace_id)
-    await connections.perform(config, lambda adapter: adapter.test_connection())
-    return connections.response(connections.save(db, user, config, record), user)
-
-
-@router.delete("/api/connectors/{connection_id}", status_code=204)
-async def disconnect(connection_id: ConnectionID, user: Actor, db: DB) -> Response:
-    db.delete(require_connection(db, user, connection_id))
-    db.commit()
-    return Response(status_code=204)
-
-
-@router.get("/api/connectors/{connection_id}/schemas", response_model=SchemaList)
-async def schemas(connection_id: ConnectionID, user: Actor, db: DB, connections: Connections) -> SchemaList:
-    config = connections.credentials(require_connection(db, user, connection_id))
-    return await connections.perform(config, lambda adapter: adapter.list_schemas())
-
-
-@router.get("/api/connectors/{connection_id}/tables", response_model=TableList)
-async def tables(
-    connection_id: ConnectionID, user: Actor, db: DB, connections: Connections,
-    schema: Identifier | None = None, search: str = Query(default="", max_length=63),
-) -> TableList:
-    config = connections.credentials(require_connection(db, user, connection_id))
-    return await connections.perform(config, lambda adapter: adapter.list_tables(schema, search))
-
-
-@router.get("/api/connectors/{connection_id}/tables/{schema}/{table}", response_model=TableDetails)
-async def table_details(
-    connection_id: ConnectionID, schema: Identifier, table: Identifier, user: Actor, db: DB, connections: Connections,
-    preview: bool = False, limit: int = Query(default=20, ge=1, le=100),
-) -> TableDetails:
-    config = connections.credentials(require_connection(db, user, connection_id))
-    if preview and not config.enable_previews:
-        raise APIError(403, "postgres_preview_disabled", "Row previews are disabled for this connection.")
-
-    def load(adapter):
-        result = adapter.describe_table(schema, table)
-        if preview:
-            result.preview = adapter.preview_table(schema, table, limit)
-        return result
-
-    return await connections.perform(config, load)
-
-
-@router.post("/api/connectors/{connection_id}/refresh-schema", response_model=SchemaList)
-async def refresh_schema(connection_id: ConnectionID, user: Actor, db: DB, connections: Connections) -> SchemaList:
-    record = require_connection(db, user, connection_id)
-    config = connections.credentials(record)
+    if error or not code or not state:
+        return back(error="access_denied" if error == "access_denied" else "connection_failed")
     try:
-        result = await connections.perform(config, lambda adapter: adapter.list_schemas())
-    except APIError:
-        record.status = "failed"
-        record.last_tested_at = utc_now()
-        db.commit()
-        raise
-    record.status = "connected"
-    record.last_tested_at = utc_now()
-    db.commit()
-    return result
+        user_id = drive.verify_state(settings, state)
+        await drive.complete_authorization(session, settings, _http(request), user_id=user_id, code=code)
+    except APIError as exc:
+        return back(error=exc.code)
+    return back(connected=drive.PROVIDER)
 
 
-@router.post("/api/connectors/{connection_id}/query", response_model=QueryResult)
-async def run_query(connection_id: ConnectionID, data: QueryRequest, user: Actor, db: DB, connections: Connections) -> QueryResult:
-    config = connections.credentials(require_connection(db, user, connection_id))
-    return await connections.perform(config, lambda adapter: adapter.execute_readonly_query(data.sql, data.limit))
+@router.delete("/google-drive", status_code=status.HTTP_204_NO_CONTENT)
+async def disconnect(request: Request, session: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Response:
+    connection = drive.get_connection(session, user.id)
+    if connection is not None:
+        await drive.disconnect(session, request.app.state.settings, _http(request), connection)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/google-drive/files")
+async def list_drive_files(
+    request: Request,
+    folder_id: str | None = Query(default=None, max_length=200),
+    q: str | None = Query(default=None, max_length=200),
+    page_token: str | None = Query(default=None, max_length=2000),
+    session: Session = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict:
+    settings = request.app.state.settings
+    connection = drive.require_connection(session, user.id)
+    token = await drive.access_token(session, settings, _http(request), connection)
+    return await drive.list_files(_http(request), token, folder_id=folder_id, query=q or None, page_token=page_token)
+
+
+class ImportRequest(BaseModel):
+    file_ids: list[str] = Field(min_length=1, max_length=10)
+    scope_type: str
+    scope_id: str
+    message_id: str | None = None
+
+
+@router.post("/google-drive/import")
+async def import_drive_files(
+    payload: ImportRequest, request: Request,
+    session: Session = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict:
+    if payload.message_id is not None and payload.scope_type != "chat":
+        raise APIError(422, "invalid_message", "Only chat imports can reference a message.")
+    if payload.scope_type == "chat":
+        require_chat(session, user, payload.scope_id)
+        if payload.message_id is not None:
+            message = session.get(Message, payload.message_id)
+            if message is None or message.chat_id != payload.scope_id or message.role != "user":
+                raise APIError(422, "invalid_message", "Import message does not belong to this chat.")
+    elif payload.scope_type == "workspace":
+        require_workspace(session, user, payload.scope_id)
+    elif payload.scope_type == "library":
+        payload.scope_id = user.id
+    else:
+        raise APIError(422, "invalid_scope", "Resource scope must be chat, workspace or library.")
+    settings = request.app.state.settings
+    client = _http(request)
+    connection = drive.require_connection(session, user.id)
+    token = await drive.access_token(session, settings, client, connection)
+    imported: list[dict] = []
+    failed: list[dict] = []
+    for file_id in dict.fromkeys(payload.file_ids):
+        upload_id = f"gdrive:{file_id}"
+        existing = session.scalar(select(ResourceLink).where(
+            ResourceLink.scope_type == payload.scope_type, ResourceLink.scope_id == payload.scope_id,
+            ResourceLink.client_upload_id == upload_id))
+        existing_resource = session.get(Resource, existing.resource_id) if existing else None
+        if existing_resource is not None:
+            imported.append({"file_id": file_id, "resource": _summary(existing_resource), "already_imported": True})
+            continue
+        try:
+            filename, content_type, content, extra = await drive.download_file(client, token, file_id)
+            resource, _ = register_upload(
+                session, request.app.state.storage, (filename, content_type, content),
+                user_id=user.id, scope_type=payload.scope_type, scope_id=payload.scope_id,
+                message_id=payload.message_id, client_upload_id=upload_id,
+            )
+            resource.metadata_json = {**resource.metadata_json, "source_connector": drive.PROVIDER, **extra}
+            if payload.scope_type == "library":
+                session.add(LibraryEntry(user_id=user.id, resource_id=resource.id))
+            session.commit()
+            session.refresh(resource)
+            imported.append({"file_id": file_id, "resource": _summary(resource), "already_imported": False})
+        except APIError as exc:
+            session.rollback()
+            if exc.code == "connector_reauth_required":
+                raise
+            failed.append({"file_id": file_id, "code": exc.code, "message": exc.message})
+    return {"imported": imported, "failed": failed}
+
+
+sync_router = APIRouter(prefix="/api/datasets", tags=["connectors"])
+
+
+@sync_router.post("/{resource_id}/sync")
+async def sync_dataset_from_drive(
+    resource_id: str, request: Request,
+    session: Session = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict:
+    """Re-download a Google Drive dataset. The resource id stays the same, so dashboards built on it show the new data."""
+    resource = session.scalar(select(Resource).where(Resource.id == resource_id, Resource.created_by == user.id))
+    metadata = dict(resource.metadata_json or {}) if resource else {}
+    if resource is None or resource.resource_type != "dataset" or metadata.get("source_connector") != drive.PROVIDER or not metadata.get("drive_file_id"):
+        raise APIError(422, "not_syncable", "Only datasets imported from Google Drive can be re-synced.")
+    outcome = await dashboard_sync.sync_resource(session, request.app.state.settings, _http(request), request.app.state.storage, resource)
+    refresh = dashboard_sync.refresh_previews(session, request.app.state.storage, resource.id) if outcome == "updated" else 0
+    return {"status": outcome, "refreshed_at": resource.metadata_json["refreshed_at"], "dashboards_updated": refresh}

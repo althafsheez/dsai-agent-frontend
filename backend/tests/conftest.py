@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+
+os.environ.setdefault("DSAI_IMPORT_SHARED_DATA", "false")
 
 from app.config import Settings
 from app.main import create_app
@@ -46,6 +49,13 @@ class FakeProvider:
             yield chunk
 
 
+@pytest.fixture(autouse=True)
+def isolate_local_settings(monkeypatch):
+    # Keep developer credentials and the shared snapshot out of isolated tests.
+    monkeypatch.setenv("DSAI_CONNECTOR_ENCRYPTION_KEY", "")
+    monkeypatch.setenv("DSAI_IMPORT_SHARED_DATA", "false")
+
+
 @pytest.fixture
 def provider() -> FakeProvider:
     return FakeProvider()
@@ -57,6 +67,8 @@ async def client(tmp_path, provider: FakeProvider) -> AsyncIterator[AsyncClient]
         database_url=f"sqlite:///{tmp_path / 'test.db'}",
         storage_root=tmp_path / "storage",
         auto_create_schema=True,
+        dashboard_sync_seconds=0,
+        workflow_tick_seconds=0,
         cors_origins=["http://localhost:3000"],
     )
     app = create_app(settings=settings, provider=provider)

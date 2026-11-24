@@ -56,3 +56,31 @@ async def test_quick_assistant_drops_questions_whose_answer_failed(client, demo_
     assert (await client.post("/api/quick-assistant/messages/stream", headers=demo_headers, json=body)).status_code == 200
     turns = provider.calls[-1][0]
     assert [turn.content for turn in turns[1:]] == ["Second question"]
+
+
+async def test_quick_assistant_threads_are_independent(client, demo_headers, provider: FakeProvider):
+    created = await create_chat(client, demo_headers)
+    chat_id = created["chat"]["id"]
+    for request_id, thread in (("t-main", "main"), ("t-two", "tab-2")):
+        body = {
+            "context_type": "chat", "context_id": chat_id, "content": f"question for {thread}",
+            "model_id": "gemini-test", "effort": "medium", "client_request_id": request_id, "thread_id": thread,
+        }
+        response = await client.post("/api/quick-assistant/messages/stream", headers=demo_headers, json=body)
+        assert response.status_code == 200, response.text
+    # The second tab's request must not carry the first tab's question as history.
+    sent = [turn.content for turn in provider.calls[-1][0][1:]]
+    assert "question for main" not in sent
+    for thread, expected in (("main", "question for main"), ("tab-2", "question for tab-2")):
+        listed = await client.get(
+            "/api/quick-assistant/messages", headers=demo_headers,
+            params={"context_type": "chat", "context_id": chat_id, "thread_id": thread},
+        )
+        contents = [item["content"] for item in listed.json()["items"] if item["role"] == "user"]
+        assert contents == [expected]
+
+    params = {"context_type": "chat", "context_id": chat_id, "thread_id": "tab-2"}
+    assert (await client.delete("/api/quick-assistant/threads", headers=demo_headers, params=params)).status_code == 204
+    assert (await client.get("/api/quick-assistant/messages", headers=demo_headers, params=params)).json()["items"] == []
+    kept = await client.get("/api/quick-assistant/messages", headers=demo_headers, params={**params, "thread_id": "main"})
+    assert len(kept.json()["items"]) == 2

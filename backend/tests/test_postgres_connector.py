@@ -229,7 +229,7 @@ async def client_for(app, *, peer="127.0.0.1"):
 
 
 async def create_connection(client, headers, form):
-    response = await client.post("/api/connectors", headers=headers, json=form)
+    response = await client.post("/api/connectors/postgresql", headers=headers, json=form)
     assert response.status_code == 201, response.text
     payload = response.json()
     assert "password" not in payload and "encrypted_credentials" not in payload
@@ -275,25 +275,25 @@ async def test_demo_postgres_is_local_only(tmp_path):
     )
     app = create_app(settings, FakeProvider())
     async with client_for(app) as client:
-        assert (await client.get("/api/connectors")).json() == {"items": []}
-        assert (await client.get("/api/connectors", headers={"X-Demo-User-Id": "user-shared"})).status_code == 403
+        assert (await client.get("/api/connectors/postgresql")).json() == {"items": []}
+        assert (await client.get("/api/connectors/postgresql", headers={"X-Demo-User-Id": "user-shared"})).status_code == 403
         assert (await client.get("/api/auth/verified")).status_code == 404
         local_forwarding = {"X-Forwarded-Host": "localhost:3100", "X-Forwarded-For": "127.0.0.1"}
-        assert (await client.get("/api/connectors", headers=local_forwarding)).status_code == 200
+        assert (await client.get("/api/connectors/postgresql", headers=local_forwarding)).status_code == 200
         for headers in (
             {"Host": "public.example.test"},
             {"Origin": "https://public.example.test"},
             {"X-Forwarded-For": "203.0.113.2, 127.0.0.1"},
             {"X-Forwarded-Host": "public.example.test"},
         ):
-            assert (await client.get("/api/connectors", headers=headers)).status_code == 403
+            assert (await client.get("/api/connectors/postgresql", headers=headers)).status_code == 403
             assert (await client.post("/api/runs/example/retry/stream", headers=headers)).status_code == 403
     async with client_for(app, peer="203.0.113.2") as client:
-        assert (await client.get("/api/connectors")).status_code == 403
+        assert (await client.get("/api/connectors/postgresql")).status_code == 403
         assert (await client.get("/api/chats")).status_code == 403
     production = create_app(settings.model_copy(update={"environment": "production"}), FakeProvider())
     async with client_for(production) as client:
-        assert (await client.get("/api/connectors")).status_code == 403
+        assert (await client.get("/api/connectors/postgresql")).status_code == 403
         assert (await client.get("/api/chats")).status_code == 200
 
 
@@ -320,10 +320,10 @@ async def test_real_postgres_connection_to_chat(tmp_path, postgres):
             assert form["password"] not in saved.encrypted_credentials
             assert saved.encrypted_credentials.startswith("gAAAA")
             assert saved.created_by == "user-you"
-        assert (await client.get(f"/api/connectors/{connection_id}", headers=other)).status_code == 403
+        assert (await client.get(f"/api/connectors/postgresql/{connection_id}", headers=other)).status_code == 403
 
     async with client_for(create_app(settings, provider)) as client:
-        path = f"/api/connectors/{connection_id}"
+        path = f"/api/connectors/postgresql/{connection_id}"
         reload = await client.get(path, headers=owner)
         assert reload.json()["name"] == form["name"]
         visible = await client.get(f"{path}/schemas", headers=owner)
@@ -397,9 +397,9 @@ async def test_real_postgres_connection_to_chat(tmp_path, postgres):
 
         workspace = (await client.post("/api/workspaces", headers=owner, json={"name": "Sales workspace"})).json()
         workspace_connection = await create_connection(client, owner, {**form, "workspace_id": workspace["id"]})
-        standalone = await client.get("/api/connectors", headers=owner, params={"for_analysis": True})
+        standalone = await client.get("/api/connectors/postgresql", headers=owner, params={"for_analysis": True})
         assert [item["id"] for item in standalone.json()["items"]] == [connection_id]
-        permitted = await client.get("/api/connectors", headers=owner, params={"for_analysis": True, "workspace_id": workspace["id"]})
+        permitted = await client.get("/api/connectors/postgresql", headers=owner, params={"for_analysis": True, "workspace_id": workspace["id"]})
         assert {item["id"] for item in permitted.json()["items"]} == {connection_id, workspace_connection}
         wrong_scope = await client.post(f"/api/chats/{chat}/messages", headers=owner, json={
             "content": "Attempt outside the saved workspace",

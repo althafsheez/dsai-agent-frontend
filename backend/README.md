@@ -103,3 +103,22 @@ backend/.venv/bin/python -m pytest -m live backend/tests/test_postgres_connector
 
 For the optional browser check, seed a permitted `orders` table with an integer primary key and a `total` column containing 61 and 112. Configure the local backend for the test reader and TLS certificate as above. Set `DSAI_TEST_BROWSER_POSTGRES_FORM` to a JSON object containing `host`, `port`, `database`, `username`, `password`, and `schema`. Run `npm run test:e2e -- tests/e2e/postgres.spec.ts`. The browser test uses real services and leaves Playwright tracing off so the test credentials do not enter trace artifacts.
 The browser check verifies connection creation, table access, source attachment, and disconnection. Set `DSAI_TEST_BROWSER_LIVE_AGENT=1` to also require Gemini to complete the live query and final answer.
+
+## Shared data (history, files, dashboards)
+
+`shared-data/` holds a snapshot of the database rows (`snapshot.json`) and stored files (`files/`), so everyone who
+clones the repo starts with the same workspaces, chats, datasets, Library and dashboards. A fresh database loads it
+automatically on first start (disable with `DSAI_IMPORT_SHARED_DATA=false`). Connector tokens are never exported.
+
+Run from the repo root:
+
+```bash
+backend/.venv/bin/python -m app.snapshot export   # refresh shared-data/ from your local data, then commit it
+backend/.venv/bin/python -m app.snapshot import   # add missing rows/files from shared-data/ to your local data
+```
+
+Run these with `PYTHONPATH=backend` from the repo root so the relative `.env` paths resolve to the same database the server uses.
+
+## Connector routes after the merge
+
+Saved PostgreSQL connections are managed at `/api/connectors/postgresql`. Google Drive status is at `/api/connectors/google-drive/status`; the OAuth callback URL stays the same. Keep each connector's key stable. SQLite upgrades converge at Alembic revision `20261124_0019` from either branch and keep the existing credential tables. Shared snapshots exclude both connection tables and per-message connection IDs.

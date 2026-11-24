@@ -1,0 +1,6 @@
+customer,segment,orders,spend
+Acme,Enterprise,14,5400
+Beta,SMB,6,900
+Gamma,SMB,9,1300
+Delta,Enterprise,21,8800
+Epsilon,Startup,3,450

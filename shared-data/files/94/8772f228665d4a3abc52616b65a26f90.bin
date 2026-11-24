@@ -1,0 +1,13 @@
+date,channel,device,sessions,signups,bounce_rate
+2026-10-01,Organic,Desktop,1240,62,0.41
+2026-10-01,Paid,Mobile,860,41,0.52
+2026-10-01,Email,Desktop,410,38,0.27
+2026-10-02,Organic,Mobile,1510,55,0.47
+2026-10-02,Social,Mobile,720,19,0.61
+2026-10-02,Paid,Desktop,640,33,0.44
+2026-10-03,Organic,Desktop,1320,70,0.39
+2026-10-03,Email,Mobile,380,29,0.31
+2026-10-03,Social,Desktop,450,14,0.58
+2026-10-04,Paid,Mobile,910,47,0.50
+2026-10-04,Organic,Mobile,1480,58,0.45
+2026-10-04,Email,Desktop,430,40,0.25

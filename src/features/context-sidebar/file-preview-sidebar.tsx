@@ -1,15 +1,17 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { ArrowLeft, Download, FileText, Maximize2, Minimize2, PencilLine, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { downloadResource } from "@/lib/api";
-import { CsvSheetEditor } from "./csv-sheet-editor";
 import { DatasetPreview } from "./dataset-preview";
 import { ImagePreview } from "./image-preview";
 import { PDFPreview } from "./pdf-preview";
 import { TextPreview } from "./text-preview";
 import { formatBytes } from "./resource-utils";
 import { isDatasetResource, type ContextFile } from "./types";
+
+const CsvSheetEditor = dynamic(() => import("./csv-sheet-editor").then((m) => m.CsvSheetEditor), { ssr: false });
 
 interface FilePreviewSidebarProps {
   file: ContextFile;

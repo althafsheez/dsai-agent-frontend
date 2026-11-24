@@ -93,6 +93,7 @@ export interface MessageDto {
 
 export interface QuickMessageDto {
   id: string;
+  thread_id: string;
   context_type: "chat" | "workspace";
   context_id: string;
   role: "user" | "assistant";
@@ -203,4 +204,73 @@ export interface PostgresTable {
 export interface PostgresTableDetails extends PostgresTable {
   columns: { name: string; data_type: string; nullable: boolean; primary_key: boolean }[];
   preview?: { columns: string[]; rows: unknown[][]; truncated: boolean } | null;
+}
+
+export interface ConnectorStatusDto {
+  id: string;
+  /** "unavailable" means the server has no Google credentials configured. */
+  status: "connected" | "disconnected" | "unavailable";
+  configured: boolean;
+  account_email: string | null;
+  connected_at: string | null;
+}
+
+export interface DriveFileDto {
+  id: string;
+  name: string;
+  mime_type: string;
+  is_folder: boolean;
+  size_bytes: number | null;
+  modified_at: string | null;
+  importable: boolean;
+}
+
+export interface DriveFilesPage {
+  items: DriveFileDto[];
+  next_page_token: string | null;
+}
+
+export interface DriveImportResult {
+  imported: Array<{ file_id: string; resource: { id: string; name: string; resource_type: "dataset" | "artifact"; size_bytes?: number }; already_imported: boolean }>;
+  failed: Array<{ file_id: string; code: string; message: string }>;
+}
+
+export interface DashboardAiDataset {
+  id: string;
+  name: string;
+  columns: Array<{ name: string; data_type: string }>;
+  rows: Array<Array<string | number | boolean | null>>;
+  row_count: number | null;
+}
+export interface DashboardAiWidget {
+  id: string;
+  type: string;
+  title: string;
+  dataset_id: string;
+  x?: string | null;
+  y?: string | null;
+  agg: "sum" | "avg" | "count";
+  span: 1 | 2 | 3;
+  script?: string;
+  request?: string;
+  datasets?: string[];
+}
+export interface DashboardCustomResult {
+  kind: string; title?: string; labels?: string[]; series?: number[]; points?: Array<[number, number]>;
+  columns?: string[]; rows?: string[][]; value?: number; max?: number; label?: string;
+}
+export interface DatasetPairReport {
+  a: string; b: string; shared_columns: string[]; key: string | null; matched_rows: number; summary: string;
+  conflicts: Array<{ column: string; by: string; differing: number; of: number; totals?: boolean; examples: Array<{ key: string; a: number; b: number }> }>;
+}
+export interface DatasetRelations { datasets: Array<{ id: string; name: string; rows: number }>; pairs: DatasetPairReport[]; conflict: boolean }
+export interface DashboardAiResult {
+  ok: boolean;
+  ai?: boolean;
+  name?: string;
+  description?: string;
+  widgets: DashboardAiWidget[];
+  notes: string[];
+  slicers?: string[];
+  suggestions?: string[];
 }

@@ -106,8 +106,15 @@ GET /api/health reports readiness; keys backend environment only. Configurable o
 
 PostgreSQL is restricted to loopback requests to a development or test backend and uses the existing `user-you` demo identity. A development or test backend configured with a connector encryption key also restricts its API to loopback so saved runs and chat history stay local.
 
-- `POST /api/connectors/postgresql/test` validates credentials and returns accessible application schemas. `POST /api/connectors` tests and saves the connection. Responses never contain passwords or encrypted credentials.
-- `GET /api/connectors` lists the owner's connections. `?for_analysis=true&chat_id=…` or `?for_analysis=true&workspace_id=…` limits selection to the active analysis scope. `GET/PATCH/DELETE /api/connectors/{id}` reads, edits, or disconnects a saved connection. `POST /api/connectors/{id}/test` tests proposed edits without saving.
-- `GET /api/connectors/{id}/schemas`, `GET /api/connectors/{id}/tables?schema=&search=`, and `GET /api/connectors/{id}/tables/{schema}/{table}?preview=true&limit=20` expose live metadata and optional bounded previews. `POST /api/connectors/{id}/refresh-schema` retests the live schema and records connection status.
-- `POST /api/connectors/{id}/query` accepts `{sql, limit?}` and returns `{columns, rows, truncated}` after authorization, parser validation, and read-only execution. Fractional numbers and integers outside JavaScript's safe range are represented as strings to preserve precision.
+- `POST /api/connectors/postgresql/test` validates credentials and returns accessible application schemas. `POST /api/connectors/postgresql` tests and saves the connection. Responses never contain passwords or encrypted credentials.
+- `GET /api/connectors/postgresql` lists the owner's connections. `?for_analysis=true&chat_id=…` or `?for_analysis=true&workspace_id=…` limits selection to the active analysis scope. `GET/PATCH/DELETE /api/connectors/postgresql/{id}` reads, edits, or disconnects a saved connection. `POST /api/connectors/postgresql/{id}/test` tests proposed edits without saving.
+- `GET /api/connectors/postgresql/{id}/schemas`, `GET /api/connectors/postgresql/{id}/tables?schema=&search=`, and `GET /api/connectors/postgresql/{id}/tables/{schema}/{table}?preview=true&limit=20` expose live metadata and optional bounded previews. `POST /api/connectors/postgresql/{id}/refresh-schema` retests the live schema and records connection status.
+- `POST /api/connectors/postgresql/{id}/query` accepts `{sql, limit?}` and returns `{columns, rows, truncated}` after authorization, parser validation, and read-only execution. Fractional numbers and integers outside JavaScript's safe range are represented as strings to preserve precision.
 - `connection_ids` is optional on new chats, messages and queued follow-ups, including multipart queue requests. Message responses include `connection_refs` for display. The selected IDs belong to the original message and remain bound to it when queued, edited, or retried. The agent rechecks that selection and its access before executing each database tool.
+
+### Google Drive
+
+- `GET /api/connectors/google-drive/status` returns Drive connection status for the current user.
+- `POST /api/connectors/google-drive/authorize` starts OAuth. `GET /api/connectors/google-drive/callback` completes it using signed state.
+- `GET /api/connectors/google-drive/files` browses files. `POST /api/connectors/google-drive/import` imports selected files into authorized scopes. `DELETE /api/connectors/google-drive` disconnects the account.
+- `POST /api/datasets/{resource_id}/sync` refreshes an authorized Drive-backed dataset.

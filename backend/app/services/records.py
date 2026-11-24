@@ -6,8 +6,11 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from ..errors import APIError
 from ..connectors.service import validate_selection
-from ..models import AgentRun, Chat, DataConnection, FileObject, Message, Resource, ResourceLink, User, Workspace, WorkspaceContextFile, utc_now
-from ..schemas import ChatCreate, ChatUpdate, MessageAttachment, MessageConnection, MessageResponse, WorkspaceCreate, WorkspaceUpdate
+from ..models import (
+    AgentRun, Chat, DataConnection, ExecutionEvent, Favorite, FileObject, LibraryEntry, Message, Resource, ResourceLink,
+    SteeringInstruction, User, Workspace, WorkspaceContextFile, utc_now,
+)
+from ..schemas import ChatBranch, ChatCreate, ChatUpdate, MessageAttachment, MessageConnection, MessageEdit, MessageResponse, WorkspaceCreate, WorkspaceUpdate
 from .resource_uploads import attach_library_resources
 
 
@@ -137,6 +140,111 @@ def create_chat(session: Session, user: User, data: ChatCreate) -> tuple[Chat, M
     session.refresh(chat)
     session.refresh(message)
     return chat, message
+
+
+def branch_chat(session: Session, user: User, chat_id: str, data: ChatBranch) -> Chat:
+    """Copy a chat up to and including one message into a new, independent chat."""
+    source = require_chat(session, user, chat_id)
+    existing = session.scalar(select(Chat).where(Chat.created_by == user.id, Chat.client_request_id == data.client_request_id))
+    if existing is not None:
+        return existing
+    cutoff = session.get(Message, data.message_id)
+    if cutoff is None or cutoff.chat_id != source.id or cutoff.kind != "normal":
+        raise APIError(422, "invalid_branch_point", "Choose a message from this chat to branch from.")
+    copied = list(session.scalars(
+        select(Message)
+        .where(Message.chat_id == source.id, Message.kind == "normal", Message.position <= cutoff.position, Message.status == "completed")
+        .order_by(Message.position)
+    ))
+    if not any(message.role == "user" for message in copied):
+        raise APIError(422, "invalid_branch_point", "There is nothing above this point to branch from.")
+    branch = Chat(
+        title=f"Branch: {source.title}"[:200],
+        title_source="manual",
+        workspace_id=source.workspace_id,
+        created_by=user.id,
+        client_request_id=data.client_request_id,
+    )
+    session.add(branch)
+    session.flush()
+    id_map: dict[str, str] = {}
+    for position, message in enumerate(copied, start=1):
+        clone = Message(
+            chat_id=branch.id, role=message.role, kind="normal", content=message.content,
+            connection_ids=list(message.connection_ids or []),
+            status="completed", position=position, client_request_id=f"branch:{branch.id}:{position}",
+        )
+        session.add(clone)
+        session.flush()
+        id_map[message.id] = clone.id
+    # Files made in the copied part travel with the branch; outputs from later messages stay behind.
+    links = session.scalars(select(ResourceLink).where(ResourceLink.scope_type == "chat", ResourceLink.scope_id == source.id))
+    for link in links:
+        if link.message_id is not None and link.message_id not in id_map:
+            continue
+        session.add(ResourceLink(
+            resource_id=link.resource_id, scope_type="chat", scope_id=branch.id,
+            message_id=id_map.get(link.message_id) if link.message_id else None,
+        ))
+    session.commit()
+    session.refresh(branch)
+    return branch
+
+
+def edit_user_message(session: Session, user: User, chat_id: str, message_id: str, data: MessageEdit) -> Message:
+    """Rewrite a question and drop everything after it, so the next run answers from the context above only."""
+    chat = require_chat(session, user, chat_id)
+    content = data.content.strip()
+    if not content:
+        raise APIError(422, "empty_message", "A question cannot be empty.")
+    message = session.get(Message, message_id)
+    if message is None or message.chat_id != chat.id or message.role != "user" or message.kind != "normal":
+        raise APIError(422, "invalid_message", "Choose one of your questions in this chat to edit.")
+    if session.scalar(select(AgentRun.id).where(AgentRun.chat_id == chat.id, AgentRun.status.in_(("queued", "running")))) is not None:
+        raise APIError(409, "run_active", "Wait for the current answer to finish before editing.")
+
+    later_ids = list(session.scalars(select(Message.id).where(Message.chat_id == chat.id, Message.position > message.position)))
+    run_ids = list(session.scalars(select(AgentRun.id).where(
+        AgentRun.chat_id == chat.id,
+        or_(AgentRun.user_message_id == message.id, AgentRun.user_message_id.in_(later_ids), AgentRun.assistant_message_id.in_(later_ids)),
+    )))
+    touched = set(session.scalars(select(Resource.id).where(Resource.run_id.in_(run_ids)))) if run_ids else set()
+    touched |= set(session.scalars(select(ResourceLink.resource_id).where(ResourceLink.message_id.in_(later_ids)))) if later_ids else set()
+
+    if run_ids:
+        session.query(ExecutionEvent).filter(ExecutionEvent.run_id.in_(run_ids)).delete(synchronize_session=False)
+        session.query(SteeringInstruction).filter(SteeringInstruction.run_id.in_(run_ids)).delete(synchronize_session=False)
+        session.query(Resource).filter(Resource.run_id.in_(run_ids)).update({Resource.run_id: None}, synchronize_session=False)
+        session.query(AgentRun).filter(AgentRun.previous_run_id.in_(run_ids), AgentRun.id.not_in(run_ids)).update(
+            {AgentRun.previous_run_id: None}, synchronize_session=False)
+    if later_ids:
+        session.query(SteeringInstruction).filter(SteeringInstruction.message_id.in_(later_ids)).delete(synchronize_session=False)
+        session.query(ResourceLink).filter(ResourceLink.message_id.in_(later_ids)).delete(synchronize_session=False)
+    # Outputs of removed answers lose their place in this chat; keep files that a Library entry or favorite still points at.
+    if touched:
+        session.query(ResourceLink).filter(
+            ResourceLink.scope_type == "chat", ResourceLink.scope_id == chat.id, ResourceLink.resource_id.in_(touched),
+            ResourceLink.message_id.is_(None)).delete(synchronize_session=False)
+    if run_ids:
+        session.query(AgentRun).filter(AgentRun.id.in_(run_ids)).delete(synchronize_session=False)
+    if later_ids:
+        session.query(Message).filter(Message.id.in_(later_ids)).delete(synchronize_session=False)
+    session.flush()
+    for resource_id in touched:
+        in_use = (
+            session.scalar(select(ResourceLink.id).where(ResourceLink.resource_id == resource_id).limit(1))
+            or session.scalar(select(LibraryEntry.id).where(LibraryEntry.resource_id == resource_id).limit(1))
+            or session.scalar(select(Favorite.artifact_id).where(Favorite.artifact_id == resource_id).limit(1))
+        )
+        if not in_use:
+            session.query(Resource).filter(Resource.id == resource_id).delete(synchronize_session=False)
+
+    message.content = content
+    message.status = "completed"
+    chat.updated_at = utc_now()
+    session.commit()
+    session.refresh(message)
+    return message
 
 
 def update_chat(session: Session, user: User, chat_id: str, data: ChatUpdate) -> Chat:

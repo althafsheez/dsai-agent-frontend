@@ -90,7 +90,7 @@ describe("live chat page", () => {
     fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/models")) return json(models);
-      if (url.includes("/connectors?")) return json({ items: [postgres] });
+      if (url.includes("/connectors/postgresql?")) return json({ items: [postgres] });
       if (url.endsWith("/workspaces")) return json({ items: [], next_cursor: null });
       if (url.endsWith(`/chats/${chat.id}`)) return json(chat);
       if (url.endsWith(`/chats/${chat.id}/messages`) && !init?.method) {

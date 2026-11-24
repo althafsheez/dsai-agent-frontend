@@ -93,7 +93,7 @@ export const ConversationNavigator = memo(function ConversationNavigator({ messa
 
   const mask = edgeMask(fadedEdges.above, fadedEdges.below);
 
-  return <nav aria-label="Conversation sections" className="relative col-start-1 row-start-2 hidden w-12 flex-col items-center justify-center bg-background sm:flex">
+  return <nav aria-label="Conversation sections" className="relative col-start-2 row-start-2 hidden w-12 flex-col items-center justify-center bg-background sm:flex">
     <div
       ref={viewportRef}
       onWheel={(event) => event.stopPropagation()}

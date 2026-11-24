@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } 
 import { Button } from "@/components/ui/button";
 import { searchablePages } from "./navigation";
 
-export function SearchDialog({ onNavigate, sidebar = false }: { onNavigate?: () => void; sidebar?: boolean }) {
+export function SearchDialog({ onNavigate }: { onNavigate?: () => void }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
