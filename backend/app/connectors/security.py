@@ -67,7 +67,7 @@ def _local_host(url: str) -> bool:
 async def protect_local_connector_api(request: Request) -> None:
     settings: Settings = request.app.state.settings
     path = request.scope["path"]
-    is_connector = path == "/api/connectors/postgresql" or path.startswith("/api/connectors/postgresql/")
+    is_connector = path == "/api/connectors/postgresql" or path.startswith(("/api/connectors/postgresql/", "/api/workflow-store/actions/"))
     # Local chat history and persisted run IDs also grant access to connector data.
     local_backend = settings.environment in LOCAL_ENVIRONMENTS and settings.connector_encryption_key
     if not is_connector and not (local_backend and path.startswith("/api/")):
@@ -140,7 +140,7 @@ def _strings(values: Iterable[ast.String] | None) -> tuple[str, ...]:
     return tuple(value.sval for value in values or ())
 
 
-def validate_sql(sql: str, schemas: set[str]) -> tuple[str, set[tuple[str, str]]]:
+def validate_sql(sql: str, schemas: set[str], *, parameter_count: int = 0) -> tuple[str, set[tuple[str, str]]]:
     try:
         statements = parse_sql(sql)
     except (ParseError, ValueError, UnicodeError):
@@ -149,6 +149,7 @@ def validate_sql(sql: str, schemas: set[str]) -> tuple[str, set[tuple[str, str]]
         _reject()
 
     relations: set[tuple[str, str]] = set()
+    parameters: set[int] = set()
 
     def visit(node: object, ctes: frozenset[str]) -> None:
         if isinstance(node, tuple):
@@ -156,6 +157,11 @@ def validate_sql(sql: str, schemas: set[str]) -> tuple[str, set[tuple[str, str]]
                 visit(child, ctes)
             return
         if not isinstance(node, ast.Node):
+            return
+        if isinstance(node, ast.ParamRef):
+            if not 1 <= node.number <= parameter_count:
+                raise APIError(422, "postgres_invalid_bindings", "Supply a value for every SQL parameter.")
+            parameters.add(node.number)
             return
         if type(node).__name__ not in SAFE_NODES:
             _reject()
@@ -196,6 +202,8 @@ def validate_sql(sql: str, schemas: set[str]) -> tuple[str, set[tuple[str, str]]
 
     try:
         visit(statements[0].stmt, frozenset())
+        if len(parameters) != parameter_count:
+            raise APIError(422, "postgres_invalid_bindings", "Each supplied SQL binding must be used.")
         return RawStream()(statements[0].stmt), relations
     except RecursionError:
         raise APIError(422, "invalid_postgres_sql", "The query is too deeply nested.") from None

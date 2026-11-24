@@ -20,18 +20,43 @@ vi.mock("@/lib/api", () => ({
 }));
 
 const wrap = (node: React.ReactNode) => render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{node}</QueryClientProvider>);
-const workflow = { id: "w1", name: "Daily revenue", description: "", prompt: "", state: "active", trigger: { kind: "schedule", config: { frequency: "daily", time: "09:00" } }, steps: [], schedule: "Every day at 9:00 AM", next_run_at: "2026-11-25T03:30:00Z", last_run_at: null, created_at: "", updated_at: "" };
+const workflow = { id: "w1", name: "Daily revenue", description: "", prompt: "", state: "active", trigger: { kind: "schedule", config: { frequency: "daily", time: "09:00" } }, steps: [
+  { id: "source", kind: "data", title: "Fetch sales", detail: "" },
+  { id: "analysis", kind: "ai", title: "Summarize revenue", detail: "" },
+  { id: "output", kind: "notify", title: "Save report", detail: "" },
+], schedule: "Every day at 9:00 AM", next_run_at: "2026-11-25T03:30:00Z", last_run_at: null, created_at: "", updated_at: "" };
 const run = (extra = {}) => ({ id: "r1", workflow_id: "w1", workflow_name: "Daily revenue", trigger: "schedule", status: "success", error: "", started_at: "2026-11-24T03:30:00Z", finished_at: "2026-11-24T03:30:07Z", cancelled_at: null, results: [], ...extra });
 
 describe("workflows page", () => {
   beforeEach(() => { vi.clearAllMocks(); api.workflows = [workflow]; api.runs = [run()]; });
 
-  it("lists workflows with their schedule and last result, and offers templates", async () => {
+  it("shows saved workflow previews, trigger types, lifecycle and run results", async () => {
+    api.workflows.push(
+      { ...workflow, id: "w2", name: "Paused inventory", state: "inactive" },
+      { ...workflow, id: "w3", name: "Draft report", state: "draft", trigger: { kind: "manual", config: { show_on_canvas: false } }, steps: [] },
+    );
     wrap(<WorkflowsPage />);
-    const list = await screen.findByRole("list", { name: "Your workflows" });
-    expect(within(list).getByText("Daily revenue")).toBeVisible();
-    expect(within(list).getByText(/Every day at 9:00 AM/)).toBeVisible();
-    expect(within(list).getByText("Done")).toBeVisible();
+    const list = await screen.findByRole("list", { name: "Saved workflows" });
+    expect(within(list).getByRole("link", { name: "Daily revenue" })).toHaveAttribute("href", "/workflows/w1");
+    expect(within(list).getByText("Active")).toBeVisible();
+    expect(within(list).getByText("Paused")).toBeVisible();
+    expect(within(list).getByText("Draft")).toBeVisible();
+    expect(within(list).getByText("Manual trigger")).toBeVisible();
+    expect(within(list).getByText("No steps yet")).toBeVisible();
+    expect(within(list).getAllByRole("switch")).toHaveLength(2);
+    expect(within(list).getAllByText("Scheduled · Every day at 9:00 AM")).toHaveLength(2);
+    const previews = within(list).getAllByRole("list", { name: "Workflow preview" });
+    expect(within(previews[0]).getByText("Fetch sales")).toBeVisible();
+    expect(within(previews[0]).getByText("Summarize revenue")).toBeVisible();
+    expect(within(previews[0]).getByRole("listitem", { name: "1 more step" })).toHaveTextContent("+1");
+    expect(await within(list).findByRole("link", { name: "Last run Done" })).toHaveAttribute("href", "/workflows/w1/runs/r1");
+  });
+
+  it("keeps templates available in their own tab", async () => {
+    const user = userEvent.setup();
+    wrap(<WorkflowsPage />);
+    expect(screen.queryByRole("list", { name: "Workflow templates" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Templates" }));
     expect(screen.getByRole("list", { name: "Workflow templates" })).toBeVisible();
     expect(screen.getByRole("link", { name: "Use the Daily sales summary template" })).toHaveAttribute("href", "/workflows/new?template=daily-sales-summary");
   });
@@ -47,13 +72,30 @@ describe("workflows page", () => {
     expect(api.runNow).toHaveBeenCalledWith("w1");
   });
 
-  it("shows every run in the history with its outcome", async () => {
-    api.runs = [run(), run({ id: "r2", status: "failed", error: "Step 2 failed: boom" })];
+  it("lists runs from different workflows together, newest first", async () => {
+    api.workflows = [workflow, { ...workflow, id: "w2", name: "Weekly inventory" }, { ...workflow, id: "w3", name: "Unused workflow" }];
+    api.runs = [
+      run(),
+      run({ id: "r2", workflow_id: "w2", workflow_name: "Weekly inventory", started_at: "2026-11-24T03:29:58Z" }),
+      run({ id: "r3", workflow_name: "Old revenue name", status: "failed", error: "Step 2 failed: boom", started_at: "2026-11-24T03:30:02Z" }),
+    ];
     const user = userEvent.setup();
     wrap(<WorkflowsPage />);
-    await user.click(await screen.findByRole("tab", { name: /History/ }));
-    expect(await screen.findByText("Step 2 failed: boom")).toBeVisible();
-    expect(screen.getAllByRole("row")).toHaveLength(3);
+    await screen.findByRole("tab", { name: "Saved workflows (3)" });
+    await user.click(screen.getByRole("tab", { name: "Runs" }));
+    const table = await screen.findByRole("table", { name: "Runs" });
+    expect(screen.getAllByRole("table")).toHaveLength(1);
+    expect(within(table).getAllByRole("row")).toHaveLength(4);
+    expect(within(table).getByRole("columnheader", { name: "Workflow" })).toBeVisible();
+    expect(within(table).getByText("Step 2 failed: boom")).toBeVisible();
+    expect(within(table).getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual([
+      "/workflows/w1/runs/r3",
+      "/workflows/w1/runs/r1",
+      "/workflows/w2/runs/r2",
+    ]);
+    expect(within(table).getAllByRole("link", { name: /Daily revenue/ })).toHaveLength(2);
+    expect(within(table).getByRole("link", { name: /Weekly inventory/ })).toBeVisible();
+    expect(within(table).queryByText("Unused workflow")).not.toBeInTheDocument();
   });
 });
 

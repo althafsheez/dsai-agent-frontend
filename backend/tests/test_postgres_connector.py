@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import secrets
 import socket
@@ -527,3 +528,59 @@ async def test_postgres_tool_auth_failure_is_persisted_at_its_step(tmp_path, pos
         assert incorrect_password not in response.text and postgres["password"] not in response.text
         persisted = (await client.get(f"/api/runs/{failed['run_id']}/events", headers=owner)).json()["items"]
         assert failed in persisted
+
+
+@pytest.mark.asyncio
+async def test_workflow_action_sql_validation_execution_and_reuse(tmp_path, postgres):
+    settings, headers, form = integration_settings(tmp_path, postgres)
+    provider = FakeProvider()
+    app = create_app(settings=settings, provider=provider)
+    root = "/api/workflow-store"
+    async with client_for(app) as client:
+        connection_id = await create_connection(client, headers["owner"], form)
+        request = {"provider": "postgresql", "connection_id": connection_id, "instructions": "Find orders for Pump"}
+        query = f'SELECT id, total FROM "{postgres["schema"]}".orders WHERE product = $1::text ORDER BY id'
+        provider.chunks = [json.dumps({"status": "supported", "message": "Find matching orders.",
+                                      "arguments": {"sql": query, "bindings": ["Pump"], "limit": 10}})]
+        generated = (await client.post(f"{root}/actions/generate", headers=headers["owner"], json=request)).json()
+        assert generated["status"] == "supported", generated
+        assert postgres["password"] not in provider.calls[-1][0][0].content
+        assert "ordered_at" in provider.calls[-1][0][0].content
+
+        action = generated["action"]
+        result = (await client.post(f"{root}/actions/test", headers=headers["owner"], json=action)).json()
+        assert result["status"] == "passed", result
+        assert result["result"]["column_types"] == ["integer", "numeric"]
+        assert result["result"]["rows"] == [[1, "30.50"], [2, "52.25"]]
+        applied = (await client.post(f"{root}/actions/apply", headers=headers["owner"],
+                                     json={"action": action, "test_receipt": result["receipt"]})).json()
+        assert applied["test_status"] == "passed"
+        stale = {**action, "arguments": {**action["arguments"], "bindings": ["Valve"]}}
+        assert (await client.post(f"{root}/actions/apply", headers=headers["owner"],
+                                  json={"action": stale, "test_receipt": result["receipt"]})).json()["test_status"] == "untested"
+
+        provider.chunks = [json.dumps({"status": "supported", "arguments": {"sql": "CREATE TABLE rogue (id int)"}})]
+        denied = (await client.post(f"{root}/actions/generate", headers=headers["owner"], json=request)).json()
+        assert denied["status"] == "unsupported" and denied["action"] is None
+        direct = (await client.post(f"{root}/actions/generate", headers=headers["owner"],
+                                    json={**request, "instructions": "SELECT 1", "model_id": "invalid-model"})).json()
+        assert direct["status"] == "supported"
+        unauthorized = (await client.post(f"{root}/actions/test", headers=headers["other"], json=action)).json()
+        assert unauthorized["status"] == "failed"
+        model_calls = len(provider.calls)
+        body = {"name": "PostgreSQL workflow", "trigger": {"kind": "manual"}, "steps": [
+            {"id": "query", "kind": "data", "title": "Orders", "detail": request["instructions"],
+             "config": {"connection_id": connection_id, "connection_provider": "postgresql", "action": applied}},
+        ]}
+        saved = (await client.put(root, headers=headers["owner"], json=body)).json()
+        assert (await client.get(f"{root}/{saved['id']}", headers=headers["owner"])).json()["steps"] == body["steps"]
+        for suffix, payload in (("run", None), ("test", {"steps": body["steps"]})):
+            run = (await client.post(f"{root}/{saved['id']}/{suffix}", headers=headers["owner"], json=payload)).json()
+            for _ in range(100):
+                run = (await client.get(f"{root}/runs/{run['id']}", headers=headers["owner"])).json()
+                if run["status"] != "running":
+                    break
+                await asyncio.sleep(0.05)
+            assert run["status"] == "success", run
+            assert run["results"][0]["output"]["rows"] == result["result"]["rows"]
+        assert len(provider.calls) == model_calls

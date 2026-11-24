@@ -6,10 +6,12 @@ from pathlib import Path
 
 from fastapi import UploadFile
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from ..errors import APIError
-from ..models import FileObject, Resource, ResourceLink
+from ..models import FileObject, LibraryEntry, Resource, ResourceLink
 from ..storage import LocalFileStorage
 from .dataset_preview import inspect_dataset
 
@@ -17,6 +19,15 @@ from .dataset_preview import inspect_dataset
 DATASET_EXTENSIONS = {".csv", ".parquet", ".xlsx", ".xls"}
 CODE_EXTENSIONS = {".py", ".js", ".ts", ".tsx", ".jsx", ".sql", ".html", ".css", ".yaml", ".yml", ".sh", ".r"}
 ALLOWED_EXTENSIONS = DATASET_EXTENSIONS | CODE_EXTENSIONS | {".png", ".jpg", ".jpeg", ".pdf", ".txt", ".md", ".json"}
+
+
+def save_owned_resource_to_library(session: Session, user_id: str, resource_id: str) -> LibraryEntry:
+    """Add a Library reference for a resource the caller has already checked."""
+    query = select(LibraryEntry).where(LibraryEntry.user_id == user_id, LibraryEntry.resource_id == resource_id)
+    insert = sqlite_insert if session.get_bind().dialect.name == "sqlite" else postgres_insert
+    statement = insert(LibraryEntry).values(user_id=user_id, resource_id=resource_id)
+    session.execute(statement.on_conflict_do_nothing(index_elements=["user_id", "resource_id"]))
+    return session.scalars(query).one()
 
 
 async def read_upload(file: UploadFile) -> tuple[str, str | None, bytes]:

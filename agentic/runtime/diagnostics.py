@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
@@ -30,21 +30,26 @@ GEMINI_RETRY_STATUSES = (500, 502, 503, 504)
 class GeminiRequests:
     count: int = 0
 
-    async def stream(self, client: Any, **kwargs: Any) -> AsyncIterator[Any]:
+    async def stream(self, client: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:
         token = _gemini_requests.set(self)
         try:
             chunks = await client.aio.models.generate_content_stream(**kwargs)
         finally:
             _gemini_requests.reset(token)
-        while True:
-            token = _gemini_requests.set(self)
-            try:
-                chunk = await anext(chunks, None)
-            finally:
-                _gemini_requests.reset(token)
-            if chunk is None:
-                return
-            yield chunk
+        try:
+            while True:
+                token = _gemini_requests.set(self)
+                try:
+                    chunk = await anext(chunks, None)
+                finally:
+                    _gemini_requests.reset(token)
+                if chunk is None:
+                    return
+                yield chunk
+        finally:
+            close = getattr(chunks, "aclose", None)
+            if close is not None:
+                await close()
 
 
 _gemini_requests: ContextVar[GeminiRequests | None] = ContextVar("gemini_requests", default=None)

@@ -7,25 +7,13 @@ import {
   ArrowRight,
   LayoutGrid,
   List,
-  BarChart3,
-  BriefcaseBusiness,
-  ChartLine,
-  ChartNoAxesCombined,
   ChevronDown,
-  FileText,
   Folder,
-  Landmark,
-  MessageSquare,
   MoreHorizontal,
-  Sigma,
-  Telescope,
   Database,
   FileSpreadsheet,
   GraduationCap,
   Layers3,
-  Mail,
-  NotebookTabs,
-  PanelsTopLeft,
   Plug,
   Plus,
   Search,
@@ -33,55 +21,20 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { disconnectPostgres, getPostgresConnections, type PostgresConnection } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ApiError, disconnectGoogleDrive, getConnectors, startGoogleDriveAuth } from "@/lib/api";
 import { DriveBrowserDialog } from "./drive-browser-dialog";
-import { dataSourceConnector } from "../catalog";
+import { connectorPreviews, type ConnectorPreview } from "../catalog";
+import { ExtensionIcon } from "./extension-icon";
 import { readConnected, toggleId, writeConnected } from "../connection-store";
 import { PostgresSetup } from "./postgres-setup";
 import { PostgresBrowser } from "./postgres-browser";
 
 type ExtensionTab = "mine" | "database" | "app" | "skill";
 type Sort = "popular" | "name";
-
-interface ConnectorPreview {
-  id: string;
-  name: string;
-  description: string;
-  category: Exclude<ExtensionTab, "mine">;
-  icon: typeof Plug;
-  logo?: string;
-}
-
-const connectorPreviews: ConnectorPreview[] = [
-  { ...dataSourceConnector("postgresql"), category: "database", logo: "postgresql" },
-  { ...dataSourceConnector("mysql"), category: "database", logo: "mysql" },
-  { ...dataSourceConnector("bigquery"), name: "BigQuery", category: "database", logo: "googlebigquery" },
-  { ...dataSourceConnector("snowflake"), category: "database", logo: "snowflake" },
-  { id: "sql-server", name: "SQL Server", category: "database", description: "Analyze tables from Microsoft SQL Server.", icon: Database },
-  { id: "mongodb", name: "MongoDB", category: "database", description: "Explore collections and documents.", icon: Database, logo: "mongodb" },
-  { ...dataSourceConnector("google-drive"), category: "app", logo: "googledrive" },
-  { ...dataSourceConnector("google-sheets"), category: "app", logo: "googlesheets" },
-  { id: "gmail", name: "Gmail", category: "app", description: "Find messages and attachments.", icon: Mail, logo: "gmail" },
-  { id: "slack", name: "Slack", category: "app", description: "Find relevant conversations and files.", icon: MessageSquare, logo: "slack" },
-  { id: "jira", name: "Jira", category: "app", description: "Explore issues and project activity.", icon: PanelsTopLeft, logo: "jira" },
-  { id: "notion", name: "Notion", category: "app", description: "Bring in pages and database content.", icon: NotebookTabs, logo: "notion" },
-  { id: "salesforce", name: "Salesforce", category: "app", description: "Analyze sales and customer records.", icon: BriefcaseBusiness, logo: "salesforce" },
-  { id: "hubspot", name: "HubSpot", category: "app", description: "Explore marketing and CRM data.", icon: BriefcaseBusiness, logo: "hubspot" },
-  { id: "google-analytics", name: "Google Analytics", category: "app", description: "Analyze site traffic and engagement.", icon: ChartNoAxesCombined, logo: "googleanalytics" },
-  { id: "data-cleaning", name: "Data Cleaning", category: "skill", description: "Clean, transform, and prepare messy datasets.", icon: Sparkles },
-  { id: "data-visualization", name: "Data Visualization", category: "skill", description: "Create charts and interactive visuals from your data.", icon: BarChart3 },
-  { id: "exploratory-analysis", name: "Exploratory Analysis", category: "skill", description: "Find patterns and relationships in a dataset.", icon: Telescope },
-  { id: "financial-analysis", name: "Financial Analysis", category: "skill", description: "Explore financial metrics and trends.", icon: Landmark },
-  { id: "forecasting", name: "Forecasting", category: "skill", description: "Estimate future values from historical data.", icon: ChartLine },
-  { id: "statistical-analysis", name: "Statistical Analysis", category: "skill", description: "Test hypotheses and measure relationships.", icon: Sigma },
-  { id: "report-writing", name: "Report Writing", category: "skill", description: "Turn findings into clear reports.", icon: FileText },
-  { id: "business-analysis", name: "Business Analysis", category: "skill", description: "Evaluate business performance and opportunities.", icon: BriefcaseBusiness },
-];
 
 const catalogTabs = [
   { value: "database", label: "Databases", icon: Database },
@@ -99,24 +52,6 @@ interface LiveState {
   busy: boolean;
   email: string | null;
   onBrowse: () => void;
-}
-
-function ExtensionIcon({ extension, large = false }: { extension: ConnectorPreview; large?: boolean }) {
-  const Icon = extension.icon;
-  const logoSize = large ? 34 : 22;
-  const iconStyle = extension.id === "postgresql" ? "border-sky-400/20 bg-sky-400/10 text-sky-300"
-    : extension.id === GOOGLE_DRIVE_ID ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
-    : extension.category === "skill" ? "border-violet-400/20 bg-violet-400/10 text-violet-300"
-    : "bg-raised text-foreground";
-  return (
-    <span className={cn("grid shrink-0 place-items-center rounded-xl border", large ? "size-12" : "size-11", iconStyle)}>
-      {extension.logo ? (
-        <Image src={`/extension-logos/${extension.logo}.svg`} alt="" width={logoSize} height={logoSize} unoptimized />
-      ) : (
-        <Icon aria-hidden="true" className={large ? "size-7" : "size-5"} strokeWidth={1.5} />
-      )}
-    </span>
-  );
 }
 
 function ConnectorRow({ connector, connected, onToggle, live, onAdd, managing = false }: {

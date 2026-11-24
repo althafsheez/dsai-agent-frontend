@@ -152,6 +152,10 @@ async def test_python_without_files_initializes_one_sandbox_and_uploads_nothing(
             assert (await pool.execute("private-run-id", "import reportlab", 10))["success"]
             assert (await pool.execute("private-run-id", "import reportlab", 10))["success"]
             sandbox.commands.run.assert_called_once()
+            assert (await pool.execute("private-run-id", "import duckdb, reportlab", 10))["success"]
+            assert (await pool.execute("private-run-id", "import duckdb", 10))["success"]
+            assert sandbox.commands.run.call_count == 2
+            assert "duckdb==" in sandbox.commands.run.call_args.args[0]
         finally:
             await pool.close("private-run-id")
     create.assert_called_once()

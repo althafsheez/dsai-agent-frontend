@@ -7,32 +7,40 @@ are stored on the run as it goes, so a person can watch a run happen. Step kinds
     script     a Python script (written by the AI) run in the restricted runner on those datasets
     ai         the model answers a prompt about the datasets and what the earlier steps produced
     condition  stop the run quietly unless the previous number passes a test
-    notify     deliver the previous output (in-app only: no mail or chat provider is configured)
+    notify     retain the previous output in the run or save its files to the Library
 """
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from agentic.runtime.contracts import ChatTurn, ProviderError
+from agentic.runtime.contracts import ChatTurn, InputSource, ProviderError, ToolContext
+from agentic.runtime.events import RunnerCancelled
 
-from ..models import FileObject, Resource, User, WorkflowDefinition, WorkflowRunRecord
+from ..errors import APIError
+from ..models import FileObject, Resource, ResourceLink, User, WorkflowDefinition, WorkflowRunRecord
+from . import action_builder
 from .dashboard_script import ScriptError, run_script
 from .dataset_preview import read_csv_rows
+from .resource_uploads import save_owned_resource_to_library
 
 log = logging.getLogger(__name__)
 
 STEP_KINDS = ("data", "script", "ai", "condition", "notify")
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 MAX_TEXT = 4000
-AI_SECONDS = 60
+AI_SECONDS = 180
 
 
 def _utc(value: datetime) -> datetime:
@@ -151,7 +159,78 @@ async def _model_id(provider: Any) -> str:
     if chosen:
         return chosen
     models, _ = await provider.list_models()
+    if not models:
+        raise ProviderError("model_unavailable", "No AI model is configured.")
     return models[0].id
+
+
+async def _run_workflow_ai(
+    app: Any, owner_id: str, run_id: str, step_id: str, prompt: str, datasets: list[dict], model_id: str,
+    effort: str | None, report: Callable[..., None],
+) -> dict:
+    inputs = {}
+    for index, dataset in enumerate(datasets):
+        file = io.StringIO(newline="")
+        writer = csv.writer(file)
+        writer.writerow(dataset["columns"])
+        writer.writerows([
+            [json.dumps(cell, ensure_ascii=False) if isinstance(cell, (list, dict, bool)) else cell for cell in row]
+            for row in dataset["rows"]
+        ])
+        content = file.getvalue().encode()
+        inputs[dataset["id"]] = InputSource(f"dataset-{index + 1}.csv", lambda content=content: content)
+    context = ToolContext(
+        run_id=f"workflow-{run_id}-{step_id}", chat_id="", user_id=owner_id,
+        transient_inputs=inputs, workflow_run_id=run_id, workflow_step_id=step_id,
+    )
+
+    def cancelled() -> bool:
+        with app.state.session_factory() as db:
+            current = db.get(WorkflowRunRecord, run_id)
+            return current is None or current.cancelled_at is not None
+
+    messages = [ChatTurn(role="user", content=prompt)]
+    reply = ""
+    resources: dict[str, dict] = {}
+    writing = False
+    try:
+        async for event in app.state.runner.run(
+            messages, model_id, effort, cancelled, context,
+            allowed_tools=frozenset({"execute_python", "lookup_data", "read_file", "generate_visualization", "list_files"}),
+        ):
+            if event.type == "progress":
+                label = event.data.get("label")
+                if isinstance(label, str) and label:
+                    report(label)
+            elif event.type == "tool.started":
+                name = str(event.data.get("name") or "tool").replace("_", " ")
+                report(f"Running {name}")
+            elif event.type == "message.delta":
+                reply += str(event.data.get("text", ""))
+                if not writing:
+                    writing = True
+                    report("Writing the response")
+            elif event.type in {"tool.completed", "tool.failed"}:
+                writing = False
+                previous_count = len(resources)
+                for resource in event.data.get("resources", []):
+                    if isinstance(resource, dict) and isinstance(resource.get("id"), str):
+                        resources[resource["id"]] = resource
+                summary = str(event.data.get("summary", "Tool finished."))
+                error = event.data.get("error")
+                if event.type == "tool.failed" and isinstance(error, str):
+                    summary = f"{summary} {error}"
+                if len(resources) > previous_count:
+                    count = len(resources) - previous_count
+                    summary = f"{summary} Saved {count} {'file' if count == 1 else 'files'}."
+                report(summary, output={"resources": list(resources.values())} if resources else None)
+            if len(reply) > 16_000:
+                break
+    finally:
+        await app.state.runner.close(context)
+    if not reply.strip() and not resources:
+        raise StepFailure("The AI step returned no answer or files.")
+    return {"kind": "ai_result", "text": reply[:16_000].strip(), "resources": list(resources.values())}
 
 
 async def _run_step(app: Any, session: Session, owner_id: str, step: dict[str, Any], ctx: dict[str, Any]) -> tuple[Any, Any, list[str]]:
@@ -169,19 +248,43 @@ async def _run_step(app: Any, session: Session, owner_id: str, step: dict[str, A
         return loaded or ctx["datasets"]
 
     if kind == "data":
+        if config.get("connection_id"):
+            try:
+                action = action_builder.from_step(step)
+                user = session.get(User, owner_id)
+                if user is None:
+                    raise StepFailure("The workflow owner is unavailable.")
+                adapter = action_builder.check_action(app.state.connections, session, user, action)
+                table = await adapter.execute(action.arguments)
+            except APIError as exc:
+                raise StepFailure(f"{exc.message} ({exc.code})") from None
+            table["output_id"] = f"{ctx['run_id']}:{step['id']}"
+            ctx["query_table"] = table
+            ctx["datasets"] = [{
+                "id": table["output_id"], "name": "PostgreSQL result", "columns": table["columns"], "rows": table["rows"],
+            }]
+            return (
+                {"connection_id": action.connection_id, "operation": action.operation, "sql": action.arguments["sql"]},
+                table, [f"PostgreSQL returned {table['row_count']} rows in {table['duration_ms']} ms."],
+            )
         if not ids:
             raise StepFailure("Choose at least one dataset for this step.")
         loaded = await datasets()
         ctx["datasets"] = loaded
+        ctx.pop("query_table", None)
         logs += [f"Read {len(item['rows']):,} rows and {len(item['columns'])} columns from {item['name']}" for item in loaded]
         return {"dataset_ids": ids}, {"datasets": _brief(loaded)}, logs
 
     if kind == "script":
         script = (config.get("script") or "").strip()
         if not script:
-            raise StepFailure("This step has no script yet. Open the workflow and choose “Build with AI”.")
+            raise StepFailure("This step has no script yet. Open the workflow and choose “Build step”.")
         loaded = await datasets()
-        ctx["datasets"] = loaded
+        if (
+            (config.get("script_for") and config["script_for"] != step.get("detail"))
+            or (isinstance(config.get("script_dataset_ids"), list) and config["script_dataset_ids"] != [item["id"] for item in loaded])
+        ):
+            raise StepFailure("Rebuild this Custom step with its current instructions and datasets.")
         logs.append(f"Running the script on {', '.join(item['name'] for item in loaded) or 'no data'}")
         try:
             result = await asyncio.to_thread(run_script, script, loaded)
@@ -194,25 +297,37 @@ async def _run_step(app: Any, session: Session, owner_id: str, step: dict[str, A
         prompt = (step.get("detail") or "").strip()
         if not prompt:
             raise StepFailure("Write what the AI should do in this step.")
+        report = ctx["ai_progress"]
+        report("Preparing inputs for the AI step", input={"prompt": prompt})
         loaded = await datasets()
-        ctx["datasets"] = loaded
-        sample = "\n".join(f"- {item['name']} ({len(item['rows'])} rows): columns {', '.join(item['columns'])}\n  first rows: {json.dumps(item['rows'][:5])}" for item in loaded)
-        previous = json.dumps(_clip(ctx["last"], 2500), default=str) if ctx["last"] is not None else "nothing yet"
-        full = f"{prompt}\n\nDatasets:\n{sample or 'none'}\n\nOutput of the previous step: {previous}\n\nAnswer in plain text, short and specific, with the real numbers."
-        logs.append("Asking the model")
+        step_input = {"prompt": prompt, "datasets": _brief(loaded), "previous_output": _clip(ctx["last"], 800)}
+        query_table = ctx.get("query_table") if not ids else None
+        full = prompt
+        if query_table:
+            step_input["output_id"] = query_table["output_id"]
+        if query_table is None or ctx["last"] is not query_table:
+            sample = "\n".join(f"- {item['name']} ({len(item['rows'])} rows): columns {', '.join(item['columns'])}\n  first rows: {json.dumps(item['rows'][:5])}" for item in loaded)
+            previous = json.dumps(_clip(ctx["last"], 2500), default=str) if ctx["last"] is not None else "nothing yet"
+            full = f"{prompt}\n\nDatasets:\n{sample[:10_000] or 'none'}\n\nOutput of the previous step: {previous}\n\nUse the real numbers and provide the requested deliverables."
+        report("Resolving the AI model", input=step_input)
         try:
-            async def collect() -> str:
-                reply = ""
-                async for chunk in app.state.provider.stream_text([ChatTurn(role="user", content=full)], await _model_id(app.state.provider), None):
-                    reply += chunk
-                return reply
-            reply = await asyncio.wait_for(collect(), AI_SECONDS)
+            model_id = config.get("model_id") or await _model_id(app.state.provider)
+            effort = config.get("effort") or None
+            selection = app.state.provider.validate_selection(model_id, effort)
+            effort = effort or selection.default_effort
+            report(f"Asking {model_id}", input={**step_input, "model": model_id, "effort": effort})
+            result = await asyncio.wait_for(
+                _run_workflow_ai(app, owner_id, ctx["run_id"], step["id"], full, loaded, model_id, effort, report),
+                AI_SECONDS,
+            )
         except asyncio.TimeoutError as exc:
-            raise StepFailure("The AI took too long to answer.") from exc
+            raise StepFailure(f"The AI step reached its {AI_SECONDS}-second limit. The input, progress log and any generated files are available below.") from exc
         except ProviderError as exc:
-            raise StepFailure(f"The AI was unavailable: {exc}") from exc
-        logs.append(f"Received {len(reply)} characters")
-        return {"prompt": prompt, "previous_output": _clip(ctx["last"], 800)}, {"text": reply.strip()}, logs
+            turn = (exc.diagnostic or {}).get("turn")
+            stage = f" on analysis turn {turn}" if isinstance(turn, int) else ""
+            raise StepFailure(f"The AI failed{stage}: {exc} ({exc.code}).") from exc
+        logs.append(f"Received {len(result['text'])} characters and {len(result['resources'])} files.")
+        return step_input, result if result["resources"] else {"text": result["text"]}, logs
 
     if kind == "condition":
         operator, wanted = config.get("operator", "greater"), config.get("value", "0")
@@ -229,11 +344,36 @@ async def _run_step(app: Any, session: Session, owner_id: str, step: dict[str, A
         return {"number": number, "test": f"{operator} {limit:g}"}, {"passed": passed}, logs
 
     if kind == "notify":
-        recipient = (config.get("recipient") or "the workflow owner").strip()
         last = ctx["last"]
+        resources = {"resources": last["resources"]} if isinstance(last, dict) and last.get("resources") else {}
+        if config.get("destination") == "library":
+            files = resources.get("resources", [])
+            if not files:
+                raise StepFailure("The previous step returned no files. Generate a file before saving it to the Library.")
+            ids = {file["id"] for file in files}
+            owned = set(session.scalars(select(Resource.id).join(ResourceLink, ResourceLink.resource_id == Resource.id).where(
+                Resource.id.in_(ids), Resource.created_by == owner_id,
+                ResourceLink.scope_type == "workflow", ResourceLink.scope_id == ctx["run_id"],
+            )))
+            if owned != ids:
+                raise StepFailure("One or more files are unavailable to this workflow.")
+            if ctx.get("test"):
+                message = f"Test run would save {len(ids)} file(s) to your Library."
+            else:
+                try:
+                    for resource_id in sorted(ids):
+                        save_owned_resource_to_library(session, owner_id, resource_id)
+                except SQLAlchemyError:
+                    session.rollback()
+                    raise StepFailure("Could not save the files to your Library.") from None
+                message = f"Saved {len(ids)} file(s) to your Library."
+            return {"destination": "library"}, {"message": message, **resources}, [message]
+        recipient = (config.get("recipient") or "the workflow owner").strip()
         message = last.get("text") if isinstance(last, dict) and isinstance(last.get("text"), str) else json.dumps(_clip(last, 1500), default=str)
+        if ctx.get("test"):
+            return {"to": recipient, "channel": "in-app"}, {"message": message, **resources}, ["Test preview. Skipped delivery."]
         logs.append(f"Delivered in the app for {recipient} (no email or chat provider is configured)")
-        return {"to": recipient, "channel": "in-app"}, {"message": message, "delivered": "in-app"}, logs
+        return {"to": recipient, "channel": "in-app"}, {"message": message, "delivered": "in-app", **resources}, logs
 
     raise StepFailure(f"Unknown step type “{kind}”.")
 
@@ -249,11 +389,14 @@ def _initial_results(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{"step_id": step["id"], "title": step.get("title") or step["kind"], "kind": step["kind"], "status": "pending", "input": None, "output": None, "logs": [], "error": "", "started_at": None, "finished_at": None} for step in steps]
 
 
-def create_run(session: Session, workflow: WorkflowDefinition, trigger: str) -> WorkflowRunRecord:
-    steps = workflow.steps or []
-    run = WorkflowRunRecord(workflow_id=workflow.id, workflow_name=workflow.name, trigger=trigger, plan=[], started_at=now_utc(), status="running", results=_initial_results(steps))
+def create_run(
+    session: Session, workflow: WorkflowDefinition, trigger: str, *, test_steps: list[dict[str, Any]] | None = None,
+) -> WorkflowRunRecord:
+    steps = test_steps if test_steps is not None else workflow.steps or []
+    run = WorkflowRunRecord(workflow_id=workflow.id, workflow_name=workflow.name, trigger=trigger, plan=steps, started_at=now_utc(), status="running", results=_initial_results(steps))
     session.add(run)
-    workflow.last_run_at = run.started_at
+    if trigger != "test":
+        workflow.last_run_at = run.started_at
     session.commit()
     return run
 
@@ -272,8 +415,8 @@ async def execute_run(app: Any, run_id: str, owner_id: str) -> None:
         workflow = session.get(WorkflowDefinition, run.workflow_id) if run else None
         if run is None:
             return
-        steps = list(workflow.steps or []) if workflow else []
-        ctx: dict[str, Any] = {"datasets": [], "last": None, "stop": False}
+        steps = run.plan or (list(workflow.steps or []) if workflow else [])
+        ctx: dict[str, Any] = {"datasets": [], "last": None, "stop": False, "test": run.trigger == "test", "run_id": run.id}
         failed = False
         for index, step in enumerate(steps):
             session.refresh(run)
@@ -290,23 +433,45 @@ async def execute_run(app: Any, run_id: str, owner_id: str) -> None:
                 continue
             results[index].update(status="running", started_at=now_utc().isoformat())
             _save(session, run, results)
+            if step.get("kind") == "ai":
+                def report(message: str, *, input: dict | None = None, output: dict | None = None) -> None:
+                    current = results[index]
+                    message = message[:240]
+                    if current.get("progress") != message:
+                        current["logs"] = [*current["logs"][-31:], message]
+                    current["progress"] = message
+                    if input is not None:
+                        current["input"] = _clip(input, 8000)
+                    if output is not None:
+                        current["output"] = output
+                    _save(session, run, results)
+
+                ctx["ai_progress"] = report
             try:
                 step_input, output, logs = await _run_step(app, session, owner_id, step, ctx)
-                results[index].update(status="success", input=_clip(step_input), output=_clip(output), logs=logs)
+                saved_output = output if isinstance(output, dict) and (output.get("kind") == "query_table" or output.get("resources")) else _clip(output)
+                if results[index]["input"] is None:
+                    results[index]["input"] = _clip(step_input)
+                results[index].update(status="success", output=saved_output, logs=[*results[index]["logs"], *logs])
                 ctx["last"] = output
+            except RunnerCancelled:
+                for item in results[index:]:
+                    item["status"] = "cancelled"
+                run.status, run.finished_at = "cancelled", now_utc()
+                _save(session, run, results)
+                return
             except StepFailure as exc:
-                results[index].update(status="failed", error=str(exc)[:600], logs=[str(exc)[:300]])
+                results[index].update(status="failed", error=str(exc)[:600], logs=[*results[index]["logs"], str(exc)[:300]])
                 failed, run.error = True, f"Step {index + 1} (“{step.get('title', '')}”) failed: {exc}"[:800]
             except Exception as exc:  # a bug in one step must not leave the run "running" forever
                 log.exception("Workflow step crashed")
-                results[index].update(status="failed", error=f"Unexpected error: {type(exc).__name__}", logs=["Unexpected error"])
+                results[index].update(status="failed", error=f"Unexpected error: {type(exc).__name__}", logs=[*results[index]["logs"], "Unexpected error"])
                 failed, run.error = True, f"Step {index + 1} crashed: {type(exc).__name__}"
             results[index]["finished_at"] = now_utc().isoformat()
             _save(session, run, results)
         session.refresh(run)
-        if run.cancelled_at is None:
-            run.status = "failed" if failed else "success"
-            run.finished_at = now_utc()
+        run.status = "cancelled" if run.cancelled_at is not None else "failed" if failed else "success"
+        run.finished_at = now_utc()
         session.commit()
 
 

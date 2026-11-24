@@ -102,6 +102,10 @@ class QueryResult(BaseModel):
     truncated: bool
 
 
+class TypedQueryResult(QueryResult):
+    column_types: list[str]
+
+
 class TableDetails(TableSummary):
     columns: list[Column]
     preview: QueryResult | None = None

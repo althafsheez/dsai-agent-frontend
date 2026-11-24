@@ -4,19 +4,17 @@ import Link from "next/link";
 import { ArrowLeft, Loader2, Square } from "lucide-react";
 import type { WorkflowStepResultDto } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { formatDuration, formatWhen, pretty, runDuration } from "../logic/format";
+import { formatDuration, formatWhen, runDuration } from "../logic/format";
 import { useCancelRun, useNow, useWorkflowRun } from "../use-workflows";
 import { Connector, StatusBadge, StepCard } from "./flow-parts";
+import { WorkflowOutput } from "./workflow-output";
+import { WorkflowStepProgress } from "./workflow-step-progress";
 
 function Panel({ title, value, empty }: { title: string; value: unknown; empty: string }) {
-  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
-  const prose = typeof record?.text === "string" ? record.text : typeof record?.message === "string" ? record.message : "";
   return (
     <div className="min-w-0 rounded-lg border bg-background/60">
       <p className="border-b px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">{title}</p>
-      {value === null || value === undefined ? <p className="px-2.5 py-3 text-[11px] text-muted-foreground">{empty}</p>
-        : prose ? <p className="whitespace-pre-wrap px-2.5 py-2 text-xs leading-relaxed">{prose}</p>
-        : <pre className="max-h-64 overflow-auto px-2.5 py-2 text-[11px] leading-relaxed">{pretty(value)}</pre>}
+      <div className="p-2.5 text-xs"><WorkflowOutput value={value} empty={empty} /></div>
     </div>
   );
 }
@@ -27,6 +25,7 @@ function StepResult({ index, result }: { index: number; result: WorkflowStepResu
     <StepCard index={index} step={{ kind: result.kind, title: result.title, detail: "" }} status={result.status}>
       {waiting ? null : (
         <div className="mt-3 grid gap-2.5">
+          <WorkflowStepProgress step={result} />
           <div className="grid gap-2.5 md:grid-cols-2">
             <Panel title="Input" value={result.input} empty={result.status === "running" ? "Reading…" : "No input"} />
             <Panel title="Output" value={result.output} empty={result.status === "running" ? "Working…" : result.status === "skipped" ? "Skipped" : "No output"} />
@@ -53,7 +52,7 @@ export function WorkflowRunPage({ workflowId, runId }: { workflowId: string; run
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2.5 text-xl font-semibold tracking-tight">Run<StatusBadge status={run.status} /></h1>
-          <p className="mt-1 text-xs text-muted-foreground">Started {formatWhen(run.started_at)} · {run.trigger === "schedule" ? "by its schedule" : "by hand"} · {run.status === "running" ? `running for ${formatDuration(runDuration(run, now))}` : `took ${formatDuration(runDuration(run))}`}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Started {formatWhen(run.started_at)} · {run.trigger === "test" ? "as a test" : run.trigger === "schedule" ? "by its schedule" : "by hand"} · {run.status === "running" ? `running for ${formatDuration(runDuration(run, now))}` : `took ${formatDuration(runDuration(run))}`}</p>
         </div>
         {run.status === "running" ? <Button type="button" variant="outline" size="sm" disabled={cancel.isPending} onClick={() => cancel.mutate(run.id)}>{cancel.isPending ? <Loader2 className="animate-spin" /> : <Square />}Stop</Button> : null}
       </header>

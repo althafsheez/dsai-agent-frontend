@@ -1004,3 +1004,36 @@ async def test_e2b_python_failure_is_sanitized_at_the_tool_step(tmp_path, demo_h
             assert "raw-e2b-secret" not in str(events)
             assert "raw-python-password" not in str(events)
             assert events[-1]["type"] == "agent.completed"
+
+
+async def test_workflow_first_response_timeout_switches_models(monkeypatch):
+    from google.genai import types
+
+    from agentic.agent.react_loop import ReActAgent
+    from agentic.runtime.diagnostics import GeminiRequests
+
+    calls = []
+    closed = []
+
+    async def stream(self, client, *, model, **kwargs):
+        calls.append(model)
+        try:
+            if model == "first":
+                await asyncio.sleep(10)
+            yield types.GenerateContentResponse(candidates=[
+                types.Candidate(content=types.Content(role="model", parts=[types.Part.from_text(text="Done.")]))
+            ])
+        finally:
+            closed.append(model)
+
+    async def execute_tool(name, arguments):
+        pytest.fail("The response does not call tools.")
+
+    monkeypatch.setattr(GeminiRequests, "stream", stream)
+    events = [event async for event in ReActAgent.stream_turns(
+        client=object(), model="first", contents=[], config=types.GenerateContentConfig(),
+        max_turns=2, execute_tool=execute_tool, fallback_models=("second",), response_idle_timeout=0.05,
+    )]
+    assert calls == ["first", "second"] and closed == calls
+    assert any("No response from first. Trying second" in event.get("content", "") for event in events)
+    assert events[-1]["content"] == "Done."

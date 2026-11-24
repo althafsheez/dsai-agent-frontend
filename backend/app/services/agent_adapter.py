@@ -15,7 +15,7 @@ from agentic.runtime.contracts import InputSource, ToolContext
 from ..connectors.service import ConnectionService
 from ..connectors.tools import database_inventory
 
-from ..models import AgentMemory, AgentRun, Chat, FileObject, Message, Resource, ResourceLink, WorkspaceContextFile
+from ..models import AgentMemory, AgentRun, Chat, FileObject, Message, Resource, ResourceLink, WorkflowDefinition, WorkflowRunRecord, WorkspaceContextFile
 from ..storage import LocalFileStorage
 from .dataset_preview import inspect_dataset
 
@@ -73,6 +73,13 @@ class AgentToolAdapter:
         return session.execute(query).unique()
 
     async def prepare(self, context: ToolContext, input_path: Callable[[str], str]) -> dict[str, Any]:
+        if context.transient_inputs is not None:
+            context.input_resources = tuple(
+                {"id": resource_id, "resource_id": resource_id, "name": source.filename,
+                 "resource_type": "dataset", "path": input_path(source.filename)}
+                for resource_id, source in context.transient_inputs.items()
+            )
+            return {"files": list(context.input_resources), "workflow": context.workflow_run_id is not None}
         with self._session_factory() as session:
             chat = session.get(Chat, context.chat_id)
             inputs = [
@@ -108,6 +115,8 @@ class AgentToolAdapter:
             return prepared
 
     def resolve_inputs(self, context: ToolContext, resource_ids: tuple[str, ...]) -> dict[str, InputSource]:
+        if context.transient_inputs is not None:
+            return {key: context.transient_inputs[key] for key in resource_ids if key in context.transient_inputs}
         with self._session_factory() as session:
             chat = session.get(Chat, context.chat_id)
             return {
@@ -125,12 +134,28 @@ class AgentToolAdapter:
     ) -> dict[str, Any]:
         resource_type = "dataset" if extension in {".csv", ".parquet", ".xlsx", ".xls"} else "artifact"
         with self._session_factory() as session:
-            run_resources = session.scalars(select(Resource).where(Resource.run_id == context.run_id))
+            if context.workflow_run_id:
+                run = session.get(WorkflowRunRecord, context.workflow_run_id)
+                workflow = session.get(WorkflowDefinition, run.workflow_id) if run else None
+                if not run or run.status != "running" or run.cancelled_at or not workflow or workflow.owner_id != context.user_id:
+                    raise ValueError("Workflow run is unavailable.")
+                scope, scope_id = "workflow", run.id
+                query = select(Resource).join(ResourceLink, ResourceLink.resource_id == Resource.id).where(
+                    ResourceLink.scope_type == scope, ResourceLink.scope_id == scope_id,
+                    Resource.created_by == context.user_id,
+                )
+            else:
+                if context.transient_inputs is not None:
+                    raise ValueError("Output scope is unavailable.")
+                scope, scope_id = "chat", context.chat_id
+                query = select(Resource).where(Resource.run_id == context.run_id)
+            run_resources = session.scalars(query)
             resource = next(
                 (
                     item for item in run_resources
                     if item.metadata_json.get("sandbox_path") == path
                     and item.metadata_json.get("sha256") == digest
+                    and item.metadata_json.get("workflow_step_id") == context.workflow_step_id
                 ),
                 None,
             )
@@ -153,12 +178,13 @@ class AgentToolAdapter:
                     origin="generated",
                     source="output",
                     created_by=context.user_id,
-                    run_id=context.run_id,
+                    run_id=None if context.workflow_run_id else context.run_id,
                     metadata_json={
                         "sandbox_path": path,
                         "sha256": digest,
                         "size_bytes": len(content),
                         "producing_step_id": context.step_id,
+                        **({"workflow_step_id": context.workflow_step_id} if context.workflow_run_id else {}),
                         "input_resource_ids": [item["resource_id"] for item in context.input_resources],
                         **inspect_dataset(name, content),
                     },
@@ -167,9 +193,9 @@ class AgentToolAdapter:
                 session.flush()
                 session.add(ResourceLink(
                     resource_id=resource.id,
-                    scope_type="chat",
-                    scope_id=context.chat_id,
-                    message_id=context.assistant_message_id or None,
+                    scope_type=scope,
+                    scope_id=scope_id,
+                    message_id=None if context.workflow_run_id else context.assistant_message_id or None,
                 ))
                 session.commit()
                 session.refresh(resource)

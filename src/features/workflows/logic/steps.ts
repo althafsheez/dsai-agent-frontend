@@ -1,15 +1,35 @@
-import type { WorkflowRecordDto, WorkflowStepDto, WorkflowStepKind, WorkflowTriggerDto } from "@/lib/api";
+import type { WorkflowAction, WorkflowRecordDto, WorkflowStepDto, WorkflowStepKind, WorkflowTriggerDto } from "@/lib/api";
 
 export interface StepKindInfo { kind: WorkflowStepKind; label: string; hint: string; needs: string }
 
 /** What a person can add to a flow. The `needs` line is shown in the picker so nobody has to guess what a step wants. */
 export const STEP_KINDS: StepKindInfo[] = [
-  { kind: "data", label: "Get data", hint: "Read one or more datasets from your Library.", needs: "Needs: a dataset" },
+  { kind: "data", label: "Extension", hint: "Select a database or app connection.", needs: "Needs: a saved connection" },
   { kind: "script", label: "Calculate (Python)", hint: "The AI writes a Python script that computes numbers, rankings or comparisons.", needs: "Needs: what to calculate" },
   { kind: "ai", label: "Ask the AI", hint: "The AI reads the data and earlier results and answers in plain words.", needs: "Needs: a question" },
   { kind: "condition", label: "Only if…", hint: "Stop the run quietly unless the previous number passes a test.", needs: "Needs: a test and a number" },
   { kind: "notify", label: "Send the result", hint: "Deliver the result in the app.", needs: "Needs: nothing" },
+  { kind: "human", label: "Human Review", hint: "Request a decision before continuing.", needs: "Needs: review instructions" },
 ];
+
+export function draftOnlyReason(steps: WorkflowStepDto[]): string | undefined {
+  if (steps.some((step) => step.kind === "human")) return "Workflows with Human Review steps can only be saved as drafts.";
+  if (steps.some((step) => step.kind === "data" && step.config?.connection_id && step.config.connection_provider !== "postgresql")) {
+    return "Only PostgreSQL connections support workflow actions.";
+  }
+  if (steps.some((step) => step.kind === "data" && step.config?.connection_id && !appliedAction(step.config, step.detail))) {
+    return "Generate and apply a PostgreSQL action before running.";
+  }
+}
+
+export function appliedAction(config: Record<string, unknown>, instructions: string): WorkflowAction | undefined {
+  const action = config.action as Partial<WorkflowAction> | undefined;
+  if (action?.provider === "postgresql" && action.connection_id === config.connection_id
+    && config.connection_provider === "postgresql" && action.instructions === instructions.trim()
+    && action.operation === "query" && action.validation === "valid" && typeof action.arguments?.sql === "string") {
+    return action as WorkflowAction;
+  }
+}
 
 export const kindInfo = (kind: string): StepKindInfo => STEP_KINDS.find((item) => item.kind === kind) ?? { kind: "ai", label: kind, hint: "", needs: "" };
 
@@ -47,30 +67,51 @@ export function describeSchedule(trigger: WorkflowTriggerDto): string {
   return `Every day at ${clock}`;
 }
 
-/** The problems that would stop a run, in plain words; empty means it can be saved and activated. */
+/** Issues that block activation or execution. Drafts can be incomplete. */
 export function problems(name: string, steps: WorkflowStepDto[]): string[] {
   const issues: string[] = [];
   if (!name.trim()) issues.push("Give the workflow a name.");
   if (!steps.length) issues.push("Add at least one step.");
+  const draftOnly = draftOnlyReason(steps);
+  if (draftOnly) issues.push(draftOnly);
   steps.forEach((step, index) => {
     const label = `Step ${index + 1} (${step.title || kindInfo(step.kind).label})`;
     const config = step.config ?? {};
-    if (step.kind === "data" && !(Array.isArray(config.dataset_ids) && config.dataset_ids.length)) issues.push(`${label}: choose a dataset.`);
+    if (step.kind === "data" && !config.connection_id && !(Array.isArray(config.dataset_ids) && config.dataset_ids.length)) issues.push(`${label}: choose a saved connection.`);
     if (step.kind === "script" && !step.detail.trim()) issues.push(`${label}: say what to calculate.`);
     if (step.kind === "ai" && !step.detail.trim()) issues.push(`${label}: write the question for the AI.`);
-    if (step.kind === "condition" && Number.isNaN(Number(config.value))) issues.push(`${label}: the number to compare with is not a number.`);
+    if (!STEP_KINDS.some((item) => item.kind === step.kind)) issues.push(`${label}: choose a supported step type.`);
+    if (step.kind === "condition" && (!String(config.value ?? "").trim() || !Number.isFinite(Number(config.value)))) issues.push(`${label}: the number to compare with is not a number.`);
   });
   const firstData = steps.findIndex((step) => step.kind === "data");
-  const firstUse = steps.findIndex((step) => step.kind === "script" || step.kind === "ai");
-  if (firstUse >= 0 && (firstData < 0 || firstData > firstUse)) issues.push("Put a “Get data” step before the steps that use it.");
+  const firstUse = steps.findIndex((step) => step.kind === "script" && !(Array.isArray(step.config?.dataset_ids) && step.config.dataset_ids.length));
+  if (firstUse >= 0 && (firstData < 0 || firstData > firstUse)) issues.push("Attach a dataset to the step that uses it.");
   return issues;
 }
 
-export const needsScript = (step: WorkflowStepDto) => step.kind === "script" && !(typeof step.config?.script === "string" && step.config.script) ;
+export const attachedIds = (step?: WorkflowStepDto) => Array.isArray(step?.config?.dataset_ids) ? step.config.dataset_ids as string[] : [];
+export function scriptDatasetIds(steps: WorkflowStepDto[], index: number) {
+  const direct = attachedIds(steps[index]);
+  return direct.length ? direct : attachedIds(steps.slice(0, index).reverse().find((entry) => entry.kind === "data"));
+}
+
+export function scriptReady(step: WorkflowStepDto, datasetIds: string[]) {
+  const builtWith = step.config?.script_dataset_ids;
+  return Boolean(step.config?.script) && (!step.config?.script_for || step.config.script_for === step.detail) &&
+    (!Array.isArray(builtWith) || (builtWith.length === datasetIds.length && builtWith.every((id, index) => id === datasetIds[index])));
+}
+
+export function executionIssues(name: string, steps: WorkflowStepDto[]) {
+  const issues = problems(name, steps);
+  if (steps.some((step, index) => step.kind === "script" && !scriptReady(step, scriptDatasetIds(steps, index)))) {
+    issues.push("Build each Custom step with its current datasets before running.");
+  }
+  return issues;
+}
 
 export function datasetIdsOf(steps: WorkflowStepDto[]): string[] {
   const ids = new Set<string>();
-  for (const step of steps) if (step.kind === "data" && Array.isArray(step.config?.dataset_ids)) for (const id of step.config.dataset_ids as string[]) ids.add(id);
+  for (const step of steps) if (Array.isArray(step.config?.dataset_ids)) for (const id of step.config.dataset_ids as string[]) ids.add(id);
   return [...ids];
 }
 
