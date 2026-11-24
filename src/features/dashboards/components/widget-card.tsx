@@ -2,24 +2,23 @@
 
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Funnel, FunnelChart, LabelList, Line, LineChart, PolarAngleAxis, PolarGrid, Pie, PieChart, Radar, RadarChart, ResponsiveContainer, Scatter, ScatterChart, Tooltip, Treemap, XAxis, YAxis, ZAxis } from "recharts";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowLeftRight, ArrowUp, Code2, GripVertical, LoaderCircle, Pencil, Trash2 } from "lucide-react";
+import { Code2, GripVertical, LoaderCircle, Pencil, Trash2 } from "lucide-react";
 import { runCustomChart, runDashboardSql } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { CHART_LABEL, applyFilters, categoryColumns, formatNumber, numberLikeColumns, gaugeValue, groupedPoints, histogramBins, kpiValue, numericColumns, scatterPoints } from "../logic/aggregate";
 import { resultFromSql } from "../logic/sql";
 import { GROUPED_TYPES, NUMERIC_X_TYPES } from "../types";
 import type { CustomResult, DashboardWidget, DatasetLite, Filters, WidgetType } from "../types";
-import type { Reorder } from "../use-reorder";
+import type { GridHandle } from "./grid-canvas";
 
 const COLORS = ["#8fb8a8", "#9db4d8", "#d4b483", "#c49aa8", "#a99bd0", "#7fc2c9"];
 const tooltipStyle = { background: "#1d1f21", border: "1px solid #3a3d40", borderRadius: 6, fontSize: 11 };
-const spanClass = { 1: "md:col-span-1", 2: "md:col-span-2", 3: "md:col-span-3" } as const;
 
 function GaugeDial({ title, value, max }: { title: string; value: number; max: number }) {
   const ratio = max > 0 ? Math.min(Math.max(value / max, 0), 1) : 0;
   const arc = Math.PI * 70;
   return (
-    <div className="mt-2 flex h-52 flex-col items-center justify-center" role="img" aria-label={`${title}: ${formatNumber(value)} of ${formatNumber(max)}`}>
+    <div className="mt-2 flex min-h-24 flex-1 flex-col items-center justify-center" role="img" aria-label={`${title}: ${formatNumber(value)} of ${formatNumber(max)}`}>
       <svg viewBox="0 0 180 100" className="w-52">
         <path d="M20,90 A70,70 0 0 1 160,90" fill="none" stroke="#2c2f31" strokeWidth="14" strokeLinecap="round" />
         <path d="M20,90 A70,70 0 0 1 160,90" fill="none" stroke={COLORS[0]} strokeWidth="14" strokeLinecap="round" strokeDasharray={`${arc * ratio} ${arc}`} />
@@ -38,7 +37,7 @@ function WidgetBody({ widget, dataset, selected, onSelect }: BodyProps) {
   }
   if (widget.type === "table") {
     return (
-      <div className="mt-2 max-h-56 overflow-auto">
+      <div className="mt-2 min-h-0 flex-1 overflow-auto">
         <table className="w-full text-left text-[11px]">
           <thead className="sticky top-0 bg-surface text-muted-foreground"><tr>{dataset.columns.map((column) => <th key={column.name} className="px-2 py-1 font-medium">{column.name}</th>)}</tr></thead>
           <tbody className="divide-y">{dataset.rows.slice(0, 10).map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex} className="max-w-[140px] truncate px-2 py-1">{String(cell ?? "")}</td>)}</tr>)}</tbody>
@@ -75,7 +74,7 @@ interface ChartViewProps {
 function ChartView({ type, title, points, dots = [], xName, yName, selected = [], onSelect, emptyText = "Pick the columns this chart needs." }: ChartViewProps) {
   const axis = { tick: { fontSize: 10, fill: "#8a9094" } };
   const frame = (chart: React.ReactElement, label: string) => (
-    <div className={cn("mt-2 h-52 w-full", Boolean(onSelect) && "[&_.recharts-wrapper]:cursor-pointer")} role="img" aria-label={`${title} ${label}`}><ResponsiveContainer width="100%" height="100%">{chart}</ResponsiveContainer></div>
+    <div className={cn("mt-2 min-h-24 w-full flex-1", Boolean(onSelect) && "[&_.recharts-wrapper]:cursor-pointer")} role="img" aria-label={`${title} ${label}`}><ResponsiveContainer width="100%" height="100%">{chart}</ResponsiveContainer></div>
   );
   const valueAxis = <YAxis {...axis} width={44} tickFormatter={(value: number) => formatNumber(Number(value))} />;
   const grid = <CartesianGrid stroke="#2c2f31" vertical={false} />;
@@ -136,7 +135,7 @@ function ResultBody({ widget, result }: { widget: DashboardWidget; result: Custo
       return <GaugeDial title={widget.title} value={result.value ?? 0} max={result.max ?? 100} />;
     case "table":
       return (
-        <div className="mt-2 max-h-56 overflow-auto">
+        <div className="mt-2 min-h-0 flex-1 overflow-auto">
           <table className="w-full text-left text-[11px]">
             <thead className="sticky top-0 bg-surface text-muted-foreground"><tr>{(result.columns ?? []).map((column) => <th key={column} className="px-2 py-1 font-medium">{column}</th>)}</tr></thead>
             <tbody className="divide-y">{(result.rows ?? []).slice(0, 12).map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex} className="max-w-[140px] truncate px-2 py-1">{cell}</td>)}</tr>)}</tbody>
@@ -192,13 +191,11 @@ interface WidgetCardProps {
   editable?: boolean;
   /** Active filters; this widget's own category column is not filtered so its other bars stay visible. */
   filters?: Filters;
-  /** Width actually drawn (after row packing); defaults to the saved span. */
-  span?: 1 | 2 | 3;
   onSelect?: (column: string, value: string) => void;
   onChange?: (widget: DashboardWidget) => void;
   onRemove?: () => void;
-  /** Move buttons and drag handle (edit mode only). */
-  reorder?: Reorder;
+  /** Grip that moves the tile on the free grid (only while the canvas is unlocked). */
+  handle?: GridHandle;
   /** Opens this widget in the editor panel (edit mode). When given, the column pickers move into that panel. */
   onOpen?: () => void;
   /** This widget is the one open in the editor panel. */
@@ -231,8 +228,7 @@ export function retype(widget: DashboardWidget, type: WidgetType, dataset: Datas
   return { ...next, x, y: widget.y ?? numbers[0], agg: widget.agg === "count" && !widget.y && widget.type !== "gauge" ? "count" : widget.type === "gauge" || NUMERIC_X_TYPES.includes(widget.type) ? "sum" : widget.agg };
 }
 
-export function WidgetCard({ widget, dataset, editable, filters = {}, span, onSelect, onChange, onRemove, reorder, onOpen, active }: WidgetCardProps) {
-  const next = (value: DashboardWidget["span"]) => (value === 3 ? 1 : ((value + 1) as DashboardWidget["span"]));
+export function WidgetCard({ widget, dataset, editable, filters = {}, onSelect, onChange, onRemove, handle, onOpen, active }: WidgetCardProps) {
   const own = widget.x && GROUPED_TYPES.includes(widget.type) ? widget.x : undefined;
   const effective: Filters = own ? Object.fromEntries(Object.entries(filters).filter(([column]) => column !== own)) : filters;
   const data = dataset ? applyFilters(dataset, effective) : undefined;
@@ -244,24 +240,18 @@ export function WidgetCard({ widget, dataset, editable, filters = {}, span, onSe
   const allColumns = dataset?.columns.map((item) => item.name) ?? [];
   return (
     <article
-      className={cn("min-w-0 rounded-xl border bg-surface/50 p-3.5 transition-shadow", spanClass[span ?? widget.span], reorder?.state === "dragging" && "opacity-40", reorder?.state === "over" && "ring-2 ring-sage/70", active && "border-sage/70 ring-1 ring-sage/50")}
-      aria-label={widget.title} {...(editable && reorder ? reorder.dragProps : {})}
+      className={cn("flex h-full min-w-0 flex-col overflow-hidden rounded-xl border bg-surface/50 p-3.5 transition-shadow", onOpen && "cursor-pointer hover:border-border-strong", active && "border-sage/70 ring-1 ring-sage/50")}
+      aria-label={widget.title}
+      onClick={onOpen ? (event) => { if (!(event.target as HTMLElement).closest("button, input, select, textarea, a")) onOpen(); } : undefined}
     >
       <header className="flex items-center gap-2">
-        {editable && reorder ? <span aria-hidden="true" title="Drag to rearrange" className="grid size-7 shrink-0 cursor-grab place-items-center rounded text-muted-foreground hover:bg-raised active:cursor-grabbing"><GripVertical className="size-3.5" /></span> : null}
+        {handle ? <span aria-label={`Move ${widget.title}`} role="button" title="Drag to move" {...handle} className="grid size-7 shrink-0 cursor-grab touch-none place-items-center rounded text-muted-foreground hover:bg-raised active:cursor-grabbing"><GripVertical className="size-3.5" /></span> : null}
         {editable ? (
           <input aria-label="Widget title" value={widget.title} onChange={(event) => onChange?.({ ...widget, title: event.target.value })} className="h-7 min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 text-xs font-medium outline-none hover:border-border focus:border-border-strong" />
         ) : <h3 className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">{widget.title}</h3>}
         {editable ? (
           <>
-            {reorder ? (
-              <>
-                <button type="button" aria-label={`Move ${widget.title} earlier`} title="Move earlier" disabled={reorder.index === 0} onClick={() => reorder.onMove(-1)} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-30"><ArrowUp className="size-3.5" /></button>
-                <button type="button" aria-label={`Move ${widget.title} later`} title="Move later" disabled={reorder.index === reorder.count - 1} onClick={() => reorder.onMove(1)} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-30"><ArrowDown className="size-3.5" /></button>
-              </>
-            ) : null}
             {onOpen ? <button type="button" aria-label={`Edit ${widget.title}`} title="Edit this widget: tables, query, type" onClick={onOpen} className="inline-flex h-7 items-center gap-1 rounded px-1.5 text-[11px] text-muted-foreground hover:bg-raised hover:text-foreground"><Pencil className="size-3.5" />Edit</button> : null}
-            <button type="button" aria-label={`Resize ${widget.title}`} title={`Width ${widget.span}/3, click to change`} onClick={() => onChange?.({ ...widget, span: next(widget.span) })} className="inline-flex h-7 items-center gap-1 rounded px-1.5 text-[11px] text-muted-foreground hover:bg-raised hover:text-foreground"><ArrowLeftRight className="size-3" />{widget.span}/3</button>
             <button type="button" aria-label={`Remove ${widget.title}`} onClick={onRemove} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-raised hover:text-red-300"><Trash2 className="size-3.5" /></button>
           </>
         ) : null}

@@ -78,7 +78,6 @@ export function describeChanges(before: DashboardWidget[], after: DashboardWidge
     if (prior.title !== widget.title) changes.push(`Renamed ${label(prior)} to ${label(widget)}`);
     const columns = (["x", "y", "agg"] as const).filter((key) => prior[key] !== widget[key]);
     if (columns.length) changes.push(`Changed the data of ${label(widget)} (${columns.map((key) => ({ x: "category column", y: "value column", agg: "aggregate" })[key]).join(", ")})`);
-    if (prior.span !== widget.span) changes.push(`Resized ${label(widget)} to ${widget.span}/3`);
   }
   const kept = after.filter((widget) => old.has(widget.id)).map((widget) => widget.id);
   const was = before.filter((widget) => now.has(widget.id)).map((widget) => widget.id);

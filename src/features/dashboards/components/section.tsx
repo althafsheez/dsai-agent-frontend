@@ -21,16 +21,18 @@ interface SectionProps {
   /** Sections that can be folded away start open unless this is false. */
   collapsible?: boolean;
   defaultOpen?: boolean;
+  /** Inside a side panel: no card, just a divider. */
+  flat?: boolean;
   children: React.ReactNode;
 }
 
 /** One clearly separate area of the designer: a header band with its own accent, then the content. */
-export function Section({ title, hint, icon, tone, actions, collapsible, defaultOpen = true, children }: SectionProps) {
+export function Section({ title, hint, icon, tone, actions, collapsible, defaultOpen = true, flat = false, children }: SectionProps) {
   const [open, setOpen] = useState(defaultOpen);
   const bodyId = useId();
   return (
-    <section aria-label={title} className={cn("overflow-hidden rounded-xl border border-t-2 bg-surface/30", TONES[tone])}>
-      <header className="flex flex-wrap items-center gap-2 border-b bg-surface/60 px-3.5 py-2">
+    <section aria-label={title} className={flat ? "border-b" : cn("overflow-hidden rounded-xl border border-t-2 bg-surface/30", TONES[tone])}>
+      <header className={cn("flex flex-wrap items-center gap-2", flat ? "px-4 py-2.5" : "border-b bg-surface/60 px-3.5 py-2")}>
         <span className="text-muted-foreground" aria-hidden="true">{icon}</span>
         <div className="min-w-0 flex-1">
           <h2 className="text-xs font-semibold uppercase tracking-[0.08em]">{title}</h2>
@@ -43,7 +45,7 @@ export function Section({ title, hint, icon, tone, actions, collapsible, default
           </button>
         ) : null}
       </header>
-      <div id={bodyId} hidden={!open} className="p-3.5">{children}</div>
+      <div id={bodyId} hidden={!open} className={flat ? "px-4 pb-3" : "p-3.5"}>{children}</div>
     </section>
   );
 }

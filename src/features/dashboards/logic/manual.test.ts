@@ -29,7 +29,6 @@ describe("hand edits", () => {
     const changes = describeChanges(before, after);
     expect(changes).toContain("Changed “b” from Bar to Pie");
     expect(changes).toContain("Renamed “b” to “Share”");
-    expect(changes).toContain("Resized “a” to 3/3");
     expect(changes).toContain("Added “c”");
     expect(changes).toContain("Rearranged the tiles");
     expect(describeChanges(before, before)).toEqual([]);

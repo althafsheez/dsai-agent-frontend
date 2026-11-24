@@ -128,6 +128,16 @@ def _custom_tile(widget: dict[str, Any], data: dict[str, dict[str, Any]], tile: 
     return {**tile, "labels": out["labels"][:10], "series": out["series"][:10]}
 
 
+def delta_of(tiles: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Change of the latest point against the one before it, for the first trend (line or area) tile. None when there is no trend."""
+    for tile in tiles:
+        series = tile.get("series") or []
+        if tile.get("type") in ORDERED and len(series) >= 2 and series[-2]:
+            change = (series[-1] - series[-2]) / abs(series[-2]) * 100
+            return {"text": f"{change:+.1f}%", "positive": change >= 0, "label": tile.get("title", "")}
+    return None
+
+
 def build_preview(widgets: list[dict[str, Any]], data: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """The listing card: the dashboard's first widgets as small tiles, in the same order, types and widths as the dashboard itself.
 
@@ -144,7 +154,7 @@ def build_preview(widgets: list[dict[str, Any]], data: dict[str, dict[str, Any]]
             tiles.append(tile)
         if len(tiles) == TILES:
             break
-    return {"tiles": tiles, "total": len(widgets)}
+    return {"tiles": tiles, "total": len(widgets), "delta": delta_of(tiles)}
 
 
 def compute_preview(db: Session, storage: Any, widgets: list[dict[str, Any]]) -> dict[str, Any]:

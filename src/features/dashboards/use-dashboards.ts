@@ -9,7 +9,7 @@ import type { DashboardWidget, DatasetLite } from "./types";
 
 export const dashboardKeys = { all: ["dashboards"] as const, one: (id: string) => ["dashboards", id] as const, datasets: ["dashboard-datasets"] as const };
 
-export const useDashboards = () => useQuery({ queryKey: dashboardKeys.all, queryFn: listDashboards });
+export const useDashboards = () => useQuery({ queryKey: dashboardKeys.all, queryFn: listDashboards, refetchInterval: 30_000 });
 export const usePeople = (enabled = true) => useQuery({ queryKey: ["dashboard-people"], queryFn: listDashboardPeople, staleTime: 60_000, enabled });
 export const useDashboard = (id: string) => useQuery({ queryKey: dashboardKeys.one(id), queryFn: () => getDashboard(id) });
 

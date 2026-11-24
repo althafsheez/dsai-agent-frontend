@@ -224,7 +224,7 @@ async def test_listing_preview_is_built_from_the_data_and_pins_are_personal(clie
     assert len(kinds[0]["series"]) == 10 and sum(kinds[0]["series"]) == 4 and kinds[2]["ratio"] == 0.45
 
     empty = (await client.put("/api/dashboards", headers=OWNER, json={"id": "db-empty", "name": "Empty"})).json()
-    assert empty["preview"] == {"tiles": [], "total": 0}
+    assert empty["preview"] == {"tiles": [], "total": 0, "delta": None}
 
     pinned = await client.put("/api/dashboards/db-share/pin", headers=OTHER, json={"pinned": True})
     assert pinned.status_code == 200 and pinned.json()["pinned"] is True

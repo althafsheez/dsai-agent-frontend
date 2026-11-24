@@ -13,6 +13,8 @@ export interface CustomResult { kind: CustomKind; title?: string; labels?: strin
 export type Filters = Record<string, string[]>;
 export type Aggregate = "sum" | "avg" | "count";
 
+export interface WidgetLayout { c: number; r: number; w: number; h: number }
+
 export interface DashboardWidget {
   id: string;
   type: WidgetType;
@@ -23,8 +25,10 @@ export interface DashboardWidget {
   /** Numeric column to aggregate; unused for count */
   y?: string;
   agg: Aggregate;
-  /** Grid columns taken out of 3 */
+  /** Starting width for tiles with no `layout` yet (1-3 thirds of the grid) */
   span: 1 | 2 | 3;
+  /** Free-grid cell: column, row, width and height in grid units (12 columns). */
+  layout?: WidgetLayout;
   /** "custom" tiles only: the Python script the AI wrote for a chart no preset covers, the request behind it, and every dataset it reads. */
   script?: string;
   request?: string;

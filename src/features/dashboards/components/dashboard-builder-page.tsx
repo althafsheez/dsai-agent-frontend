@@ -13,8 +13,6 @@ import { dashboardKeys, useDashboardAi, useDatasetRelations, useHydratedDatasets
 import { usedDatasetIds } from "../types";
 import { AddDatasetMenu } from "./add-dataset-menu";
 
-const STARTERS = ["Overview with key numbers and a breakdown by category", "Trends over time with a table of the latest rows", "Compare the top categories with a pie chart"];
-
 /**
  * New dashboard, in the same three steps as a new workspace: a name, where the data files come from, and what the AI should build.
  * Creating it writes a draft and opens it in the editor.
@@ -100,9 +98,6 @@ export function DashboardBuilderPage() {
             <div className="mb-2.5 flex items-center gap-2.5"><Sparkles className="size-5" strokeWidth={1.5} /><h2 id="dashboard-overview" className="text-sm font-medium">AI Overview <span className="text-red-300">*</span></h2></div>
             <label className="sr-only" htmlFor="dashboard-ai-overview">AI Overview</label>
             <textarea id="dashboard-ai-overview" value={overview} onChange={(event) => setOverview(event.target.value)} maxLength={2000} rows={3} placeholder="What should it show? e.g. revenue and units by region, a KPI row and a table of the latest orders" className="w-full resize-y rounded-md border bg-surface px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-border-strong" />
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {STARTERS.map((starter) => <button key={starter} type="button" onClick={() => setOverview(starter)} className="rounded-full border bg-surface px-2.5 py-1 text-[11px] text-muted-foreground hover:border-border-strong hover:text-foreground">{starter}</button>)}
-            </div>
           </section>
 
           {error ? <p role="alert" className="text-xs text-red-300">{error}</p> : null}

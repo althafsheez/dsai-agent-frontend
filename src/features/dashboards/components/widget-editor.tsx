@@ -55,8 +55,8 @@ export function WidgetEditor({ widget, datasets, onChange, onRemove, onClose }: 
   );
 
   return (
-    <section aria-label="Edit widget" className="rounded-xl border bg-surface/50">
-      <header className="flex items-center gap-2 border-b px-3 py-2">
+    <section aria-label="Edit widget" className="border-b">
+      <header className="flex items-center gap-2 border-b px-4 py-2">
         <Code2 className="size-4 shrink-0 text-muted-foreground" />
         <input aria-label="Widget title" value={widget.title} onChange={(event) => onChange({ ...widget, title: event.target.value })} className="h-7 min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 text-sm font-medium outline-none hover:border-border focus:border-border-strong" />
         <button type="button" aria-label="Close widget editor" onClick={onClose} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-raised hover:text-foreground"><X className="size-4" /></button>
@@ -64,7 +64,7 @@ export function WidgetEditor({ widget, datasets, onChange, onRemove, onClose }: 
 
       <div className="space-y-4 p-3">
         <div>
-          <p className={label}>Tables used</p>
+          <p className={label}>Datasets and tables used</p>
           {ids.length ? (
             <ul className="space-y-1.5">
               {ids.map((id) => {
@@ -72,8 +72,8 @@ export function WidgetEditor({ widget, datasets, onChange, onRemove, onClose }: 
                 const info = tables.data?.find((entry) => entry.dataset_id === id);
                 return (
                   <li key={id} className="rounded-lg border bg-background/40 p-2">
-                    <p className="flex items-center gap-1.5 text-xs font-medium"><Table2 className="size-3.5 shrink-0 text-sage" /><span className="truncate">{item?.name ?? "Unavailable dataset"}</span></p>
-                    {info ? <p className="mt-0.5 text-[10px] text-muted-foreground">SQL table <code className="rounded bg-raised px-1 font-mono text-foreground">{info.table}</code></p> : null}
+                    <p className="flex items-center gap-1.5 text-xs font-medium"><Table2 className="size-3.5 shrink-0 text-sage" /><span className="truncate"><span className="font-normal text-muted-foreground">Dataset </span>{item?.name ?? "Unavailable dataset"}</span></p>
+                    {info ? <p className="mt-0.5 text-[10px] text-muted-foreground">Table <code className="rounded bg-raised px-1 font-mono text-foreground">{info.table}</code></p> : null}
                     {item ? <p className="mt-1 flex flex-wrap gap-1">{item.columns.map((column) => <span key={column.name} className={cn("rounded border px-1.5 py-px text-[10px]", [widget.x, widget.y].includes(column.name) && !widget.sql ? "border-sage/60 text-foreground" : "text-muted-foreground")} title={column.name}>{column.name}</span>)}</p> : null}
                   </li>
                 );
@@ -111,8 +111,8 @@ export function WidgetEditor({ widget, datasets, onChange, onRemove, onClose }: 
               </div>
               {widget.type === "table" ? <p className="text-[11px] text-muted-foreground">Shows the first rows of the table.</p> : null}
               {startingSql ? (
-                <details className="rounded-md border bg-background/40 text-[11px]">
-                  <summary className="cursor-pointer px-2 py-1.5 text-muted-foreground hover:text-foreground">The same query as SQL</summary>
+                <details open className="rounded-md border bg-background/40 text-[11px]">
+                  <summary className="cursor-pointer px-2 py-1.5 text-muted-foreground hover:text-foreground">Query this widget runs (SQL)</summary>
                   <pre className="overflow-auto border-t px-2 py-1.5 font-mono text-[10px] leading-snug">{startingSql}</pre>
                   <div className="border-t p-1.5"><button type="button" onClick={() => onChange(withReferencedTables(widget, startingSql))} className="inline-flex h-7 items-center gap-1.5 rounded-md border bg-surface px-2 text-[11px] hover:border-border-strong"><Code2 className="size-3.5" />Edit as SQL</button></div>
                 </details>
@@ -154,9 +154,12 @@ export function WidgetEditor({ widget, datasets, onChange, onRemove, onClose }: 
               </select>
             </label>
           ) : null}
-          <div><span className={label}>Width</span>
-            <div role="group" aria-label="Width" className="flex gap-1">
-              {([1, 2, 3] as const).map((span) => <button key={span} type="button" aria-pressed={widget.span === span} onClick={() => onChange({ ...widget, span })} className={cn("h-8 flex-1 rounded-md border text-xs", widget.span === span ? "border-sage/60 bg-sage/10 text-foreground" : "bg-surface text-muted-foreground hover:border-border-strong")}>{span}/3</button>)}
+          <div><span className={label}>Size on the grid (columns × rows)</span>
+            <div role="group" aria-label="Size" className="flex items-center gap-1.5">
+              <input type="number" min={1} max={12} aria-label="Columns" value={widget.layout?.w ?? widget.span * 4} onChange={(event) => onChange({ ...widget, layout: { c: widget.layout?.c ?? 0, r: widget.layout?.r ?? 0, h: widget.layout?.h ?? 5, w: Math.min(12, Math.max(1, Number(event.target.value) || 1)) } })} className="h-8 w-16 rounded-md border bg-surface px-2 text-xs" />
+              <span className="text-xs text-muted-foreground">×</span>
+              <input type="number" min={2} aria-label="Rows" value={widget.layout?.h ?? 5} onChange={(event) => onChange({ ...widget, layout: { c: widget.layout?.c ?? 0, r: widget.layout?.r ?? 0, w: widget.layout?.w ?? widget.span * 4, h: Math.max(2, Number(event.target.value) || 2) } })} className="h-8 w-16 rounded-md border bg-surface px-2 text-xs" />
+              <span className="text-[10px] text-muted-foreground">or drag the corner when Edit is on</span>
             </div>
           </div>
         </div>

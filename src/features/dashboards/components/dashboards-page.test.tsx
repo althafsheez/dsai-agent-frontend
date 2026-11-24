@@ -10,7 +10,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 const record = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
   id, name, description: `${name} description`, status: "published", pinned: false, slicers: [], dataset_ids: [], widgets: [{ id: "w" }],
   owner: "You", ownership: "owned", role: "owner", refresh_minutes: 0, shares: [], created_at: "2026-11-01T00:00:00Z", updated_at: "2026-11-02T00:00:00Z",
-  preview: { total: 3, tiles: [{ type: "kpi", title: "Revenue", span: 1, value: "36" }, { type: "bar", title: "By region", span: 2, series: [20, 15, 1], labels: ["S", "N", "E"] }, { type: "line", title: "Trend", span: 3, series: [1, 3, 2], labels: ["a", "b", "c"] }, { type: "histogram", title: "Spread", span: 1, series: [2, 5, 1], labels: ["0–1", "1–2", "2–3"] }, { type: "gauge", title: "Avg", span: 1, value: "5", max: "9", ratio: 0.5 }] }, ...extra,
+  preview: { total: 3, delta: { text: "+12.5%", positive: true, label: "Trend" }, tiles: [{ type: "kpi", title: "Revenue", span: 1, value: "36" }, { type: "bar", title: "By region", span: 2, series: [20, 15, 1], labels: ["S", "N", "E"] }, { type: "line", title: "Trend", span: 3, series: [1, 3, 2], labels: ["a", "b", "c"] }, { type: "histogram", title: "Spread", span: 1, series: [2, 5, 1], labels: ["0–1", "1–2", "2–3"] }, { type: "gauge", title: "Avg", span: 1, value: "5", max: "9", ratio: 0.5 }] }, ...extra,
 });
 
 const api = vi.hoisted(() => ({
@@ -47,15 +47,22 @@ describe("dashboards page", () => {
     renderPage();
     const cards = await screen.findAllByRole("article");
     expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual(["Revenue Overview", "Customer Health", "Sales Performance"]);
-    // Each card shows just two key widgets, by name: the first number and the first chart.
+    // Each card shows the first number with its change badge and the first chart; no other widgets.
     expect(within(cards[0]).getByText("36")).toBeVisible();
     expect(within(cards[0]).getByText("Revenue")).toBeVisible();
-    expect(within(cards[0]).getByRole("button", { name: "S: 20" })).toBeVisible();
-    expect(within(cards[0]).getByText("By region")).toBeVisible();
-    expect(within(cards[0]).queryByText("Trend")).not.toBeInTheDocument();
+    expect(within(cards[0]).getByText("+12.5%")).toBeVisible();
+    expect(within(cards[0]).queryByRole("button", { name: "b: 3" })).not.toBeInTheDocument();
     expect(within(cards[0]).queryByRole("img", { name: "Avg: 5 of 9" })).not.toBeInTheDocument();
     expect(within(cards[2]).getByText("No charts yet")).toBeVisible();
     expect(screen.getByText("3 dashboards")).toBeVisible();
+  });
+
+  it("shows what a bar of the card chart means when hovered", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const cards = await screen.findAllByRole("article");
+    await user.hover(within(cards[0]).getByRole("img", { name: "S: 20" }));
+    expect(within(cards[0]).getAllByText("S: 20").length).toBeGreaterThan(0);
   });
 
   it("searches and filters by ownership", async () => {

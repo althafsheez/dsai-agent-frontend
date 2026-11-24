@@ -6,8 +6,8 @@ import { DashboardViewPage } from "./dashboard-view-page";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("next/dynamic", () => ({
-  default: () => function Stub({ widget, onOpen }: { widget: { title: string }; onOpen?: () => void }) {
-    return <article aria-label={widget.title}>{widget.title}{onOpen ? <button type="button" aria-label={`Edit ${widget.title}`} onClick={onOpen}>Edit</button> : null}</article>;
+  default: () => function Stub({ widget, onOpen, handle }: { widget: { title: string }; onOpen?: () => void; handle?: object }) {
+    return <article aria-label={widget.title}>{widget.title}{handle ? <span role="button" aria-label={`Move ${widget.title}`} /> : null}{onOpen ? <button type="button" aria-label={`Edit ${widget.title}`} onClick={onOpen}>Edit</button> : null}</article>;
   },
 }));
 vi.mock("@/features/connectors/components/drive-browser-dialog", () => ({ DriveBrowserDialog: () => null }));
@@ -71,7 +71,7 @@ describe("dashboard page", () => {
     const user = userEvent.setup();
     renderPage("customer-health");
     await user.click(await screen.findByRole("button", { name: "Preview" }));
-    expect(screen.getByRole("status")).toHaveTextContent("does not refresh");
+    expect(screen.getByText(/Preview: this is how/)).toHaveTextContent("does not refresh");
     expect(screen.queryByRole("complementary", { name: "Dashboard tools" })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Ask AI to change this dashboard" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Refresh data/ })).not.toBeInTheDocument();
@@ -90,8 +90,12 @@ describe("dashboard page", () => {
     expect(await screen.findByText(/Published · live/)).toBeVisible();
     expect(screen.getByRole("button", { name: "Edit" })).toBeVisible();
     expect(screen.getByRole("button", { name: /Refresh data/ })).toBeVisible();
-    expect(screen.queryByRole("complementary", { name: "Dashboard tools" })).not.toBeInTheDocument();
+    const tools = screen.getByRole("complementary", { name: "Dashboard tools" });
+    expect(await within(tools).findByText("orders.csv")).toBeVisible();
+    expect(within(tools).getByRole("button", { name: "Edit dashboard" })).toBeVisible();
+    expect(within(tools).queryByRole("button", { name: /Add dataset/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Ask AI to change this dashboard" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Dashboard status" })).toHaveTextContent("Published");
   });
 
   it("shows a published dashboard clean, with Edit to bring the tools back", async () => {
@@ -104,9 +108,22 @@ describe("dashboard page", () => {
     expect(await screen.findByRole("textbox", { name: "Ask AI to change this dashboard" })).toBeVisible();
   });
 
+  it("keeps tiles locked until Edit is pressed, then offers the add-a-tile panel in the centre and drag handles", async () => {
+    const user = userEvent.setup();
+    renderPage("customer-health");
+    const edit = await screen.findByRole("button", { name: "Edit" });
+    expect(screen.queryByText("Add a tile yourself")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Move Revenue by region" })).not.toBeInTheDocument();
+    await user.click(edit);
+    expect(await screen.findByText("Add a tile yourself")).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Move Revenue by region" })).toBeVisible();
+    expect(screen.getByRole("separator", { name: "Resize Revenue by region" })).toBeVisible();
+  });
+
   it("opens a widget to show its tables and query, and edits it as SQL", async () => {
     const user = userEvent.setup();
     renderPage("customer-health");
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
     await user.click(await screen.findByRole("button", { name: "Edit Revenue by region" }));
     const editor = await screen.findByRole("region", { name: "Edit widget" });
     expect(await within(editor).findByText("orders")).toBeVisible();

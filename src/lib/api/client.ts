@@ -737,7 +737,7 @@ export interface PreviewTileDto {
   labels?: string[]; series?: number[]; points?: Array<[number, number]>;
   columns?: string[]; rows?: string[][];
 }
-export interface DashboardPreviewDto { tiles: PreviewTileDto[]; total: number }
+export interface DashboardPreviewDto { tiles: PreviewTileDto[]; total: number; delta?: { text: string; positive: boolean; label: string } | null }
 export interface DashboardShareDto { user_id: string; role: "viewer" | "editor"; name?: string }
 export interface DashboardRecordDto {
   id: string; name: string; description: string; status: "draft" | "published"; pinned: boolean;

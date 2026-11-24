@@ -41,7 +41,7 @@ function layoutTreemap(values: number[], x: number, y: number, w: number, h: num
 }
 
 /** One widget of the dashboard, drawn small, in the same type it has inside. Hover or focus to read values. */
-function MiniTile({ tile, large = false }: { tile: PreviewTile; large?: boolean }) {
+function MiniTile({ tile, large = false, bare = false }: { tile: PreviewTile; large?: boolean; bare?: boolean }) {
   const [active, setActive] = useState<number | null>(null);
   const series = tile.series ?? [];
   const labels = tile.labels ?? [];
@@ -49,7 +49,7 @@ function MiniTile({ tile, large = false }: { tile: PreviewTile; large?: boolean 
   const min = Math.min(...series, 0);
   const hit = (index: number) => ({ onMouseEnter: () => setActive(index), onFocus: () => setActive(index), onMouseLeave: () => setActive(null), onBlur: () => setActive(null) });
   const readout = active === null ? tile.title : `${labels[active]}: ${shorten(series[active])}`;
-  const head = <p className={cn("truncate text-muted-foreground", large ? "h-4 text-[11px] leading-4" : "h-3 text-[9px] leading-3")}>{readout}</p>;
+  const head = bare ? null : <p className={cn("truncate text-muted-foreground", large ? "h-4 text-[11px] leading-4" : "h-3 text-[9px] leading-3")}>{readout}</p>;
   const label = (index: number) => `${labels[index]}: ${shorten(series[index])}`;
   let body: React.ReactNode = null;
 
@@ -157,7 +157,7 @@ function MiniTile({ tile, large = false }: { tile: PreviewTile; large?: boolean 
       </div>
     );
   }
-  return <div className="flex h-full min-w-0 flex-col">{head}<div className="mt-1 min-h-0 flex-1">{body}</div></div>;
+  return <div className="flex h-full min-w-0 flex-col">{head}<div className={cn("min-h-0 flex-1", !bare && "mt-1")}>{body}</div></div>;
 }
 
 function Menu({ dashboard, onPin, onRename, onShare, onDelete, onDuplicate }: { dashboard: Dashboard; onPin: () => void; onRename: () => void; onShare: () => void; onDelete: () => void; onDuplicate: () => void }) {
@@ -198,7 +198,8 @@ function Menu({ dashboard, onPin, onRename, onShare, onDelete, onDuplicate }: { 
 /** The first number and the first chart of a dashboard: what the card shows above its title. */
 function pickHighlights(tiles: PreviewTile[]): { headline?: PreviewTile; chart?: PreviewTile } {
   const headline = tiles.find((tile) => tile.type === "kpi");
-  const chart = tiles.find((tile) => tile.type !== "kpi" && tile.type !== "table") ?? tiles.find((tile) => tile !== headline);
+  const chart = tiles.find((tile) => ["line", "area", "bar", "hbar", "histogram", "pie"].includes(tile.type) && (tile.series?.length ?? 0) >= 2)
+    ?? tiles.find((tile) => tile.type !== "kpi" && tile.type !== "table") ?? tiles.find((tile) => tile !== headline);
   return { headline, chart: chart === headline ? undefined : chart };
 }
 
@@ -212,41 +213,132 @@ function ago(iso: string) {
   return `${Math.floor(minutes / 10080)}w ago`;
 }
 
+const chartWidth = 280;
+const chartHeight = 72;
+
+function toPoints(series: number[]) {
+  const max = Math.max(...series);
+  const min = Math.min(...series);
+  const range = max - min || 1;
+  return series.map((value, index) => ({
+    x: (index / (series.length - 1)) * chartWidth,
+    y: chartHeight - 6 - ((value - min) / range) * (chartHeight - 14),
+  }));
+}
+
+/** main's card chart, drawn from the dashboard's real numbers. Hover or focus a bar, point or slice to read it. */
+function PreviewChart({ kind, series, labels = [] }: { kind: "line" | "area" | "bar" | "donut"; series: number[]; labels?: string[] }) {
+  const [active, setActive] = useState<number | null>(null);
+  const total = series.reduce((sum, value) => sum + value, 0) || 1;
+  const name = (index: number) => labels[index] ?? `Value ${index + 1}`;
+  const reading = (index: number) => kind === "donut" ? `${name(index)}: ${shorten(series[index])} (${Math.round((series[index] / total) * 100)}%)` : `${name(index)}: ${shorten(series[index])}`;
+  const hit = (index: number) => ({ tabIndex: 0, role: "img" as const, "aria-label": reading(index), onMouseEnter: () => setActive(index), onFocus: () => setActive(index), onMouseLeave: () => setActive(null), onBlur: () => setActive(null) });
+  const tones = ["var(--sage)", "var(--slate)", "var(--muted-foreground)", "var(--border-strong)", "#a99bd0", "#d4b483"];
+  let body: React.ReactNode;
+
+  if (kind === "donut") {
+    const radius = 26;
+    const circumference = 2 * Math.PI * radius;
+    let offset = 0;
+    const shown = series.slice(0, 4);
+    body = (
+      <div className="flex h-full items-center gap-5 px-1">
+        <svg viewBox="0 0 72 72" className="size-[72px] shrink-0 -rotate-90" aria-hidden="true">
+          {shown.map((value, index) => {
+            const length = (value / total) * circumference;
+            const segment = <circle key={index} cx="36" cy="36" r={radius} fill="none" stroke={tones[index % tones.length]} strokeWidth="9" strokeDasharray={`${Math.max(length - 2, 0)} ${circumference}`} strokeDashoffset={-offset} opacity={active === null || active === index ? 1 : 0.35} onMouseEnter={() => setActive(index)} onMouseLeave={() => setActive(null)} />;
+            offset += length;
+            return segment;
+          })}
+        </svg>
+        <div className="min-w-0 flex-1 space-y-1.5">
+          {shown.map((value, index) => (
+            <div key={index} {...hit(index)} className={cn("flex items-center gap-2 rounded focus-visible:outline-none", active !== null && active !== index && "opacity-40")}>
+              <span className="size-1.5 shrink-0 rounded-full" style={{ background: tones[index % tones.length] }} />
+              <span className="h-1 flex-1 overflow-hidden rounded-full bg-raised"><span className="block h-1 rounded-full" style={{ width: `${(value / total) * 100}%`, background: tones[index % tones.length] }} /></span>
+              <span className="w-7 text-right text-[10px] tabular-nums text-muted-foreground">{Math.round((value / total) * 100)}%</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  } else if (kind === "bar") {
+    const max = Math.max(...series, 1);
+    body = (
+      <div className="flex h-full items-end gap-1.5 px-1">
+        {series.map((value, index) => (
+          <span key={index} {...hit(index)} className="flex-1 rounded-[2px] focus-visible:outline-none" style={{ height: `${Math.max((value / max) * 100, 3)}%`, background: active === index || (active === null && index === series.length - 1) ? "var(--sage)" : "var(--slate)", opacity: active === null ? (index === series.length - 1 ? 1 : 0.45) : active === index ? 1 : 0.35 }} />
+        ))}
+      </div>
+    );
+  } else {
+    const points = toPoints(series);
+    const line = points.map((point, index) => `${index ? "L" : "M"}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+    const area = `${line} L${chartWidth},${chartHeight} L0,${chartHeight} Z`;
+    const marked = points[active ?? points.length - 1];
+    const tone = kind === "area" ? "var(--sage)" : "var(--slate)";
+    body = (
+      <div className="relative h-full">
+        <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none" className="h-full w-full overflow-visible" aria-hidden="true">
+          {[0.25, 0.5, 0.75].map((ratio) => <line key={ratio} x1="0" x2={chartWidth} y1={chartHeight * ratio} y2={chartHeight * ratio} stroke="var(--border)" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />)}
+          {kind === "area" && <path d={area} fill="var(--sage)" opacity="0.12" />}
+          <path d={line} fill="none" stroke={tone} strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+        </svg>
+        <span aria-hidden="true" className="pointer-events-none absolute size-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ left: `${(marked.x / chartWidth) * 100}%`, top: `${(marked.y / chartHeight) * 100}%`, background: tone }} />
+        <div className="absolute inset-0 flex">{series.map((_, index) => <span key={index} {...hit(index)} className="h-full flex-1 focus-visible:outline-none" />)}</div>
+      </div>
+    );
+  }
+  return (
+    <div className="relative h-full">
+      {body}
+      {active !== null ? <span className="pointer-events-none absolute right-0 top-0 z-10 max-w-full truncate rounded border bg-popover px-1.5 py-0.5 text-[10px] shadow-md">{reading(active)}</span> : null}
+    </div>
+  );
+}
+
+const KIND: Record<string, "line" | "area" | "bar" | "donut"> = { line: "line", area: "area", bar: "bar", hbar: "bar", histogram: "bar", pie: "donut" };
+
 function DashboardCard({ dashboard, onTogglePin, onRename, onShare, onDelete, onDuplicate }: { dashboard: Dashboard; onTogglePin: (dashboard: Dashboard) => void; onRename: (dashboard: Dashboard) => void; onShare: (dashboard: Dashboard) => void; onDelete: (dashboard: Dashboard) => void; onDuplicate: (dashboard: Dashboard) => void }) {
   const router = useRouter();
   const { tiles } = dashboard.preview ?? { tiles: [] };
   const { headline, chart } = pickHighlights(tiles);
-  const widgets = dashboard.preview?.total ?? dashboard.widgets.length;
+  const delta = dashboard.preview?.delta;
+  const published = dashboard.status === "published";
+  const kind = chart ? KIND[chart.type] : undefined;
   return (
     <article aria-label={dashboard.name} className="group flex flex-col overflow-hidden rounded-lg border bg-surface/40 transition-colors hover:border-border-strong hover:bg-surface/70">
-      <div onClick={() => router.push(`/dashboards/${dashboard.id}`)} className="relative cursor-pointer border-b bg-background/60 px-4 pb-3 pt-3.5">
+      <div onClick={() => router.push(`/dashboards/${dashboard.id}`)} className="relative cursor-pointer border-b bg-background/60 px-3.5 pb-2 pt-3">
         {headline ? (
-          <div className="min-w-0">
-            <p className="truncate text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{headline.title}</p>
-            <p className="mt-0.5 truncate text-lg font-semibold tracking-tight text-foreground">{headline.value}</p>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{headline.title}</p>
+              <p className="mt-0.5 truncate text-lg font-semibold tracking-tight text-foreground" title={`${headline.title}: ${headline.value}`}>{headline.value}</p>
+            </div>
+            {delta ? <span title={`${delta.label}: latest vs previous`} className={cn("mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums", delta.positive ? "text-sage" : "text-destructive")} style={{ background: `color-mix(in srgb, ${delta.positive ? "var(--sage)" : "var(--destructive)"} 12%, transparent)` }}>{delta.text}</span> : null}
           </div>
         ) : null}
-        <div className={cn("h-[72px]", headline && "mt-3")}>
-          {chart ? <MiniTile tile={{ ...chart, span: 1 }} /> : !headline ? <p className="grid h-full place-items-center rounded border border-dashed text-[11px] text-muted-foreground">No charts yet</p> : null}
+        <div className={cn("h-16", headline && "mt-2")}>
+          {chart && kind && chart.series ? <PreviewChart kind={kind} series={chart.series} labels={chart.labels} />
+            : chart ? <MiniTile tile={{ ...chart, span: 1 }} bare={chart.type !== "gauge"} />
+            : !headline ? <p className="grid h-full place-items-center rounded border border-dashed text-[11px] text-muted-foreground">No charts yet</p> : null}
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col px-4 pb-3.5 pt-3">
+      <div className="flex flex-1 flex-col px-3.5 pb-2.5 pt-2.5">
         <div className="flex items-start gap-2">
           <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground" title={dashboard.name}>
             <Link href={`/dashboards/${dashboard.id}`} className="hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">{dashboard.name}</Link>
           </h2>
-          {dashboard.status === "draft" ? <span className="shrink-0 rounded border px-1.5 py-px text-[10px] text-muted-foreground">Draft</span> : null}
+          <span className={cn("inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-px text-[10px]", published ? "border-emerald-400/30 text-emerald-300" : "text-muted-foreground")}>{published ? <><span className="size-1.5 rounded-full bg-emerald-400" />Live</> : "Draft"}</span>
           {dashboard.pinned && <Pin aria-label="Pinned" className="mt-1 size-3.5 shrink-0 fill-foreground text-foreground" />}
           <Menu dashboard={dashboard} onPin={() => onTogglePin(dashboard)} onRename={() => onRename(dashboard)} onShare={() => onShare(dashboard)} onDelete={() => onDelete(dashboard)} onDuplicate={() => onDuplicate(dashboard)} />
         </div>
-        {dashboard.description ? <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{dashboard.description}</p> : null}
-
-        <div className="mt-auto flex items-center gap-2 pt-3.5 text-[11px] text-muted-foreground">
+        <div className="mt-auto flex items-center gap-2 pt-2 text-[11px] text-muted-foreground">
           <span aria-hidden="true" className="grid size-5 shrink-0 place-items-center rounded-full border bg-raised text-[9px] font-semibold text-foreground">{initials(dashboard.owner)}</span>
           <span className="truncate">{dashboard.owner}</span>
           {dashboard.ownership === "shared" && <span className="inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-px text-[10px]"><Users className="size-2.5" />Shared</span>}
-          <span className="ml-auto shrink-0 tabular-nums">{widgets} {widgets === 1 ? "widget" : "widgets"} · {ago(dashboard.updated_at)}</span>
+          <span className="ml-auto shrink-0 tabular-nums">{ago(dashboard.updated_at)}</span>
         </div>
       </div>
     </article>

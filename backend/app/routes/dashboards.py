@@ -16,7 +16,7 @@ from ..models import Dashboard, FileObject, Resource, User
 from ..services import dashboard_ai
 from ..services import dataset_relations
 from ..services.dashboard_sql import SqlError, describe, run_sql
-from ..services.dashboard_preview import compute_preview
+from ..services.dashboard_preview import compute_preview, delta_of
 from ..services.dashboard_script import ScriptError, run_script
 from ..services.dataset_preview import read_csv_rows
 
@@ -269,12 +269,20 @@ def _sources(db: Session, item: Dashboard) -> list[dict]:
     return found
 
 
+def _preview_view(preview: dict | None) -> dict:
+    """Cards saved before the change badge existed get it from their stored tiles."""
+    preview = dict(preview or {})
+    if "tiles" in preview:
+        preview["delta"] = delta_of(preview["tiles"])
+    return preview
+
+
 def _view(item: Dashboard, user: User, db: Session, role: str) -> dict:
     owner = db.get(User, item.owner_id)
     mine = item.owner_id == user.id
     view = {
         "id": item.id, "name": item.name, "description": item.description, "status": item.status, "pinned": user.id in (item.pinned_by or []),
-        "slicers": item.slicers, "dataset_ids": item.dataset_ids, "widgets": item.widgets, "preview": item.preview or {},
+        "slicers": item.slicers, "dataset_ids": item.dataset_ids, "widgets": item.widgets, "preview": _preview_view(item.preview),
         "owner": "You" if mine else (owner.name if owner else "Unknown"), "ownership": "owned" if mine else "shared",
         "role": role, "refresh_minutes": item.refresh_minutes or 0, "sources": _sources(db, item),
         "created_at": _utc(item.created_at), "updated_at": _utc(item.updated_at),
