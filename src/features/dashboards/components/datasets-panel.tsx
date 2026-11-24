@@ -253,7 +253,7 @@ function TableView({ dataset, onClose }: { dataset: DatasetLite; onClose: () => 
   }, [onClose]);
   const total = dataset.row_count ?? dataset.rows.length;
   return (
-    <div role="dialog" aria-modal="true" aria-label={`Table ${dataset.name}`} className="fixed inset-0 z-[70] flex flex-col bg-sidebar p-4 text-sidebar-foreground">
+    <div role="dialog" aria-modal="true" aria-label={`Table ${dataset.name}`} className="fixed inset-y-0 right-0 z-[70] flex w-full flex-col border-l bg-sidebar p-4 text-sidebar-foreground shadow-2xl xl:w-[min(52vw,820px)]">
       <header className="mb-3 flex shrink-0 items-center gap-3">
         <FileSpreadsheet className="size-4 shrink-0 text-sage" />
         <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{dataset.name}</h2>
