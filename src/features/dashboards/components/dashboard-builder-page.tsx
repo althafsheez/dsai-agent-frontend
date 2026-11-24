@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Database, FileSpreadsheet, LoaderCircle, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,30 @@ import { defaultPolicy, policyContext } from "../logic/manual";
 import { dashboardKeys, useDashboardAi, useDatasetRelations, useHydratedDatasets, useSaveDashboard } from "../use-dashboards";
 import { usedDatasetIds } from "../types";
 import { AddDatasetMenu } from "./add-dataset-menu";
+
+/** How far along the build is. The AI call reports no progress of its own, so the bar eases towards 90% over ~40 s, then jumps when saving. */
+function BuildProgress({ stage }: { stage: "ai" | "save" }) {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setSeconds((value) => value + 0.5), 500);
+    return () => window.clearInterval(timer);
+  }, []);
+  const percent = stage === "save" ? 95 : Math.round(8 + 82 * (1 - Math.exp(-seconds / 15)));
+  const steps = [["Reading your data files", seconds >= 1 || stage === "save"], ["Designing the tiles", stage === "save"], ["Saving the draft", false]] as const;
+  return (
+    <div className="mt-3 space-y-2" aria-live="polite">
+      <div role="progressbar" aria-label="Building the dashboard" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} className="h-1.5 overflow-hidden rounded-full bg-raised">
+        <div className="h-full rounded-full bg-sage transition-[width] duration-500 ease-out" style={{ width: `${percent}%` }} />
+      </div>
+      <ol className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+        {steps.map(([label, done], index) => {
+          const current = !done && (index === 0 ? true : steps[index - 1][1]);
+          return <li key={label} className={cn("flex items-center gap-1.5", done ? "text-foreground" : current ? "text-sky-300" : "text-muted-foreground")}>{current ? <LoaderCircle className="size-3 animate-spin" /> : <span className={cn("size-1.5 rounded-full", done ? "bg-sage" : "bg-border-strong")} />}{label}</li>;
+        })}
+      </ol>
+    </div>
+  );
+}
 
 /**
  * New dashboard, in the same three steps as a new workspace: a name, where the data files come from, and what the AI should build.
@@ -97,6 +121,7 @@ export function DashboardBuilderPage() {
             <div className="mb-2.5 flex items-center gap-2.5"><Sparkles className="size-5" strokeWidth={1.5} /><h2 id="dashboard-overview" className="text-sm font-medium">AI Overview <span className="text-red-300">*</span></h2></div>
             <label className="sr-only" htmlFor="dashboard-ai-overview">AI Overview</label>
             <textarea id="dashboard-ai-overview" value={overview} onChange={(event) => setOverview(event.target.value)} maxLength={2000} rows={3} placeholder="What should it show? e.g. revenue and units by region, a KPI row and a table of the latest orders" className="w-full resize-y rounded-md border bg-surface px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-border-strong" />
+            {busy ? <BuildProgress stage={save.isPending ? "save" : "ai"} /> : null}
           </section>
 
           {error ? <p role="alert" className="text-xs text-red-300">{error}</p> : null}

@@ -97,31 +97,55 @@ describe("dashboard page", () => {
     expect(screen.getByRole("status", { name: "Dashboard status" })).toHaveTextContent("Published");
   });
 
-  it("shows a published dashboard clean, with Edit to bring the tools back", async () => {
+  it("shows a published dashboard clean; Edit turns into Done, and Done goes back to the live view", async () => {
     const user = userEvent.setup();
     renderPage("live-one");
     expect(await screen.findByRole("heading", { name: "Live One" })).toBeVisible();
     expect(screen.getByRole("status", { name: "Dashboard status" })).toHaveTextContent(/· live/);
     expect(screen.queryByRole("textbox", { name: "Ask AI to change this dashboard" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Edit" }));
-    const tools = screen.getByRole("complementary", { name: "Dashboard tools" });
-    expect(await within(tools).findByRole("textbox", { name: "Ask AI to change this dashboard" })).toBeVisible();
-    expect(within(tools).queryByRole("tab", { name: /Datasets/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(await screen.findByRole("button", { name: "Edit" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
   });
 
-  it("keeps tiles locked until Edit is pressed, then swaps the datasets panel for the edit panel", async () => {
+  it("opens the Edit panel without changing the dashboard; only an AI prompt does", async () => {
+    const user = userEvent.setup();
+    renderPage("live-one");
+    await user.click(await screen.findByRole("tab", { name: /Edit/ }));
+    const tools = screen.getByRole("complementary", { name: "Dashboard tools" });
+    expect(await within(tools).findByRole("textbox", { name: "Ask AI to change this dashboard" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Export/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Save changes/ })).not.toBeInTheDocument();
+  });
+
+  it("shows a tile's data, tables and query in the Info tab when it is clicked without editing", async () => {
     const user = userEvent.setup();
     renderPage("customer-health");
-    const edit = await screen.findByRole("button", { name: "Edit" });
-    expect(screen.queryByRole("button", { name: "Move Revenue by region" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Move Revenue by region" })).not.toBeInTheDocument();
-    await user.click(edit);
+    await user.click(await screen.findByRole("button", { name: "Edit Revenue by region" }));
+    const tools = screen.getByRole("complementary", { name: "Dashboard tools" });
+    expect(within(tools).getByRole("tab", { name: /Info/ })).toHaveAttribute("aria-selected", "true");
+    const about = within(tools).getByRole("region", { name: "About Revenue by region" });
+    expect(within(about).getByText("orders.csv")).toBeVisible();
+    expect(within(about).getByRole("button", { name: /Change the query/ })).toBeVisible();
+  });
+
+  it("keeps tiles locked on the Edit tab; the header Edit unlocks them and turns into Done", async () => {
+    const user = userEvent.setup();
+    renderPage("customer-health");
+    await user.click(await screen.findByRole("tab", { name: /Edit/ }));
     const tools = screen.getByRole("complementary", { name: "Dashboard tools" });
     expect(await within(tools).findByRole("list", { name: "Starting prompts" })).toBeVisible();
     expect(within(tools).getByRole("textbox", { name: "Ask AI to change this dashboard" })).toBeVisible();
-    expect(within(tools).queryByRole("tab", { name: /Datasets/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Move Revenue by region" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Edit" }));
     expect(await screen.findByRole("button", { name: "Move Revenue by region" })).toBeVisible();
     expect(screen.getByRole("separator", { name: "Resize Revenue by region" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("button", { name: "Move Revenue by region" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeVisible();
   });
 
   it("opens a widget to show its tables and query, and edits it as SQL", async () => {

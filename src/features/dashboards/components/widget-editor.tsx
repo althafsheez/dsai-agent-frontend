@@ -169,7 +169,7 @@ export function WidgetEditor({ widget, datasets, onChange, onRemove, onClose, la
         </div>
 
         <button type="button" onClick={onRemove} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-red-300"><Trash2 className="size-3.5" />Remove widget</button>
-        <p className="flex items-center gap-1.5 border-t pt-2 text-[10px] text-muted-foreground"><Database className="size-3 shrink-0" />Changes apply to the draft. Save changes to keep them.</p>
+        <p className="flex items-center gap-1.5 border-t pt-2 text-[10px] text-muted-foreground"><Database className="size-3 shrink-0" />Changes apply right away; press Done or Save draft to keep them.</p>
       </div>
     </section>
   );

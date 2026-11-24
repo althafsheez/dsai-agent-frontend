@@ -8,7 +8,7 @@ import type { CSSProperties } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSqlTables } from "@/lib/api";
 import { generatedSql } from "../logic/sql";
-import { ArrowLeft, Download, Eye, LayoutDashboard, Lock, LoaderCircle, Merge, Pencil, Radio, Save, Share2, Trash2, Undo2, Wand2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, Database, Download, Info, Eye, LayoutDashboard, LoaderCircle, Merge, Pencil, Radio, Save, Share2, Trash2, Undo2, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { DriveBrowserDialog } from "@/features/connectors/components/drive-browser-dialog";
@@ -25,7 +25,7 @@ import { AiNotes } from "./ai-notes";
 import { AskAiBar } from "./ask-ai-bar";
 import { DataStatus } from "./data-status";
 import { DatasetRelationsPanel } from "./dataset-relations";
-import { DatasetsPanel } from "./datasets-panel";
+import { DatasetsPanel, WidgetInfo } from "./datasets-panel";
 import { GridCanvas } from "./grid-canvas";
 import { HandEdits } from "./hand-edits";
 import { Section } from "./section";
@@ -61,6 +61,10 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   /** The user's edits to the code of tiles the AI added or changed, by widget id. */
   const [pendingCode, setPendingCode] = useState<Record<string, string>>({});
   const [quickId, setQuickId] = useState<string | null>(null);
+  /** The tile whose details (data, tables, query) are shown while not editing. */
+  const [infoId, setInfoId] = useState<string | null>(null);
+  /** Which view the right panel shows. */
+  const [side, setSide] = useState<"datasets" | "library" | "info" | "edit">("datasets");
   const [fill, setFill] = useState<{ text: string; n: number }>();
   const [panelWidth, setPanelWidth] = usePanelWidth();
   const [name, setName] = useState("");
@@ -119,6 +123,7 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   const changes = editing ? describeChanges(baseline, draft) : [];
   const usage = Object.fromEntries(attached.map((id) => [id, draft.filter((widget) => usedDatasetIds([widget]).includes(id)).length]));
   const openWidget = editing ? draft.find((widget) => widget.id === openId) : undefined;
+  const infoWidget = widgets.find((widget) => widget.id === infoId);
   const datasetFor = (widget: DashboardWidget) => datasets.find((dataset) => dataset.id === widget.dataset_id);
   const writeFields = (overrides: Partial<Pick<Dashboard, "status" | "pinned" | "refresh_minutes">> & { widgets?: DashboardWidget[]; name?: string; slicers?: string[]; datasetIds?: string[]; shares?: Array<{ user_id: string; role: "viewer" | "editor" }> }) => ({
     id: dashboard.id, name: overrides.name ?? dashboard.name, description: dashboard.description,
@@ -167,6 +172,7 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   /** Any change in plain words comes back as a suggestion: previewed on the dashboard, with each touched tile's code editable. */
   async function suggest(text: string) {
     setNotes([]);
+    if (mode !== "edit") setMode("edit");
     const result = await ai.tune.mutateAsync({ instruction: text, widgets: draft, slicers, name, datasets: (attachedDatasets.length ? attachedDatasets : datasets).slice(0, 8), context });
     setPending({ widgets: result.widgets, slicers: result.slicers, name: result.name, notes: result.notes });
     setPendingCode({});
@@ -201,7 +207,13 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   }
 
   /** Opens a widget's editor (code included) from anywhere, e.g. the dataset panel. */
-  const editWidget = (id: string) => { if (mode !== "edit") setMode("edit"); setUnlocked(true); setOpenId(id); };
+  const editWidget = (id: string) => { if (mode !== "edit") setMode("edit"); setUnlocked(true); setSide("edit"); setOpenId(id); };
+  /** The header Edit/Done toggle: Edit unlocks the tiles; Done locks them again (and, when published, saves and goes back to the live view). */
+  const startEditing = () => { if (mode !== "edit") setMode("edit"); setUnlocked(true); };
+  const finishEditing = () => {
+    setUnlocked(false); setOpenId(null); setQuickId(null);
+    if (published) void (dirty ? saveEdits() : Promise.resolve()).then(() => setMode("view"));
+  };
 
   async function saveEdits() {
     await save.mutateAsync(writeFields({ widgets: draft, name, slicers, datasetIds: attachedIds }));
@@ -232,7 +244,7 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
             widgets={suggested ?? widgets} layouts={suggested ? resolveLayouts(suggested) : layouts} unlocked={tools && !suggested} onLayouts={setLayouts}
             render={(widget, handle) => (
               <div className="relative h-full">
-                <WidgetCard widget={widget} filters={filters} onSelect={() => undefined} dataset={datasetFor(widget)} editable={tools} handle={handle} onChange={change} onRemove={() => { setDraft(draft.filter((item) => item.id !== widget.id)); if (openId === widget.id) setOpenId(null); }} onOpen={tools ? () => { setOpenId(widget.id); } : undefined} onQuickEdit={tools ? () => setQuickId(widget.id) : undefined} active={tools && openId === widget.id} />
+                <WidgetCard widget={widget} filters={filters} onSelect={() => undefined} dataset={datasetFor(widget)} editable={tools} handle={handle} onChange={change} onRemove={() => { setDraft(draft.filter((item) => item.id !== widget.id)); if (openId === widget.id) setOpenId(null); }} onOpen={tools ? () => { setOpenId(widget.id); setSide("edit"); } : panel ? () => { setInfoId(widget.id); setSide("info"); } : undefined} onQuickEdit={tools ? () => setQuickId(widget.id) : undefined} active={tools && openId === widget.id} />
                 {tools && quickId === widget.id && layouts[widget.id] ? (
                   <QuickEdit
                     widget={widget} dataset={datasetFor(widget)} layout={layouts[widget.id]}
@@ -269,7 +281,7 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
       </div>
       <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          {editing ? <input aria-label="Dashboard name" value={name} onChange={(event) => setName(event.target.value)} className="h-9 w-full max-w-md rounded-md border bg-surface px-2.5 text-lg font-semibold outline-none focus:border-border-strong" /> : <h1 className="truncate text-xl font-semibold tracking-tight">{mode === "preview" ? name : dashboard.name}</h1>}
+          {editing ? <input aria-label="Dashboard name" value={name} onChange={(event) => setName(event.target.value)} style={{ width: `${Math.min(Math.max(name.length, 10) + 3, 60)}ch` }} className="h-9 max-w-full rounded-md border bg-surface px-2.5 text-lg font-semibold outline-none focus:border-border-strong" /> : <h1 className="truncate text-xl font-semibold tracking-tight">{mode === "preview" ? name : dashboard.name}</h1>}
           <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
             {published ? <span className="inline-flex items-center gap-1 rounded border border-emerald-400/30 px-1.5 py-0.5 text-[10px] text-emerald-300"><Radio className="size-3" />Published · live</span> : <span className="rounded border px-1.5 py-0.5 text-[10px]">Draft</span>}
             {!isOwner ? <span className="rounded border px-1.5 py-0.5 text-[10px]">{role === "editor" ? "Can edit" : "View only"}</span> : null}
@@ -282,7 +294,7 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
             <>
               <Button type="button" variant="outline" onClick={() => downloadJson(fileSafe(dashboard.name), { name: dashboard.name, description: dashboard.description, slicers: dashboard.slicers, widgets: dashboard.widgets })}><Download />Export</Button>
               {isOwner ? <Button type="button" variant="outline" onClick={() => setShareOpen(true)}><Share2 />Share</Button> : null}
-              {canEdit ? <Button type="button" onClick={() => { setMode("edit"); setUnlocked(true); }}><Pencil />Edit</Button> : null}
+              {canEdit ? <Button type="button" variant="outline" aria-pressed={false} onClick={startEditing}><Pencil />Edit</Button> : null}
             </>
           ) : mode === "preview" ? (
             <>
@@ -293,10 +305,11 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
             <>
               {dirty ? <Button type="button" variant="outline" onClick={discard}><Undo2 />Discard</Button> : null}
               <Button type="button" variant="outline" onClick={() => { setOpenId(null); setMode("preview"); }} disabled={!draft.length}><Eye />Preview</Button>
-              <Button type="button" variant={unlocked ? "default" : "outline"} aria-pressed={unlocked} onClick={() => { setUnlocked(!unlocked); setOpenId(null); }}>{unlocked ? <Pencil /> : <Lock />}Edit</Button>
-              <Button type="button" variant="outline" onClick={() => void saveEdits()} disabled={!dirty || !name.trim() || save.isPending}><Save />{published ? "Save changes" : "Save draft"}</Button>
+              {unlocked || published
+                ? <Button type="button" aria-pressed onClick={finishEditing} disabled={save.isPending}><Check />Done</Button>
+                : <Button type="button" variant="outline" aria-pressed={false} onClick={startEditing}><Pencil />Edit</Button>}
+              {!published ? <Button type="button" variant="outline" onClick={() => void saveEdits()} disabled={!dirty || !name.trim() || save.isPending}><Save />Save draft</Button> : null}
               {isOwner && !published ? <Button type="button" onClick={() => setPublishOpen(true)} disabled={!draft.length || !name.trim()}><Radio />Publish</Button> : null}
-              {published ? <Button type="button" onClick={() => { void (dirty ? saveEdits() : Promise.resolve()).then(() => setMode("view")); }} disabled={save.isPending}>Done</Button> : null}
             </>
           )}
         </div>
@@ -345,7 +358,15 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
       {panel ? (
         <aside aria-label="Dashboard tools" style={{ "--panel-w": `${panelWidth}px` } as CSSProperties} className="relative flex w-full shrink-0 flex-col border-t bg-sidebar text-sidebar-foreground xl:h-full xl:w-[var(--panel-w)] xl:border-l xl:border-t-0">
           <PanelResizer width={panelWidth} onWidth={setPanelWidth} />
-          {tools ? (
+          <div role="tablist" aria-label="Side panel" className="flex shrink-0 gap-0.5 border-b p-2">
+            {([["datasets", "Datasets", Database], ...(canEdit ? [["library", "Library", BookOpen]] : []), ["info", "Info", Info], ...(canEdit ? [["edit", "Edit", Pencil]] : [])] as Array<["datasets" | "library" | "info" | "edit", string, typeof Pencil]>).map(([value, label, Icon]) => (
+              <button key={value} type="button" role="tab" aria-selected={side === value} onClick={() => setSide(value)}
+                className={cn("flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-xs transition-colors", side === value ? "bg-raised font-medium text-foreground" : "text-muted-foreground hover:bg-raised/50 hover:text-foreground")}>
+                <Icon className="size-3.5" />{label}
+              </button>
+            ))}
+          </div>
+          {canEdit && side === "edit" ? (
             <>
               <div className="flex min-h-0 flex-1 flex-col xl:overflow-y-auto">
                 {openWidget ? (
@@ -400,10 +421,15 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
             </>
           ) : (
             <div className="min-h-0 flex-1 xl:overflow-y-auto">
-              {mode === "view" ? (
-                <DatasetsPanel readOnly canAdd={canEdit} widgets={draft} onEditWidget={canEdit ? editWidget : undefined} attached={attachedDatasets} library={datasets} usage={usage} onAttach={(id) => addDatasets([id])} onDetach={() => undefined} onUploaded={() => void attachNew()} onDrive={() => setDriveOpen(true)} />
+              {side === "info" ? (
+                infoWidget
+                  ? <WidgetInfo widget={infoWidget} datasets={datasets} onClose={() => setInfoId(null)} onEdit={canEdit ? () => editWidget(infoWidget.id) : undefined} />
+                  : <p className="px-4 py-10 text-center text-xs text-muted-foreground">Click a tile to see the data, tables and query behind it.</p>
+              ) : mode === "view" ? (
+                <DatasetsPanel view={side === "library" ? "library" : "datasets"} onShowLibrary={() => setSide("library")} readOnly canAdd={canEdit} widgets={draft} onEditWidget={canEdit ? editWidget : undefined} attached={attachedDatasets} library={datasets} usage={usage} onAttach={(id) => addDatasets([id])} onDetach={() => undefined} onUploaded={() => void attachNew()} onDrive={() => setDriveOpen(true)} />
               ) : (
                 <DatasetsPanel
+                  view={side === "library" ? "library" : "datasets"} onShowLibrary={() => setSide("library")}
                   widgets={draft} onEditWidget={editWidget}
                   attached={attachedDatasets} library={datasets} usage={usage}
                   onAttach={(id) => attach([id])} onDetach={(id) => setAttachedIds((items) => items.filter((item) => item !== id))}

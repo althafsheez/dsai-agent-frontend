@@ -253,7 +253,7 @@ export function WidgetCard({ widget, dataset, editable, filters = {}, onSelect, 
         ) : <h3 className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">{widget.title}</h3>}
         {editable ? (
           <>
-            {onOpen || onQuickEdit ? <button type="button" aria-label={`Edit ${widget.title}`} title="Quick edit: size and type" onClick={onQuickEdit ?? onOpen} className="inline-flex h-7 items-center gap-1 rounded px-1.5 text-[11px] text-muted-foreground hover:bg-raised hover:text-foreground"><Pencil className="size-3.5" />Edit</button> : null}
+            {onOpen || onQuickEdit ? <button type="button" aria-label={`Edit ${widget.title}`} title="Quick edit: size and type" onClick={onQuickEdit ?? onOpen} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-raised hover:text-foreground"><Pencil className="size-3.5" /></button> : null}
             <button type="button" aria-label={`Remove ${widget.title}`} onClick={onRemove} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-raised hover:text-red-300"><Trash2 className="size-3.5" /></button>
           </>
         ) : null}

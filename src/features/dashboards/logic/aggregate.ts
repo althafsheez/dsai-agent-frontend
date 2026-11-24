@@ -46,7 +46,7 @@ export function kpiValue(widget: DashboardWidget, dataset: DatasetLite): number 
   return reduce(values, widget.agg);
 }
 
-/** Groups rows by the category column and aggregates the numeric column. Top 12 groups, largest first for bar/pie. */
+/** Groups rows by the category column and aggregates the numeric column. Line/area: in x order; others: top 12 groups, largest first. */
 export function groupedPoints(widget: DashboardWidget, dataset: DatasetLite): Point[] {
   const x = columnIndex(dataset, widget.x);
   const y = columnIndex(dataset, widget.y);
@@ -59,7 +59,11 @@ export function groupedPoints(widget: DashboardWidget, dataset: DatasetLite): Po
     groups.set(key, list);
   }
   const points = [...groups].map(([name, values]) => ({ name, value: Math.round(reduce(values.filter(Number.isFinite), widget.agg) * 100) / 100 }));
-  if (widget.type === "line" || widget.type === "area") return points.slice(0, 12);
+  // Trends read left to right in x order (numbers as numbers), like the tile's SQL: ORDER BY x.
+  if (widget.type === "line" || widget.type === "area") {
+    const numeric = points.every((point) => point.name.trim() !== "" && Number.isFinite(Number(point.name)));
+    return points.sort((left, right) => numeric ? Number(left.name) - Number(right.name) : left.name.localeCompare(right.name)).slice(0, 60);
+  }
   return points.sort((left, right) => right.value - left.value).slice(0, widget.type === "radar" ? 8 : 12);
 }
 

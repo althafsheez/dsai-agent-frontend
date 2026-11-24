@@ -162,8 +162,15 @@ function MiniTile({ tile, large = false, bare = false }: { tile: PreviewTile; la
 
 function Menu({ dashboard, onPin, onRename, onShare, onDelete, onDuplicate }: { dashboard: Dashboard; onPin: () => void; onRename: () => void; onShare: () => void; onDelete: () => void; onDuplicate: () => void }) {
   const [open, setOpen] = useState(false);
+  const [up, setUp] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const role = roleOf(dashboard);
+  const toggle = () => {
+    // Open upwards when the card sits near the bottom of the screen, so no item is cut off.
+    const bottom = box.current?.getBoundingClientRect().bottom ?? 0;
+    setUp(window.innerHeight - bottom < 230);
+    setOpen((value) => !value);
+  };
   useEffect(() => {
     if (!open) return;
     const close = (event: MouseEvent | KeyboardEvent) => {
@@ -177,12 +184,12 @@ function Menu({ dashboard, onPin, onRename, onShare, onDelete, onDuplicate }: { 
   const run = (action: () => void) => () => { setOpen(false); action(); };
   return (
     <div ref={box} className="relative -mr-1.5 -mt-0.5 shrink-0">
-      <button type="button" aria-label={`Actions for ${dashboard.name}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}
+      <button type="button" aria-label={`Actions for ${dashboard.name}`} aria-haspopup="menu" aria-expanded={open} onClick={toggle}
         className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-raised hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
         <MoreHorizontal className="size-4" />
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 top-8 z-20 w-44 rounded-md border bg-popover p-1 shadow-lg">
+        <div role="menu" className={cn("absolute right-0 z-30 w-44", up ? "bottom-8" : "top-8", "rounded-md border bg-popover p-1 shadow-lg")}>
           <Link role="menuitem" href={`/dashboards/${dashboard.id}`} className={item}><ExternalLink className="size-3.5" /> Open</Link>
           <button type="button" role="menuitem" onClick={run(onPin)} className={item}><Pin className="size-3.5" /> {dashboard.pinned ? "Unpin" : "Pin"}</button>
           {role !== "viewer" && <button type="button" role="menuitem" onClick={run(onRename)} className={item}><Pencil className="size-3.5" /> Rename</button>}
@@ -240,10 +247,10 @@ function PreviewChart({ kind, series, labels = [] }: { kind: "line" | "area" | "
     const radius = 26;
     const circumference = 2 * Math.PI * radius;
     let offset = 0;
-    const shown = series.slice(0, 4);
+    const shown = series.slice(0, 3);
     body = (
-      <div className="flex h-full items-center gap-5 px-1">
-        <svg viewBox="0 0 72 72" className="size-[72px] shrink-0 -rotate-90" aria-hidden="true">
+      <div className="flex h-full items-center gap-4 px-1">
+        <svg viewBox="0 0 72 72" className="size-16 shrink-0 -rotate-90" aria-hidden="true">
           {shown.map((value, index) => {
             const length = (value / total) * circumference;
             const segment = <circle key={index} cx="36" cy="36" r={radius} fill="none" stroke={tones[index % tones.length]} strokeWidth="9" strokeDasharray={`${Math.max(length - 2, 0)} ${circumference}`} strokeDashoffset={-offset} opacity={active === null || active === index ? 1 : 0.35} onMouseEnter={() => setActive(index)} onMouseLeave={() => setActive(null)} />;
@@ -251,24 +258,30 @@ function PreviewChart({ kind, series, labels = [] }: { kind: "line" | "area" | "
             return segment;
           })}
         </svg>
-        <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="min-w-0 flex-1 space-y-1">
           {shown.map((value, index) => (
             <div key={index} {...hit(index)} className={cn("flex items-center gap-2 rounded focus-visible:outline-none", active !== null && active !== index && "opacity-40")}>
               <span className="size-1.5 shrink-0 rounded-full" style={{ background: tones[index % tones.length] }} />
-              <span className="h-1 flex-1 overflow-hidden rounded-full bg-raised"><span className="block h-1 rounded-full" style={{ width: `${(value / total) * 100}%`, background: tones[index % tones.length] }} /></span>
-              <span className="w-7 text-right text-[10px] tabular-nums text-muted-foreground">{Math.round((value / total) * 100)}%</span>
+              <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">{name(index)}</span>
+              <span className="h-1 w-12 shrink-0 overflow-hidden rounded-full bg-raised"><span className="block h-1 rounded-full" style={{ width: `${(value / total) * 100}%`, background: tones[index % tones.length] }} /></span>
+              <span className="w-7 text-right text-[10px] tabular-nums text-foreground/80">{Math.round((value / total) * 100)}%</span>
             </div>
           ))}
+          {series.length > shown.length ? <p className="pl-3.5 text-[10px] text-muted-foreground">+{series.length - shown.length} more</p> : null}
         </div>
       </div>
     );
   } else if (kind === "bar") {
     const max = Math.max(...series, 1);
+    const top = series.indexOf(Math.max(...series));
     body = (
-      <div className="flex h-full items-end gap-1.5 px-1">
-        {series.map((value, index) => (
-          <span key={index} {...hit(index)} className="flex-1 rounded-[2px] focus-visible:outline-none" style={{ height: `${Math.max((value / max) * 100, 3)}%`, background: active === index || (active === null && index === series.length - 1) ? "var(--sage)" : "var(--slate)", opacity: active === null ? (index === series.length - 1 ? 1 : 0.45) : active === index ? 1 : 0.35 }} />
-        ))}
+      <div className="flex h-full flex-col gap-0.5 px-1">
+        <div className="flex min-h-0 flex-1 items-end gap-1.5">
+          {series.map((value, index) => (
+            <span key={index} {...hit(index)} className="flex-1 rounded-[2px] focus-visible:outline-none" style={{ height: `${Math.max((value / max) * 100, 3)}%`, background: active === index || (active === null && index === top) ? "var(--sage)" : "var(--slate)", opacity: active === null ? (index === top ? 1 : 0.45) : active === index ? 1 : 0.35 }} />
+          ))}
+        </div>
+        {labels.length ? <div aria-hidden="true" className="flex gap-1.5">{series.map((_, index) => <span key={index} className="min-w-0 flex-1 truncate text-center text-[9px] leading-3 text-muted-foreground">{name(index)}</span>)}</div> : null}
       </div>
     );
   } else {
@@ -278,7 +291,8 @@ function PreviewChart({ kind, series, labels = [] }: { kind: "line" | "area" | "
     const marked = points[active ?? points.length - 1];
     const tone = kind === "area" ? "var(--sage)" : "var(--slate)";
     body = (
-      <div className="relative h-full">
+      <div className="flex h-full flex-col gap-0.5">
+      <div className="relative min-h-0 flex-1">
         <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none" className="h-full w-full overflow-visible" aria-hidden="true">
           {[0.25, 0.5, 0.75].map((ratio) => <line key={ratio} x1="0" x2={chartWidth} y1={chartHeight * ratio} y2={chartHeight * ratio} stroke="var(--border)" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />)}
           {kind === "area" && <path d={area} fill="var(--sage)" opacity="0.12" />}
@@ -286,6 +300,8 @@ function PreviewChart({ kind, series, labels = [] }: { kind: "line" | "area" | "
         </svg>
         <span aria-hidden="true" className="pointer-events-none absolute size-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ left: `${(marked.x / chartWidth) * 100}%`, top: `${(marked.y / chartHeight) * 100}%`, background: tone }} />
         <div className="absolute inset-0 flex">{series.map((_, index) => <span key={index} {...hit(index)} className="h-full flex-1 focus-visible:outline-none" />)}</div>
+      </div>
+      {labels.length ? <div aria-hidden="true" className="flex justify-between gap-2 text-[9px] leading-3 text-muted-foreground"><span className="truncate">{name(0)}</span><span className="truncate">{name(series.length - 1)} · {shorten(series[series.length - 1])}</span></div> : null}
       </div>
     );
   }
@@ -307,8 +323,8 @@ function DashboardCard({ dashboard, onTogglePin, onRename, onShare, onDelete, on
   const published = dashboard.status === "published";
   const kind = chart ? KIND[chart.type] : undefined;
   return (
-    <article aria-label={dashboard.name} className="group flex flex-col overflow-hidden rounded-lg border bg-surface/40 transition-colors hover:border-border-strong hover:bg-surface/70">
-      <div onClick={() => router.push(`/dashboards/${dashboard.id}`)} className="relative cursor-pointer border-b bg-background/60 px-3.5 pb-2 pt-3">
+    <article aria-label={dashboard.name} className="group flex flex-col rounded-lg border bg-surface/40 transition-colors hover:border-border-strong hover:bg-surface/70">
+      <div onClick={() => router.push(`/dashboards/${dashboard.id}`)} className="relative cursor-pointer rounded-t-lg border-b bg-background/60 px-3.5 pb-2 pt-3">
         {headline ? (
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
