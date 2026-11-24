@@ -103,3 +103,28 @@ async def test_dataset_rows_returns_up_to_the_limit(client: AsyncClient, demo_he
     capped = (await client.get(f"/api/datasets/{resource_id}/rows?limit=100", headers=demo_headers)).json()
     assert len(capped["rows"]) == 100 and capped["truncated"] is True
     assert (await client.get(f"/api/datasets/{resource_id}/rows?limit=6001", headers=demo_headers)).status_code == 422
+
+
+async def test_ask_falls_back_to_another_model_when_the_chosen_one_stays_busy(monkeypatch) -> None:
+    from agentic.runtime.contracts import ModelInfo, ProviderError
+
+    from app.services import dashboard_ai
+
+    calls: list[str] = []
+
+    class Busy:
+        async def list_models(self):
+            return [ModelInfo("busy", "Busy", (), None), ModelInfo("spare", "Spare", (), None)], "busy"
+
+        async def stream_text(self, turns, model_id, effort):
+            calls.append(model_id)
+            if model_id == "busy":
+                raise ProviderError("unavailable", "Service unavailable")
+            yield '{"ok": true}'
+
+    async def no_wait(_seconds):
+        return None
+
+    monkeypatch.setattr(dashboard_ai.asyncio, "sleep", no_wait)
+    assert await dashboard_ai._ask(Busy(), "prompt", "busy", None) == {"ok": True}
+    assert calls == ["busy", "busy", "busy", "spare"]

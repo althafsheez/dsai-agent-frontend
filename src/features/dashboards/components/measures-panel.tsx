@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3, Check, ChevronDown, Hash, LoaderCircle, Pencil, Plus, Sigma, Sparkles, Trash2 } from "lucide-react";
+import { BarChart3, Check, Hash, LoaderCircle, Pencil, Plus, Sigma, Trash2 } from "lucide-react";
 import { runDax } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -10,19 +10,6 @@ import { formatNumber } from "../logic/aggregate";
 import type { DashboardMeasure, DashboardWidget, DatasetLite, Filters } from "../types";
 
 type Format = NonNullable<DashboardMeasure["format"]>;
-
-const EXAMPLES: Array<[string, string]> = [
-  ["Total", "SUM(Sales[Amount])"],
-  ["Row count", "COUNTROWS(Sales)"],
-  ["Share of total", "DIVIDE([Total], CALCULATE([Total], ALL(Sales)))"],
-  ["Only one region", "CALCULATE([Total], Sales[Region] = \"East\")"],
-  ["Row by row", "SUMX(Sales, Sales[Price] * Sales[Qty])"],
-  ["Big orders", "COUNTROWS(FILTER(Sales, Sales[Amount] > 100))"],
-  ["Variables", "VAR t = [Total] RETURN IF(t > 1000, \"High\", \"Low\")"],
-  ["Year to date", "TOTALYTD([Total], Sales[Date])"],
-  ["Same time last year", "CALCULATE([Total], SAMEPERIODLASTYEAR(Sales[Date]))"],
-  ["Last 3 months", "CALCULATE([Total], DATESINPERIOD(Sales[Date], LASTDATE(Sales[Date]), -3, MONTH))"],
-];
 
 export function formatMeasure(value: unknown, format: Format = "number"): string {
   if (value === null || value === undefined || value === "") return "(blank)";
@@ -106,7 +93,6 @@ interface MeasuresPanelProps {
   /** Missing for viewers: the list is read-only. */
   onChange?: (measures: DashboardMeasure[]) => void;
   onAddTile?: (tile: { title: string; dax: string; datasetId: string; x?: string; grain?: DashboardWidget["grain"] }) => void;
-  ai?: { ready: boolean; busy: boolean; error?: string; write: (request: string) => Promise<DashboardMeasure & { explanation: string }> };
 }
 
 /** DAX measures, like Power BI: named formulas that react to the dashboard's filters and can be shown as tiles. */
@@ -116,12 +102,9 @@ function looksLikeDate(type: string, sample: unknown): boolean {
   return /date|time/i.test(type) || (typeof sample === "string" && /^(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})/.test(sample));
 }
 
-export function MeasuresPanel({ measures, datasets, filters, onChange, onAddTile, ai }: MeasuresPanelProps) {
+export function MeasuresPanel({ measures, datasets, filters, onChange, onAddTile }: MeasuresPanelProps) {
   const [editing, setEditing] = useState<string | "new" | null>(null);
-  const [draft, setDraft] = useState<(DashboardMeasure & { explanation: string }) | null>(null);
-  const [request, setRequest] = useState("");
   const [chartFor, setChartFor] = useState<string | null>(null);
-  const [helpOpen, setHelpOpen] = useState(false);
   const datasetIds = datasets.map((dataset) => dataset.id);
   const columns = datasets.flatMap((dataset) => dataset.columns.map((column, index) => ({ datasetId: dataset.id, column: column.name, date: looksLikeDate(column.data_type, dataset.rows.find((row) => row[index] != null && row[index] !== "")?.[index]), label: datasets.length > 1 ? `${dataset.name} · ${column.name}` : column.name })));
   const tableNames = datasets.map((dataset) => dataset.name.replace(/\.[A-Za-z0-9]{1,5}$/, "").replace(/[^0-9A-Za-z_]+/g, "_").replace(/^_+|_+$/g, "").toLowerCase());
@@ -130,38 +113,13 @@ export function MeasuresPanel({ measures, datasets, filters, onChange, onAddTile
     setEditing(null);
   };
 
-  async function askAi() {
-    if (!ai || !request.trim()) return;
-    try {
-      setDraft(await ai.write(request.trim()));
-    } catch {
-      /* shown through ai.error */
-    }
-  }
-
   return (
     <section aria-label="Measures" className="flex flex-col gap-3 p-3">
       <div className="flex items-center gap-2">
         <h2 className="flex items-center gap-1.5 text-xs font-semibold"><Sigma className="size-3.5" />Measures <span className="font-normal text-muted-foreground">{measures.length}</span></h2>
-        {onChange ? <Button type="button" size="sm" variant="outline" className="ml-auto" onClick={() => { setEditing("new"); setDraft(null); }}><Plus />New measure</Button> : null}
+        {onChange ? <Button type="button" size="sm" variant="outline" className="ml-auto" onClick={() => setEditing("new")}><Plus />New measure</Button> : null}
       </div>
       <p className="text-[11px] leading-relaxed text-muted-foreground">DAX formulas, like in Power BI. Each one recalculates for every bar of a chart and for the slicers you pick. Tables: {tableNames.map((name) => <code key={name} className="mx-0.5 rounded bg-raised px-1 font-mono text-foreground">{name}</code>)}</p>
-
-      {onChange && ai ? (
-        draft ? (
-          <MeasureEditor initial={draft} others={measures} datasetIds={datasetIds} filters={filters} note={`AI: ${draft.explanation || "Here is the formula."} Edit it if needed, then save.`}
-            onSave={(measure) => { save(measure); setDraft(null); setRequest(""); }} onCancel={() => setDraft(null)} />
-        ) : (
-          <form onSubmit={(event) => { event.preventDefault(); void askAi(); }} className="space-y-1.5">
-            <label className="sr-only" htmlFor="measure-ai">Describe a measure</label>
-            <div className="flex gap-2">
-              <input id="measure-ai" value={request} onChange={(event) => setRequest(event.target.value)} placeholder="Describe a measure, e.g. share of revenue by region" className="h-8 min-w-0 flex-1 rounded-md border bg-surface px-2.5 text-xs outline-none placeholder:text-muted-foreground focus:border-border-strong" />
-              <Button type="submit" size="sm" disabled={!ai.ready || ai.busy || request.trim().length < 3}>{ai.busy ? <LoaderCircle className="animate-spin" /> : <Sparkles />}Write</Button>
-            </div>
-            {ai.error ? <p role="alert" className="text-[11px] text-red-300">{ai.error}</p> : null}
-          </form>
-        )
-      ) : null}
 
       {editing === "new" ? <MeasureEditor initial={{ name: "", expression: "", format: "number" }} others={measures} datasetIds={datasetIds} filters={filters} onSave={(measure) => save(measure)} onCancel={() => setEditing(null)} /> : null}
 
@@ -208,19 +166,7 @@ export function MeasuresPanel({ measures, datasets, filters, onChange, onAddTile
             </li>
           ))}
         </ul>
-      ) : editing !== "new" && !draft ? <p className="rounded-lg border border-dashed px-3 py-6 text-center text-[11px] text-muted-foreground">No measures yet.{onChange ? " Describe one above, or press New measure." : ""}</p> : null}
-
-      <div className="rounded-lg border">
-        <button type="button" aria-expanded={helpOpen} onClick={() => setHelpOpen((open) => !open)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] font-medium hover:bg-raised/60">
-          <ChevronDown className={cn("size-3.5 text-muted-foreground transition-transform", !helpOpen && "-rotate-90")} />DAX examples
-        </button>
-        {helpOpen ? (
-          <div className="space-y-1 border-t px-3 py-2">
-            {EXAMPLES.map(([label, code]) => <p key={label} className="text-[10px]"><span className="text-muted-foreground">{label}: </span><code className="font-mono text-foreground/90">{code}</code></p>)}
-            <p className="pt-1 text-[10px] text-muted-foreground">Also: AVERAGE, MIN, MAX, DISTINCTCOUNT, COUNTBLANK, MEDIAN, AVERAGEX, MINX, MAXX, ALLEXCEPT, ALLSELECTED, KEEPFILTERS, VALUES, SELECTEDVALUE, SWITCH, ROUND, COALESCE… Not yet: relationships between tables and time intelligence.</p>
-          </div>
-        ) : null}
-      </div>
+      ) : editing !== "new" ? <p className="rounded-lg border border-dashed px-3 py-6 text-center text-[11px] text-muted-foreground">No measures yet.{onChange ? " Press New measure and write a DAX formula." : ""}</p> : null}
     </section>
   );
 }

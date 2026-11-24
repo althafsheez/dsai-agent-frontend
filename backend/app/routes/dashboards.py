@@ -123,25 +123,6 @@ async def tune_dashboard(data: TuneRequest, request: Request, user: User = Depen
     return await _with_scripts(result, data, request, db, user)
 
 
-class MeasureAiRequest(BaseModel):
-    request: str = Field(min_length=3, max_length=1000)
-    dataset_ids: list[str] = Field(min_length=1, max_length=8)
-    measures: list[MeasureInput] = Field(default_factory=list, max_length=50)
-    model_id: str
-    effort: str | None = None
-
-
-@router.post("/measure")
-async def write_measure(data: MeasureAiRequest, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
-    """The AI writes a DAX measure from plain words; it is run once to check it works before it comes back."""
-    _validated(request, data.model_id, data.effort)
-    loaded = _datasets_for_sql(request, db, user, data.dataset_ids)
-    try:
-        return await dashboard_ai.write_measure(request.app.state.provider, data.request.strip(), loaded, {item.name: item.expression for item in data.measures}, data.model_id, data.effort)
-    except (ProviderError, ValueError) as exc:
-        raise APIError(502, "dashboard_ai_failed", str(exc)) from exc
-
-
 class CustomRequest(BaseModel):
     request: str = Field(min_length=3, max_length=1000)
     title: str = Field(default="", max_length=80)

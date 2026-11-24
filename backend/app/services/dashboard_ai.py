@@ -229,9 +229,11 @@ async def _stream_reply(provider: LLMProvider, prompt: str, model_id: str, effor
     return reply
 
 
-def _busy(exc: ProviderError) -> bool:
+def _busy(exc: Exception) -> bool:
     """The provider was overloaded or slow (503, 429, 5xx, timeout): worth waiting and asking again."""
-    return getattr(exc, "code", "") in ("unavailable", "rate_limit", "service_error", "timeout")
+    details = getattr(exc, "diagnostic", None) or {}
+    marks = {str(getattr(exc, "code", "")), str(details.get("category", "")), str(details.get("code", ""))}
+    return bool(details.get("retryable")) or bool(marks & {"unavailable", "rate_limit", "service_error", "timeout", "provider_timeout"})
 
 
 async def _ask(provider: LLMProvider, prompt: str, model_id: str, effort: str | None) -> Any:
@@ -250,6 +252,19 @@ async def _ask(provider: LLMProvider, prompt: str, model_id: str, effort: str | 
             if (exc.__cause__ is not None or _busy(exc)) and attempt < 2:
                 await asyncio.sleep(4 * (attempt + 1))  # Gemini "high demand" (503) spikes are short; waiting beats instant retries.
     assert last is not None
+    if isinstance(last, ProviderError) and (_busy(last) or last.code == "provider_timeout"):
+        # The chosen model stayed overloaded: answer with another available model rather than failing.
+        try:
+            models, _ = await provider.list_models()
+        except Exception:  # noqa: BLE001 - the original error is the one worth reporting
+            models = []
+        for fallback in [model for model in models if model.id != model_id][:2]:
+            try:
+                reply = await asyncio.wait_for(_stream_reply(provider, prompt, fallback.id, fallback.default_effort), ATTEMPT_SECONDS)
+                logger.warning("Dashboard AI answered with fallback model %s (%s was unavailable)", fallback.id, model_id)
+                return _extract_json(reply)
+            except (asyncio.TimeoutError, ProviderError, ValueError) as exc:
+                logger.warning("Dashboard AI fallback %s failed: %s", fallback.id, exc)
     raise last
 
 
@@ -389,43 +404,3 @@ async def fill_custom(provider: LLMProvider, widgets: list[dict[str, Any]], load
         notes.append(f"“{widget['title']}” is not a preset chart, so the AI wrote a small Python script for it.")
         result.append({**widget, "script": script})
     return result
-
-
-async def write_measure(
-    provider: LLMProvider, request_text: str, loaded: list[dict[str, Any]], measures: dict[str, str], model_id: str, effort: str | None,
-) -> dict[str, Any]:
-    """A DAX measure from plain words. It is checked by running it; on an error the AI gets one more try with that error."""
-    from .dax import SUPPORTED, DaxError, run_dax
-    from .dashboard_sql import describe
-
-    tables = "\n".join(f"- {table['table']}: {', '.join(table['columns'][:60])}" for table in describe(loaded))
-    samples = "\n".join(f"{table['table']} first rows: {json.dumps(item['rows'][:3])[:600]}" for table, item in zip(describe(loaded), loaded))
-    existing = "\n".join(f"- [{name}] = {text}" for name, text in measures.items()) or "(none yet)"
-    base = (
-        "You write DAX measures, exactly like in Power BI. Reply with ONLY a JSON object: "
-        '{"name": str, "expression": str, "format": "number" | "percent" | "currency", "explanation": str}. '
-        "expression is the DAX formula without the 'Name =' part. Reference columns as Table[Column] using the table names below, "
-        "and existing measures as [Measure Name]. Use only these functions: " + ", ".join(SUPPORTED) + ". "
-        "There are no relationships between tables and no time intelligence functions. "
-        "explanation: one or two plain sentences on what it calculates and how filters affect it.\n\n"
-        f"Tables:\n{tables}\n{samples}\n\nExisting measures:\n{existing}\n\nUser request: {request_text}"
-    )
-    prompt, last_error = base, ""
-    for _ in range(2):
-        data = await _ask(provider, prompt, model_id, effort)
-        if not isinstance(data, dict) or not str(data.get("expression") or "").strip():
-            last_error = "The AI did not return a formula."
-            prompt = base + "\n\nReply with the JSON object described above."
-            continue
-        name = str(data.get("name") or "New measure").strip()[:80] or "New measure"
-        expression = str(data["expression"]).strip()
-        fmt = data.get("format") if data.get("format") in ("number", "percent", "currency") else "number"
-        try:
-            result = run_dax(expression, loaded, {**measures, name: expression} if name not in measures else measures)
-        except DaxError as exc:
-            last_error = str(exc)
-            prompt = base + f"\n\nYour previous formula was:\n{expression}\nIt failed with: {exc}\nFix it."
-            continue
-        value = result["rows"][0][0] if result["rows"] else None
-        return {"name": name, "expression": expression, "format": fmt, "explanation": str(data.get("explanation") or "")[:400], "value": value}
-    raise ValueError(f"The AI's formula did not work: {last_error}")

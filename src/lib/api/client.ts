@@ -776,10 +776,6 @@ export function runDax(input: DaxRunInput): Promise<SqlResult & { sql: string }>
     }),
   });
 }
-/** The AI writes a DAX measure from plain words; the server runs it once before returning it. */
-export function writeMeasureWithAi(input: { request: string; datasetIds: string[]; measures: DaxMeasureDto[]; modelId: string }): Promise<Required<DaxMeasureDto> & { explanation: string; value: string | number | null }> {
-  return requestJson("/dashboards/ai/measure", { method: "POST", body: JSON.stringify({ request: input.request, dataset_ids: input.datasetIds, measures: input.measures, model_id: input.modelId }) });
-}
 
 export interface DashboardPersonDto { id: string; name: string; initials: string }
 export async function listDashboardPeople(): Promise<DashboardPersonDto[]> {

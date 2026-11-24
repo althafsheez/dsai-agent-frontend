@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowLeft, ChevronDown, Code2, FileSpreadsheet, Pencil, Plus, Search, Table2, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getSqlTables } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -158,6 +158,7 @@ function queryOf(widget: DashboardWidget, table: string | undefined): { language
 /** One dataset opened up, like the chat's table preview: what it is, its columns, what it builds, the queries, and its rows. */
 function DatasetPreview({ dataset, widgets, onBack, onEditWidget, onLoad }: { dataset: DatasetLite; widgets: DashboardWidget[]; onBack: () => void; onEditWidget?: (id: string) => void; onLoad?: () => void }) {
   const [columnsOpen, setColumnsOpen] = useState(false);
+  const [tableOpen, setTableOpen] = useState(false);
   const tables = useQuery({ queryKey: ["sql-tables", [dataset.id]], queryFn: () => getSqlTables([dataset.id]), staleTime: 60_000, retry: false });
   const table = tables.data?.find((entry) => entry.dataset_id === dataset.id)?.table;
   const usedBy = (column: string) => widgets.filter((widget) => readsColumn(widget, column)).map((widget) => widget.title);
@@ -234,23 +235,52 @@ function DatasetPreview({ dataset, widgets, onBack, onEditWidget, onLoad }: { da
         ) : null}
       </div>
 
-      <section aria-label="Rows" className="px-4 py-4">
-        <h3 className="text-xs font-semibold">Rows</h3>
-        <p className="mb-3 mt-1 text-[11px] text-muted-foreground">{dataset.rows.length} rows shown{(dataset.row_count ?? dataset.rows.length) > dataset.rows.length ? ` of ${(dataset.row_count ?? 0).toLocaleString()} · Preview limited to a sample` : ""}</p>
-        <div tabIndex={0} className="max-h-[28rem] overflow-auto rounded-lg border focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
-          <table aria-label="Dataset preview" className="w-full text-left text-xs">
-            <thead className="sticky top-0 z-10 bg-raised text-muted-foreground"><tr>{dataset.columns.map((column) => <th key={column.name} scope="col" className="whitespace-nowrap border-b px-3 py-2 font-medium">{column.name}</th>)}</tr></thead>
-            <tbody>{dataset.rows.map((row, index) => (
-              <tr key={index} className="border-b border-border/50 hover:bg-raised/40">{row.map((value, column) => {
-                const display = value === null ? "NULL" : String(value);
-                return <td key={column} title={display} className="max-w-52 truncate whitespace-nowrap px-3 py-2 tabular-nums">{display}</td>;
-              })}</tr>
-            ))}</tbody>
-          </table>
-          {dataset.rows.length === 0 ? <p className="p-3 text-xs text-muted-foreground">No rows to display.</p> : null}
-        </div>
+      <section aria-label="Rows" className="flex items-center gap-2 px-4 py-4">
+        <p className="min-w-0 flex-1 text-[11px] text-muted-foreground">{(dataset.row_count ?? dataset.rows.length).toLocaleString()} rows · {dataset.columns.length} columns</p>
+        <button type="button" onClick={() => setTableOpen(true)} className="inline-flex h-8 items-center gap-1.5 rounded-md border bg-surface px-2.5 text-xs font-medium hover:border-border-strong"><Table2 className="size-3.5" />View table</button>
       </section>
+      {tableOpen ? <TableView dataset={dataset} onClose={() => setTableOpen(false)} /> : null}
     </section>
+  );
+}
+
+/** The dataset as one big table over the whole screen, like a dataset opened in a chat; closing it returns to the panel. */
+function TableView({ dataset, onClose }: { dataset: DatasetLite; onClose: () => void }) {
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    document.addEventListener("keydown", escape);
+    return () => document.removeEventListener("keydown", escape);
+  }, [onClose]);
+  const total = dataset.row_count ?? dataset.rows.length;
+  return (
+    <div role="dialog" aria-modal="true" aria-label={`Table ${dataset.name}`} className="fixed inset-0 z-[70] flex flex-col bg-sidebar p-4 text-sidebar-foreground">
+      <header className="mb-3 flex shrink-0 items-center gap-3">
+        <FileSpreadsheet className="size-4 shrink-0 text-sage" />
+        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{dataset.name}</h2>
+        <span className="text-[11px] text-muted-foreground">{dataset.rows.length.toLocaleString()}{total > dataset.rows.length ? ` of ${total.toLocaleString()}` : ""} rows · {dataset.columns.length} columns</span>
+        <button type="button" autoFocus aria-label="Close table" onClick={onClose} className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-raised hover:text-foreground"><X className="size-4" /></button>
+      </header>
+      <div className="min-h-0 flex-1 overflow-auto overscroll-contain rounded-md border bg-background [scrollbar-gutter:stable]">
+        <table aria-label="Dataset rows" className="min-w-max border-collapse text-left text-[11px]">
+          <thead className="sticky top-0 z-20 bg-raised text-muted-foreground shadow-[0_1px_0_var(--border)]">
+            <tr><th aria-label="Row" className="sticky left-0 z-30 w-12 min-w-12 border-b border-r bg-raised px-2 py-2 text-center font-medium">#</th>{dataset.columns.map((column) => <th key={column.name} scope="col" className="min-w-36 whitespace-nowrap border-b border-r px-3 py-2.5 font-medium last:border-r-0">{column.name}</th>)}</tr>
+          </thead>
+          <tbody>
+            {dataset.rows.map((row, rowIndex) => (
+              <tr key={rowIndex} className="border-b odd:bg-surface/25 hover:bg-raised/60 last:border-b-0">
+                <th scope="row" className="sticky left-0 z-10 w-12 min-w-12 border-r bg-background px-2 py-2 text-center font-normal tabular-nums text-muted-foreground">{rowIndex + 1}</th>
+                {dataset.columns.map((column, columnIndex) => {
+                  const value = row[columnIndex];
+                  const shown = value === null || value === undefined || value === "" ? "—" : String(value);
+                  return <td key={column.name} title={shown} className="max-w-64 truncate whitespace-nowrap border-r px-3 py-2 last:border-r-0">{shown}</td>;
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {dataset.rows.length === 0 ? <p className="p-3 text-xs text-muted-foreground">No rows to display.</p> : null}
+      </div>
+    </div>
   );
 }
 

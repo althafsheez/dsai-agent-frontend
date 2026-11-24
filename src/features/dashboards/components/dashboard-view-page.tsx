@@ -69,6 +69,7 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   /** Which view the right panel shows. */
   const [side, setSide] = useState<"datasets" | "info">("datasets");
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [infoPanel, setInfoPanel] = useState<"query" | "dax">("query");
   const [chatHeight, setChatHeight] = useState(280);
   const [fill, setFill] = useState<{ text: string; n: number }>();
   const [panelWidth, setPanelWidth] = usePanelWidth();
@@ -385,15 +386,23 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
             <div className="min-h-0 flex-1 xl:overflow-y-auto">
               {side === "info" ? (
                 <>
-                  {infoWidget
-                    ? <WidgetInfo key={infoWidget.id} widget={infoWidget} datasets={datasets} onClose={() => setInfoId(null)} onSaveCode={canEdit ? (code) => { if (mode !== "edit") setMode("edit"); change(withCodeOf(infoWidget, code)); } : undefined} />
-                    : <p className="border-b px-4 py-6 text-center text-xs text-muted-foreground">Click a tile to see the data, tables and query behind it.</p>}
-                  <MeasuresPanel
-                    measures={measures} datasets={attachedDatasets.length ? attachedDatasets : datasets.slice(0, 1)} filters={filters}
-                    onChange={canEdit ? (next) => { if (mode !== "edit") setMode("edit"); setMeasures(next); } : undefined}
-                    onAddTile={canEdit ? addMeasureTile : undefined}
-                    ai={{ ready: ai.ready, busy: ai.measure.isPending, error: messageOf(ai.measure.error) ?? undefined, write: (request) => ai.measure.mutateAsync({ request, datasetIds: attachedIds.length ? attachedIds : datasets.slice(0, 1).map((dataset) => dataset.id), measures }) }}
-                  />
+                  <div role="tablist" aria-label="Info panels" className="mx-3 mt-3 grid grid-cols-2 gap-0.5 rounded-lg border bg-surface/40 p-0.5">
+                    {([["query", "Query & data"], ["dax", "DAX formulas"]] as const).map(([value, label]) => (
+                      <button key={value} type="button" role="tab" aria-selected={infoPanel === value} onClick={() => setInfoPanel(value)}
+                        className={cn("h-7 rounded-md text-[11px] transition-colors", infoPanel === value ? "bg-raised font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}>{label}</button>
+                    ))}
+                  </div>
+                  {infoPanel === "query" ? (
+                    infoWidget
+                      ? <WidgetInfo key={infoWidget.id} widget={infoWidget} datasets={datasets} onClose={() => setInfoId(null)} onSaveCode={canEdit ? (code) => { if (mode !== "edit") setMode("edit"); change(withCodeOf(infoWidget, code)); } : undefined} />
+                      : <p className="px-4 py-6 text-center text-xs text-muted-foreground">Click a tile to see its SQL query and the datasets and tables it uses.</p>
+                  ) : (
+                    <MeasuresPanel
+                      measures={measures} datasets={attachedDatasets.length ? attachedDatasets : datasets.slice(0, 1)} filters={filters}
+                      onChange={canEdit ? (next) => { if (mode !== "edit") setMode("edit"); setMeasures(next); } : undefined}
+                      onAddTile={canEdit ? addMeasureTile : undefined}
+                    />
+                  )}
                 </>
               ) : mode === "view" ? (
                 <DatasetsPanel view={libraryOpen ? "library" : "datasets"} onShowLibrary={() => setLibraryOpen(true)} onHideLibrary={() => setLibraryOpen(false)} readOnly canAdd={canEdit} widgets={draft} onEditWidget={canEdit ? editWidget : undefined} attached={attachedDatasets} library={datasets} usage={usage} onAttach={(id) => addDatasets([id])} onDetach={() => undefined} onUploaded={() => void attachNew()} onDrive={() => setDriveOpen(true)} />

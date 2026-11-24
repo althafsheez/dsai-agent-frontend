@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { analyzeDatasets, buildCustomChartWithAi, generateDashboardWithAi, getDatasetRows, getLibrary, getModels, listDashboardPeople, reviewDashboardWithAi, syncDatasetFromDrive, tuneDashboardWithAi, writeMeasureWithAi } from "@/lib/api";
+import { analyzeDatasets, buildCustomChartWithAi, generateDashboardWithAi, getDatasetRows, getLibrary, getModels, listDashboardPeople, reviewDashboardWithAi, syncDatasetFromDrive, tuneDashboardWithAi } from "@/lib/api";
 import type { DashboardAiResult } from "@/lib/api";
 import { deleteDashboard, duplicateDashboard, getDashboard, listDashboards, pinDashboard, saveDashboard } from "./data/dashboard-store";
-import type { DashboardMeasure, DashboardWidget, DatasetLite } from "./types";
+import type { DashboardWidget, DatasetLite } from "./types";
 
 export const dashboardKeys = { all: ["dashboards"] as const, one: (id: string) => ["dashboards", id] as const, datasets: ["dashboard-datasets"] as const };
 
@@ -79,10 +79,7 @@ export function useDashboardAi() {
       return toWidget(widget);
     },
   });
-  const measure = useMutation({
-    mutationFn: (input: { request: string; datasetIds: string[]; measures: DashboardMeasure[] }) => writeMeasureWithAi({ ...input, modelId }),
-  });
-  return { ready: Boolean(modelId), generate, tune, review, custom, measure };
+  return { ready: Boolean(modelId), generate, tune, review, custom };
 }
 
 /** How the chosen datasets overlap and where they disagree. Only asked for when two or more are chosen. */
