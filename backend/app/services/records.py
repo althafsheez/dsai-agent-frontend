@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from ..errors import APIError
-from ..models import AgentRun, Chat, FileObject, Message, Resource, ResourceLink, User, Workspace, WorkspaceContextFile, utc_now
-from ..schemas import ChatCreate, ChatUpdate, MessageAttachment, MessageResponse, WorkspaceCreate, WorkspaceUpdate
+from ..connectors.service import validate_selection
+from ..models import AgentRun, Chat, DataConnection, FileObject, Message, Resource, ResourceLink, User, Workspace, WorkspaceContextFile, utc_now
+from ..schemas import ChatCreate, ChatUpdate, MessageAttachment, MessageConnection, MessageResponse, WorkspaceCreate, WorkspaceUpdate
 from .resource_uploads import attach_library_resources
 
 
@@ -110,6 +111,7 @@ def create_chat(session: Session, user: User, data: ChatCreate) -> tuple[Chat, M
 
     if data.workspace_id is not None:
         require_workspace(session, user, data.workspace_id)
+    connection_ids = validate_selection(session, user, data.workspace_id, data.connection_ids)
     content = data.content.strip()
     if not content:
         raise APIError(422, "empty_message", "Message content cannot be blank.")
@@ -128,6 +130,7 @@ def create_chat(session: Session, user: User, data: ChatCreate) -> tuple[Chat, M
         status="completed",
         position=1,
         client_request_id=data.client_request_id,
+        connection_ids=connection_ids,
     )
     session.add(message)
     session.commit()
@@ -188,8 +191,16 @@ def message_response(session: Session, message: Message) -> MessageResponse:
         .where(or_(ResourceLink.message_id == message.id, AgentRun.assistant_message_id == message.id))
         .order_by(ResourceLink.created_at, ResourceLink.id)
     ).unique().all()
+    names = dict(session.execute(select(DataConnection.id, DataConnection.name).where(
+        DataConnection.id.in_(message.connection_ids),
+        DataConnection.created_by == select(Chat.created_by).where(Chat.id == message.chat_id).scalar_subquery(),
+    )).all()) if message.connection_ids else {}
     return MessageResponse.model_validate(message).model_copy(
         update={
+            "connection_refs": [
+                MessageConnection(id=id, name=names.get(id, "Disconnected PostgreSQL source"))
+                for id in message.connection_ids
+            ],
             "attachment_refs": [
                 MessageAttachment(resource_type=resource_type, resource_id=resource_id, name=name, size_bytes=size)
                 for resource_type, resource_id, name, size in references
@@ -220,6 +231,7 @@ def list_messages(session: Session, user: User, chat_id: str) -> list[Message]:
 def create_message(
     session: Session, user: User, chat_id: str, content: str, request_id: str,
     resource_ids: list[str] | None = None,
+    connection_ids: list[str] | None = None,
 ) -> Message:
     chat = require_chat(session, user, chat_id)
     existing = session.scalar(
@@ -238,6 +250,7 @@ def create_message(
         status="completed",
         position=position,
         client_request_id=request_id,
+        connection_ids=validate_selection(session, user, chat.workspace_id, connection_ids or []),
     )
     session.add(message)
     if resource_ids:

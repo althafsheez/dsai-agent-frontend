@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgentTrace, IndividualThoughtTextRenderer } from "./agent-trace";
 import type { TraceStep } from "../types";
@@ -49,6 +49,42 @@ const mockSteps: TraceStep[] = [
 ];
 
 describe("AgentTrace component (Reasoning Trace)", () => {
+  it("shows PostgreSQL results in the expanded SQL block", async () => {
+    const user = userEvent.setup();
+    render(<AgentTrace steps={[{
+      ...mockSteps[0],
+      label: "Query Database",
+      summary: undefined,
+      sql: "SELECT sum(total) FROM sales.orders",
+      queryTable: { caption: "PostgreSQL query results", columns: ["revenue"], rows: [["154.00"]] },
+    }]} isStreaming />);
+    await user.click(screen.getByRole("button", { name: "Expand Query Database sql block" }));
+    expect(screen.getByText((_, element) => element?.textContent === "SELECT sum(total) FROM sales.orders", { selector: "code" })).toBeVisible();
+    expect(screen.getByRole("table", { name: "PostgreSQL query results" })).toHaveTextContent("154.00");
+  });
+
+  it("replaces a running tool indicator with diagnostics on the failed step", async () => {
+    const user = userEvent.setup();
+    const running: TraceStep = { ...mockSteps[2], status: "running", stdout: undefined, outputs: undefined };
+    const { rerender } = render(<AgentTrace steps={[running]} isStreaming />);
+    expect(screen.getByText("Running…")).toBeVisible();
+    const failed: TraceStep = {
+      ...running,
+      status: "failed",
+      error: "Python execution failed",
+      diagnostic: {
+        component: "E2B", category: "python_execution", code: "e2b_python_failed",
+        message: "Python execution failed", stage: "python_execution", tool: "execute_python", retryable: false,
+      },
+    };
+    rerender(<AgentTrace steps={[failed]} />);
+    expect(screen.queryByText("Running…")).not.toBeInTheDocument();
+    const step = within(document.getElementById(`trace-step-${failed.id}`)!);
+    expect(step.getByText("Python execution failed", { selector: "p" })).toBeVisible();
+    await user.click(step.getByText("Error Details"));
+    expect(step.getByText("e2b_python_failed")).toBeVisible();
+  });
+
   it("shows the latest thought in the header and toggles the timeline", async () => {
     const user = userEvent.setup();
     render(<AgentTrace steps={mockSteps} isStreaming={false} />);

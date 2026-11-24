@@ -78,6 +78,8 @@ export interface ChatDto {
 }
 
 export interface MessageDto {
+  connection_ids?: string[];
+  connection_refs?: { id: string; name: string }[];
   id: string;
   chat_id: string;
   role: "user" | "assistant";
@@ -139,6 +141,7 @@ export interface RunStartInput {
 }
 
 export interface QueueRunInput {
+  connection_ids?: string[];
   content: string;
   model_id: string;
   effort?: string;
@@ -159,4 +162,45 @@ export interface SteeringInstructionDto {
   status: "received" | "applied" | "unapplied";
   checkpoint: string | null;
   created_at: string;
+}
+
+export interface PostgresConnectionInput {
+  name: string;
+  description: string;
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  password?: string;
+  ssl_mode: "verify-full" | "disable";
+  workspace_id: string | null;
+  include_schema_for_ai: boolean;
+  enable_previews: boolean;
+  schema_filter: string[];
+}
+
+export interface PostgresConnection extends Omit<PostgresConnectionInput, "password"> {
+  id: string;
+  provider: "postgresql";
+  owner: string;
+  created_by: string;
+  status: "connected" | "failed";
+  created_at: string;
+  updated_at: string;
+  last_tested_at: string;
+}
+
+export interface PostgresSchemaList {
+  items: string[];
+  truncated: boolean;
+}
+
+export interface PostgresTable {
+  schema_name: string;
+  name: string;
+}
+
+export interface PostgresTableDetails extends PostgresTable {
+  columns: { name: string; data_type: string; nullable: boolean; primary_key: boolean }[];
+  preview?: { columns: string[]; rows: unknown[][]; truncated: boolean } | null;
 }

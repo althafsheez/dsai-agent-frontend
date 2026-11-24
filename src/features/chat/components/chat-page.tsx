@@ -64,10 +64,14 @@ import {
   type ExecutionEvent,
   type LibraryResource,
   type MessageDto,
+  type PostgresConnection,
 } from "@/lib/api";
+import { PostgresChips, PostgresSources } from "@/features/connectors/components/postgres-sources";
+import { PostgresSetup } from "@/features/connectors/components/postgres-setup";
 import { LibraryImportDialog } from "@/features/library";
-import type { AssistantMessage, ChatMessage, MessageBlock, TraceStep } from "../types";
-import { asRecord, classifyError, replayTrace, resources as extractTraceResources } from "../execution-trace";
+import type { AssistantMessage, ChatMessage, MessageBlock } from "../types";
+import { finishTrace, replayTrace, terminalDiagnostic, toolStepId, toolTraceStep } from "../execution-trace";
+import { diagnosticHeadline, interruptedDiagnostic, requestDiagnostic } from "../execution-diagnostic";
 import type { DataReferenceResource } from "./data-reference";
 import { takePendingRun } from "../pending-run";
 import { useConversationScroll } from "../use-conversation-scroll";
@@ -88,6 +92,7 @@ function toMessage(message: MessageDto, resources = new Map<string, ContextFile>
       role: "user",
       content: message.content,
       createdAt: message.created_at,
+      databases: message.connection_refs,
       attachments: message.attachment_refs.map((reference) => {
         const resource = resources.get(reference.resource_id);
         const size = resource?.size_bytes ?? reference.size_bytes;
@@ -132,10 +137,6 @@ function eventString(event: ExecutionEvent, key: string): string | null {
   return typeof value === "string" ? value : null;
 }
 
-function toolLabel(name: string): string {
-  return name.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
-}
-
 interface QueueEdit {
   runId: string;
   content: string;
@@ -159,7 +160,6 @@ type ConnectorCategory = "all" | "skills" | "data" | "apps";
 const connectorItems = [
   { name: "Data Cleaning", description: "Clean, validate, and prepare data for analysis", category: "skills" as const, icon: Sparkles },
   { name: "Data Visualization", description: "Create charts, plots, and interactive visuals", category: "skills" as const, icon: BarChart3 },
-  { name: "PostgreSQL", description: "Connect to a PostgreSQL database", category: "data" as const, icon: Database },
   { name: "Google BigQuery", description: "Connect to and query data from BigQuery", category: "data" as const, icon: Database },
   { name: "Snowflake", description: "Connect to your Snowflake data warehouse", category: "data" as const, icon: Snowflake },
   { name: "Forecasting", description: "Forecast trends and future values", category: "skills" as const, icon: TrendingUp },
@@ -223,6 +223,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const [postgresSetup, setPostgresSetup] = useState(false);
+  const [postgresSelection, setPostgresSelection] = useState<PostgresConnection | null>(null);
   const [libraryDialogOpen, setLibraryDialogOpen] = useState(false);
   const [connectorCategory, setConnectorCategory] = useState<ConnectorCategory>("all");
   const [connectorQuery, setConnectorQuery] = useState("");
@@ -278,6 +280,10 @@ export function ChatPage({ chatId }: { chatId: string }) {
     (connectorCategory === "all" || connector.category === connectorCategory)
     && `${connector.name} ${connector.description}`.toLowerCase().includes(connectorQuery.trim().toLowerCase())
   ));
+  const showPostgres = (connectorCategory === "all" || connectorCategory === "data") &&
+    "postgresql database".includes(connectorQuery.trim().toLowerCase());
+  const postgresSource = postgresSelection && (!postgresSelection.workspace_id || postgresSelection.workspace_id === chatQuery.data?.workspace_id)
+    ? postgresSelection : null;
   const resources = useMemo(() => new Map<string, ContextFile>([
     ...(datasetsQuery.data?.items ?? []),
     ...(artifactsQuery.data?.items ?? []),
@@ -306,7 +312,13 @@ export function ChatPage({ chatId }: { chatId: string }) {
   }, [runsQuery.data?.items]);
 
   useEffect(() => {
-    if (traceHistoryQuery.data) setTraceEvents(traceHistoryQuery.data);
+    const events = traceHistoryQuery.data;
+    if (!events) return;
+    setTraceEvents((current) => {
+      const merged = new Map(current.map((event) => [event.event_id, event]));
+      for (const event of events) merged.set(event.event_id, event);
+      return [...merged.values()];
+    });
   }, [traceHistoryQuery.data]);
 
   useEffect(() => {
@@ -314,17 +326,25 @@ export function ChatPage({ chatId }: { chatId: string }) {
     const next = messagesQuery.data.items.filter((message) => message.status !== "queued").map((message) => toMessage(message, resources));
     setMessages((current) => {
       const hydrated = next.map((message) => {
-      if (message.role !== "assistant") return message;
-      const existing = current.find((item): item is AssistantMessage => item.role === "assistant" && item.id === message.id);
-      const historicalOutputs = (traceReplay.outputsByMessage.get(message.id) ?? []).map((output): Extract<MessageBlock, { type: "file" }> => ({
-        type: "file", id: output.id, name: output.name, kind: output.resourceType === "dataset" ? "Dataset" : "Generated file", size: output.sizeBytes ? formatFileSize(output.sizeBytes) : "Saved output", description: "Generated during this analysis",
-      }));
-      const outputBlocks = [...(existing?.blocks.filter((block) => block.type === "file") ?? []), ...historicalOutputs];
-      const uniqueOutputs = outputBlocks.filter((output, index, all) => output.type === "file" && all.findIndex((candidate) => candidate.type === "file" && candidate.id === output.id) === index);
-      const trace = traceReplay.stepsByMessage.get(message.id) ?? existing?.trace;
-      return trace?.length || uniqueOutputs.length
-        ? { ...message, trace, blocks: [...message.blocks, ...uniqueOutputs.filter((output) => !message.blocks.some((block) => block.type === "file" && block.id === output.id))] }
-        : message;
+        if (message.role !== "assistant") return message;
+        const existing = current.find((item): item is AssistantMessage => item.role === "assistant" && item.id === message.id);
+        const historicalOutputs = (traceReplay.outputsByMessage.get(message.id) ?? []).map((output): Extract<MessageBlock, { type: "file" }> => ({
+          type: "file", id: output.id, name: output.name, kind: output.resourceType === "dataset" ? "Dataset" : "Generated file", size: output.sizeBytes ? formatFileSize(output.sizeBytes) : "Saved output", description: "Generated during this analysis",
+        }));
+        const outputBlocks = [...(existing?.blocks.filter((block) => block.type === "file") ?? []), ...historicalOutputs];
+        const uniqueOutputs = outputBlocks.filter((output, index, all) => output.type === "file" && all.findIndex((candidate) => candidate.type === "file" && candidate.id === output.id) === index);
+        const existingTrace = message.status === "completed"
+          ? existing?.trace?.filter((step) => step.diagnostic?.component !== "Connection")
+          : existing?.trace;
+        const trace = traceReplay.stepsByMessage.get(message.id) ?? existingTrace;
+        const diagnostic = message.status === "completed" ? undefined
+          : traceReplay.errorsByMessage.get(message.id) ?? existing?.diagnostic;
+        const status = diagnostic && message.status === "running"
+          ? (diagnostic.category === "cancelled" || diagnostic.category === "interrupted" ? "interrupted" : "failed")
+          : message.status;
+        return diagnostic || trace?.length || uniqueOutputs.length
+          ? { ...message, status, diagnostic, trace, blocks: [...message.blocks, ...uniqueOutputs.filter((output) => !message.blocks.some((block) => block.type === "file" && block.id === output.id))] }
+          : message;
       });
       const persistedIds = new Set(hydrated.map((message) => message.id));
       // Never let an older query result erase a just-submitted question or a
@@ -334,7 +354,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
         // still hold a pre-send messages response while an SSE trace event
         // arrives. Keep that user bubble until the next messages refresh.
         message.role === "user"
-        || (message.role === "assistant" && message.status === "running")
+        || (message.role === "assistant" && (message.status === "running" || Boolean(message.diagnostic)))
       ));
       return [...hydrated, ...liveOnly];
     });
@@ -403,6 +423,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
     const placeholderId = input.type === "message" ? `assistant-pending-${input.clientRequestId}` : "";
     let assistantId = placeholderId;
     let streamRunId: string | null = null;
+    let receivedTerminalEvent = false;
+    const requestStartedAt = performance.now();
     const controller = new AbortController();
     streamController.current = controller;
     setRunning(true);
@@ -428,6 +450,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
     function onEvent(event: ExecutionEvent) {
       setTraceEvents((current) => current.some((item) => item.event_id === event.event_id) ? current : [...current, event]);
       if (event.type === "agent.started") {
+        receivedTerminalEvent = false;
         const run = event.data.run;
         if (run && typeof run === "object") {
           const runData = run as { id?: unknown; assistant_message_id?: unknown };
@@ -482,72 +505,17 @@ export function ChatPage({ chatId }: { chatId: string }) {
         });
         return;
       }
-      if (event.type === "tool.started") {
-        const id = eventString(event, "tool_call_id");
-        const name = eventString(event, "name");
-        if (!id || !name) return;
-        const argumentsValue = asRecord(event.data.arguments) ?? {};
-        const stepId = eventString(event, "step_id") ?? `${event.run_id}:${id}`;
-        const code = typeof event.data.code === "string" ? event.data.code : typeof argumentsValue.code === "string" ? argumentsValue.code : undefined;
-        const sql = typeof event.data.sql === "string" ? event.data.sql : typeof argumentsValue.sql === "string" ? argumentsValue.sql : undefined;
-        const inputResources = extractTraceResources(event.data.input_resources ?? argumentsValue.input_resources);
+      if (["tool.started", "tool.completed", "tool.failed"].includes(event.type)) {
+        const stepId = toolStepId(event);
         updateAssistant((message) => {
-          const priorTrace = message.trace ?? [];
-          const existingStepIndex = priorTrace.findIndex((s) => s.id === stepId);
-          const newStep: TraceStep = {
-            id: stepId,
-            runId: event.run_id,
-            messageId: assistantId,
-            label: toolLabel(name),
-            summary: eventString(event, "summary") ?? "Starting tool.",
-            detail: "Tool is running",
-            status: "running",
-            startedAt: event.timestamp,
-            code,
-            sql,
-            inputs: inputResources.length ? inputResources : undefined,
-          };
-          const nextTrace = existingStepIndex >= 0
-            ? priorTrace.map((s, idx) => idx === existingStepIndex ? { ...s, ...newStep } : s)
-            : [...priorTrace, newStep];
+          const trace = message.trace ?? [];
+          const index = trace.findIndex((step) => step.id === stepId);
+          const step = toolTraceStep(event, message.id, trace[index]);
           return {
             ...message,
-            trace: nextTrace,
+            trace: index === -1 ? [...trace, step] : trace.map((item) => item.id === stepId ? step : item),
           };
         });
-        return;
-      }
-      if (event.type === "tool.completed" || event.type === "tool.failed") {
-        const id = eventString(event, "tool_call_id");
-        if (!id) return;
-        const failed = event.type === "tool.failed";
-        const stepId = eventString(event, "step_id") ?? `${event.run_id}:${id}`;
-        const output = asRecord(event.data.output) ?? {};
-        const outputResources = extractTraceResources(event.data.resources ?? output.resources);
-        const durationMs = typeof event.data.duration_ms === "number" ? event.data.duration_ms : undefined;
-        const results = output.rows ?? output.results ?? output.text;
-        const stdout = typeof output.stdout === "string" ? output.stdout : undefined;
-        const stderr = typeof output.stderr === "string" ? output.stderr : undefined;
-        const errorMessage = failed ? String(event.data.error ?? output.error ?? "Tool failed") : undefined;
-
-        updateAssistant((message) => ({
-          ...message,
-          trace: (message.trace ?? []).map((step) => step.id === stepId
-            ? {
-                ...step,
-                status: failed ? "failed" : "completed",
-                detail: failed ? (errorMessage ?? "Tool failed") : "Completed",
-                summary: eventString(event, "summary") ?? step.summary,
-                completedAt: event.timestamp,
-                durationMs: durationMs ?? step.durationMs,
-                outputs: outputResources.length ? outputResources : step.outputs,
-                results: results !== undefined ? results : step.results,
-                stdout: stdout !== undefined ? stdout : step.stdout,
-                stderr: stderr !== undefined ? stderr : step.stderr,
-                error: errorMessage,
-              }
-            : step),
-        }));
         return;
       }
       if (event.type === "dataset.created" || event.type === "artifact.created") {
@@ -590,40 +558,19 @@ export function ChatPage({ chatId }: { chatId: string }) {
         setComposerStatus("The response finished before the steering instruction could be applied.");
         return;
       }
-      if (event.type === "agent.failed") {
-        const failure = event.data.error;
-        const message = failure && typeof failure === "object" && "message" in failure
-          ? String((failure as { message: unknown }).message)
-          : "Gemini could not complete this response.";
-        const errorType = classifyError(message);
-        setError(message);
-        setQueuedQuestions((current) => current.map((item) => ({ ...item, paused: true })));
-        updateAssistant((assistant) => ({
-          ...assistant,
-          status: "failed",
-          error: message,
-          errorType,
-          trace: (assistant.trace ?? []).map((step) =>
-            step.status === "running"
-              ? { ...step, status: "failed", detail: message, error: message }
-              : step
-          ),
-        }));
-        return;
-      }
-      if (event.type === "agent.cancelled" || event.type === "agent.interrupted") {
-        const reason = event.type === "agent.cancelled" ? "Run stopped by user." : "Run interrupted.";
-        setComposerStatus(event.type === "agent.cancelled" ? "Run stopped." : "Run interrupted.");
+      if (["agent.failed", "agent.cancelled", "agent.interrupted", "agent.completed"].includes(event.type)) {
+        receivedTerminalEvent = true;
+        const diagnostic = terminalDiagnostic(event);
+        if (event.type === "agent.failed") {
+          setQueuedQuestions((current) => current.map((item) => ({ ...item, paused: true })));
+        } else if (event.type !== "agent.completed") {
+          setComposerStatus(event.type === "agent.cancelled" ? "Run stopped." : "Run interrupted.");
+        }
         updateAssistant((message) => ({
           ...message,
-          status: "interrupted",
-          error: reason,
-          errorType: "recoverable",
-          trace: (message.trace ?? []).map((step) =>
-            step.status === "running"
-              ? { ...step, status: "failed", detail: "Interrupted", error: reason }
-              : step
-          ),
+          status: event.type === "agent.failed" ? "failed" : event.type === "agent.completed" ? "completed" : "interrupted",
+          diagnostic,
+          trace: finishTrace(message.trace ?? [], event.run_id, message.id, event.timestamp, diagnostic),
         }));
       }
     }
@@ -639,33 +586,17 @@ export function ChatPage({ chatId }: { chatId: string }) {
       } else {
         await resumeChatQueue(chatId, onEvent, controller.signal);
       }
+      if (streamRunId && !receivedTerminalEvent) throw new Error("Stream ended before a terminal event.");
     } catch (caught) {
-      if (controller.signal.aborted) {
+      if (!receivedTerminalEvent) {
+        const cancelled = controller.signal.aborted;
+        const diagnostic = cancelled ? interruptedDiagnostic(true) : requestDiagnostic(caught, requestStartedAt, streamRunId);
+        if (!assistantId && !cancelled) setError(diagnosticHeadline(diagnostic));
         updateAssistant((message) => ({
           ...message,
-          status: "interrupted",
-          error: "Run was cancelled by user.",
-          errorType: "recoverable",
-          trace: (message.trace ?? []).map((step) =>
-            step.status === "running"
-              ? { ...step, status: "failed", detail: "Interrupted", error: "Run was cancelled by user." }
-              : step
-          ),
-        }));
-      } else {
-        const message = caught instanceof Error ? caught.message : "The Gemini request failed.";
-        const errorType = classifyError(message);
-        setError(message);
-        updateAssistant((assistant) => ({
-          ...assistant,
-          status: "failed",
-          error: message,
-          errorType,
-          trace: (assistant.trace ?? []).map((step) =>
-            step.status === "running"
-              ? { ...step, status: "failed", detail: message, error: message }
-              : step
-          ),
+          status: cancelled ? "interrupted" : "failed",
+          diagnostic,
+          trace: finishTrace(message.trace ?? [], streamRunId ?? message.id, message.id, new Date().toISOString(), diagnostic),
         }));
       }
     } finally {
@@ -947,6 +878,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
       role: "user",
       content,
       createdAt: new Date().toISOString(),
+      databases: postgresSource ? [postgresSource] : [],
       attachments: submittedAttachments.map((attachment) => ({
         id: attachment.id,
         name: attachment.name,
@@ -966,6 +898,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
       const userMessage = await createMessage(chatId, {
         content,
         ...(resourceIds.length ? { resource_ids: resourceIds } : {}),
+        ...(postgresSource ? { connection_ids: [postgresSource.id] } : {}),
         client_request_id: clientRequestId,
       });
       setMessages((current) => replaceMessageId(current, temporaryUserId, toMessage(userMessage, resources)));
@@ -980,6 +913,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
         });
       }
       clearSubmittedAttachments(submittedAttachments);
+      setPostgresSelection((current) => current?.id === postgresSource?.id ? null : current);
       if (submittedAttachments.length) {
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ["chat", chatId, "datasets"] }),
@@ -1021,6 +955,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
         effort: effort || undefined,
         client_request_id: crypto.randomUUID(),
         ...(resourceIds.length ? { resource_ids: resourceIds } : {}),
+        ...(postgresSource ? { connection_ids: [postgresSource.id] } : {}),
       }, files);
       const queuedQuestion = {
         runId: result.run.id,
@@ -1036,6 +971,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
       });
       setDraft((current) => current.trim() === content ? "" : current);
       clearSubmittedAttachments(submittedAttachments);
+      setPostgresSelection((current) => current?.id === postgresSource?.id ? null : current);
       if (submittedAttachments.length) {
         void queryClient.invalidateQueries({ queryKey: ["chat", chatId, "datasets"] });
         void queryClient.invalidateQueries({ queryKey: ["chat", chatId, "artifacts"] });
@@ -1050,7 +986,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
 
   async function steerDraft() {
     const content = draft.trim();
-    if (!content || !activeRunId || composerPending || attachments.length) return;
+    if (!content || !activeRunId || composerPending || attachments.length || postgresSource) return;
     setComposerPending("steer");
     setComposerStatus(null);
     setError(null);
@@ -1290,7 +1226,7 @@ export function ChatPage({ chatId }: { chatId: string }) {
                 {composerPending === "queue" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ListPlus className="size-3.5" />}
                 Queue
               </button>
-              <button type="button" onClick={() => void steerDraft()} disabled={Boolean(composerPending) || attachments.length > 0} title={attachments.length ? "Queue the follow-up to include its files." : undefined} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40">
+              <button type="button" onClick={() => void steerDraft()} disabled={Boolean(composerPending) || attachments.length > 0 || Boolean(postgresSource)} title={attachments.length || postgresSource ? "Queue the follow-up to include its data sources." : undefined} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground hover:bg-raised hover:text-foreground disabled:opacity-40">
                 {composerPending === "steer" ? <LoaderCircle className="size-3.5 animate-spin" /> : <CornerDownRight className="size-3.5" />}
                 Steer
               </button>
@@ -1299,6 +1235,10 @@ export function ChatPage({ chatId }: { chatId: string }) {
           ) : null}
           <div ref={composerRef} className="relative mx-auto max-w-3xl rounded-lg border border-border-strong bg-surface p-2 focus-within:border-ring">
             {queueEdit && <p className="mb-2 px-1 text-xs font-medium text-muted-foreground">Editing queued question</p>}
+            {!queueEdit && <PostgresChips connections={postgresSource ? [postgresSource] : []} onRemove={() => setPostgresSelection(null)} />}
+            {queueEdit && queuedQuestions.find((item) => item.runId === queueEdit.runId)?.message.connection_refs?.map((source) =>
+              <p key={source.id} className="mb-2 flex items-center gap-1.5 px-1 text-xs text-muted-foreground"><Database aria-hidden="true" className="size-3.5" />{source.name}</p>
+            )}
             {slashMenuOpen ? (
               <SlashCommandMenu
                 id="slash-command-menu"
@@ -1404,6 +1344,16 @@ export function ChatPage({ chatId }: { chatId: string }) {
                       </div>
                     </div>
                     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 sm:px-3">
+                      {showPostgres && <PostgresSources chatId={chatId} workspaceId={chatQuery.data?.workspace_id} selected={postgresSource ? [postgresSource] : []}
+                        onSelect={(source) => {
+                          setPostgresSelection(source);
+                          setAttachmentMenuOpen(false);
+                          textareaRef.current?.focus();
+                        }}
+                        onAdd={() => {
+                          setAttachmentMenuOpen(false);
+                          setPostgresSetup(true);
+                        }} />}
                       {visibleConnectors.map(({ name, description, icon: Icon }) => (
                         <div key={name} aria-disabled="true" className="flex items-center gap-3 border-b px-2 py-2 last:border-b-0 sm:px-3">
                           <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
@@ -1414,10 +1364,9 @@ export function ChatPage({ chatId }: { chatId: string }) {
                           <span className="shrink-0 rounded-full border bg-raised px-2 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground">Soon</span>
                         </div>
                       ))}
-                      {!visibleConnectors.length ? <p className="px-3 py-4 text-xs text-muted-foreground">No matching connectors.</p> : null}
+                      {!showPostgres && !visibleConnectors.length ? <p className="px-3 py-4 text-xs text-muted-foreground">No matching connectors.</p> : null}
                     </div>
                     <div className="flex shrink-0 items-center justify-between gap-3 border-t px-2.5 py-2 text-[10px] text-muted-foreground sm:px-3">
-                      <span>Local files are available now. External connectors are coming soon.</span>
                       <span className="hidden shrink-0 gap-1 lg:flex">
                         <span className="rounded-md border px-1.5 py-0.5"><kbd>↑↓</kbd> to move</span>
                         <span className="rounded-md border px-1.5 py-0.5"><kbd>Enter</kbd> to select</span>
@@ -1560,6 +1509,8 @@ export function ChatPage({ chatId }: { chatId: string }) {
           </div>
         </form>
 
+        {postgresSetup && <PostgresSetup open workspaceId={chatQuery.data?.workspace_id} onClose={() => setPostgresSetup(false)}
+          onSaved={(source) => { if (source.include_schema_for_ai) setPostgresSelection(source); }} />}
         <LibraryImportDialog
           open={libraryDialogOpen}
           onClose={() => setLibraryDialogOpen(false)}

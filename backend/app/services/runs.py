@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Callable
+from datetime import timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from agentic.runtime.contracts import AgentExecution, ChatTurn, LLMProvider, ProviderError, ToolContext
+from ..connectors.service import validate_selection
+from agentic.runtime.diagnostics import diagnostic, public_tool_value, unexpected_diagnostic
 from agentic.runtime.events import RunnerCancelled, RunnerSteered
 
 from ..errors import APIError
@@ -16,10 +20,14 @@ from .records import require_chat
 from .resource_uploads import attach_library_resources
 
 
+logger = logging.getLogger(__name__)
+
+
 class RunCoordinator:
     """Single-process cancellation/checkpoint state for the MVP worker."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, development: bool = False) -> None:
+        self.development = development
         self._cancellations: dict[str, str] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._viewers: dict[str, set[str]] = {}
@@ -182,7 +190,7 @@ def prepare_queued_run(
     provider: LLMProvider,
     register_files: Callable[[Message], None] | None = None,
 ) -> tuple[Message, AgentRun, int]:
-    require_chat(session, user, active_run.chat_id)
+    chat = require_chat(session, user, active_run.chat_id)
     duplicate = session.scalar(
         select(AgentRun).where(
             AgentRun.chat_id == active_run.chat_id,
@@ -218,6 +226,7 @@ def prepare_queued_run(
         status="queued",
         position=next_position,
         client_request_id=data.client_request_id,
+        connection_ids=validate_selection(session, user, chat.workspace_id, data.connection_ids),
     )
     assistant = Message(
         chat_id=active_run.chat_id,
@@ -367,16 +376,28 @@ def _mark_unapplied_steering(session: Session, run: AgentRun) -> list[ExecutionE
     return events
 
 
-def _sse(event: ExecutionEvent) -> str:
-    envelope = EventEnvelope(
+def execution_event_envelope(event: ExecutionEvent) -> EventEnvelope:
+    data = event.data
+    if event.type == "tool.failed" and "diagnostic" not in data:
+        # Earlier E2B errors included raw exception bodies and stderr.
+        raw_output = data.get("output")
+        data = {key: value for key, value in data.items() if key not in ("output", "error")}
+        data["error"] = "Tool execution failed"
+        if isinstance(raw_output, dict):
+            data["output"] = {"resources": raw_output.get("resources", [])}
+        data = public_tool_value(data)
+    return EventEnvelope(
         event_id=event.event_id,
         run_id=event.run_id,
         type=event.type,
-        data=event.data,
+        data=data,
         timestamp=event.timestamp,
         sequence=event.sequence,
     )
-    payload = envelope.model_dump_json()
+
+
+def _sse(event: ExecutionEvent) -> str:
+    payload = execution_event_envelope(event).model_dump_json()
     return f"id: {event.event_id}\nevent: {event.type}\ndata: {payload}\n\n"
 
 
@@ -397,25 +418,46 @@ def _history(session: Session, run: AgentRun) -> list[ChatTurn]:
     return [ChatTurn(role=message.role, content=message.content) for message in messages if message.content]
 
 
-def _finalize_cancelled(session: Session, run: AgentRun, reason: str) -> ExecutionEvent:
-    interrupted = reason in ("navigation", "refresh", "disconnect")
-    run.status = "interrupted" if interrupted else "cancelled"
+def _finalize_run_error(
+    session: Session, run: AgentRun, status: str, error: dict, *,
+    unread: bool | None = None, reason: str | None = None,
+) -> ExecutionEvent:
     run.finished_at = utc_now()
-    assistant = session.get(Message, run.assistant_message_id)
-    user_message = session.get(Message, run.user_message_id)
-    if assistant is not None:
-        assistant.status = run.status
-    if user_message is not None:
-        user_message.status = run.status
+    error = {**error, "correlation_id": run.id}
+    if run.started_at is not None and "duration_ms" not in error:
+        started_at = run.started_at.replace(tzinfo=timezone.utc) if run.started_at.tzinfo is None else run.started_at
+        error["duration_ms"] = round((run.finished_at - started_at).total_seconds() * 1000)
+    run.status = status
+    run.error_code = error["code"]
+    run.error_detail = error["message"]
+    for message_id in (run.assistant_message_id, run.user_message_id):
+        message = session.get(Message, message_id)
+        if message is not None:
+            message.status = status
     chat = session.get(Chat, run.chat_id)
     if chat is not None:
-        chat.updated_at = utc_now()
-    session.commit()
-    return _persist_event(
-        session,
-        run.id,
-        "agent.interrupted" if interrupted else "agent.cancelled",
-        {"run_id": run.id, "reason": reason},
+        chat.updated_at = run.finished_at
+        if unread is not None:
+            chat.is_unread = unread
+    data = {"run_id": run.id, "message_id": run.assistant_message_id, "error": error}
+    if reason:
+        data["reason"] = reason
+    # Save the message/run state and its terminal event in the same transaction.
+    return _persist_event(session, run.id, f"agent.{status}", data)
+
+
+def _finalize_cancelled(session: Session, run: AgentRun, reason: str, turn: int | None = None) -> ExecutionEvent:
+    interrupted = reason in ("navigation", "refresh", "disconnect", "backend_restart")
+    message = "Run interrupted" if interrupted else "Run stopped by user"
+    if reason == "backend_restart":
+        message = "Run interrupted by a backend restart"
+    error = diagnostic(
+        "Agent", "backend_restart" if reason == "backend_restart" else "run_interrupted" if interrupted else "run_cancelled",
+        "interrupted" if interrupted else "cancelled", message, "run_execution", retryable=True, turn=turn,
+    )
+    return _finalize_run_error(
+        session, run, "interrupted" if interrupted else "cancelled", error,
+        reason=reason, unread=True if reason == "backend_restart" else None,
     )
 
 
@@ -426,6 +468,7 @@ async def stream_run(
     coordinator: RunCoordinator,
 ) -> AsyncIterator[str]:
     tool_context: ToolContext | None = None
+    turn: int | None = None
     try:
         with session_factory() as session:
             run = session.get(AgentRun, run_id)
@@ -505,6 +548,12 @@ async def stream_run(
                             event_data = {"message_id": assistant.id, "text": text}
                         else:
                             event_data = runner_event.data
+                            if type(event_data.get("turn")) is int:
+                                turn = event_data["turn"]
+                            error = event_data.get("diagnostic")
+                            if runner_event.type == "tool.failed" and isinstance(error, dict) and not coordinator.development:
+                                error = {key: value for key, value in error.items() if key != "development"}
+                                event_data = {**event_data, "diagnostic": error}
                         event = _persist_event(session, run.id, runner_event.type, event_data)
                         yield _sse(event)
                         if runner_event.type in ("tool.completed", "tool.failed"):
@@ -555,7 +604,7 @@ async def stream_run(
                 return
             reason = coordinator.cancellation_reason(run_id)
             if reason:
-                yield _sse(_finalize_cancelled(session, run, reason))
+                yield _sse(_finalize_cancelled(session, run, reason, turn))
                 return
             assistant = session.get(Message, run.assistant_message_id)
             user_message = session.get(Message, run.user_message_id)
@@ -589,72 +638,41 @@ async def stream_run(
             run = session.get(AgentRun, run_id)
             if run is not None:
                 reason = coordinator.cancellation_reason(run_id) or "user"
-                yield _sse(_finalize_cancelled(session, run, reason))
-    except ProviderError as exc:
+                yield _sse(_finalize_cancelled(session, run, reason, turn))
+    except Exception as exc:
+        if isinstance(exc, ProviderError):
+            error = exc.diagnostic or diagnostic(
+                "Gemini API", exc.code if exc.code in {"quota_exceeded", "provider_error"} else "provider_error",
+                "rate_limit" if exc.code == "quota_exceeded" else "execution",
+                "Rate limit exceeded" if exc.code == "quota_exceeded" else "Response generation failed",
+                "model_generation", retryable=True,
+            )
+        else:
+            error = unexpected_diagnostic(exc)
+        error = dict(error)
+        if turn is not None:
+            error.setdefault("turn", turn)
+        if not coordinator.development:
+            error.pop("development", None)
+        logger.warning("agent_run_failed run_id=%s component=%s code=%s", run_id, error["component"], error["code"])
         with session_factory() as session:
             run = session.get(AgentRun, run_id)
-            if run is not None:
-                run.status = "failed"
-                run.finished_at = utc_now()
-                run.error_code = exc.code
-                run.error_detail = str(exc)
-                assistant = session.get(Message, run.assistant_message_id)
-                user_message = session.get(Message, run.user_message_id)
-                if assistant is not None:
-                    assistant.status = "failed"
-                if user_message is not None:
-                    user_message.status = "failed"
-                chat = session.get(Chat, run.chat_id)
-                if chat is not None:
-                    chat.updated_at = utc_now()
-                    chat.is_unread = not coordinator.is_viewing(run.chat_id)
-                session.commit()
-                failed = _persist_event(
-                    session,
-                    run.id,
-                    "agent.failed",
-                    {"run_id": run.id, "error": {"code": exc.code, "message": str(exc)}},
-                )
-                yield _sse(failed)
-    except Exception:
-        with session_factory() as session:
-            run = session.get(AgentRun, run_id)
-            if run is not None:
-                run.status = "failed"
-                run.finished_at = utc_now()
-                run.error_code = "agent_error"
-                run.error_detail = "Agent execution failed."
-                assistant = session.get(Message, run.assistant_message_id)
-                user_message = session.get(Message, run.user_message_id)
-                if assistant is not None:
-                    assistant.status = "failed"
-                if user_message is not None:
-                    user_message.status = "failed"
-                chat = session.get(Chat, run.chat_id)
-                if chat is not None:
-                    chat.updated_at = utc_now()
-                    chat.is_unread = not coordinator.is_viewing(run.chat_id)
-                session.commit()
-                failed = _persist_event(
-                    session,
-                    run.id,
-                    "agent.failed",
-                    {
-                        "run_id": run.id,
-                        "error": {"code": "agent_error", "message": "Agent execution failed."},
-                    },
-                )
-                yield _sse(failed)
+            if run is not None and run.status in ("queued", "running"):
+                yield _sse(_finalize_run_error(
+                    session, run, "failed", error, unread=not coordinator.is_viewing(run.chat_id),
+                ))
     except asyncio.CancelledError:
         with session_factory() as session:
             run = session.get(AgentRun, run_id)
             if run is not None and run.status in ("queued", "running"):
-                _finalize_cancelled(session, run, "disconnect")
+                _finalize_cancelled(session, run, "disconnect", turn)
         raise
     finally:
         try:
             if tool_context is not None:
                 await runner.close(tool_context)
+        except Exception as exc:
+            logger.warning("agent_cleanup_failed run_id=%s error_type=%s", run_id, type(exc).__name__)
         finally:
             coordinator.clear(run_id)
 
@@ -716,15 +734,9 @@ async def stream_persisted_events(
 
 def reconcile_stale_runs(session: Session) -> None:
     now = utc_now()
-    for run in session.scalars(select(AgentRun).where(AgentRun.status == "running")):
-        run.status = "interrupted"
-        run.finished_at = now
-        run.error_code = "backend_restart"
-        run.error_detail = "Run was interrupted by a backend restart."
-        chat = session.get(Chat, run.chat_id)
-        if chat is not None:
-            chat.is_unread = True
-            chat.updated_at = now
+    running = list(session.scalars(select(AgentRun).where(AgentRun.status == "running")))
+    for run in running:
+        _finalize_cancelled(session, run, "backend_restart")
     for run in session.scalars(select(AgentRun).where(AgentRun.status == "queued")):
         run.status = "cancelled"
         run.finished_at = now

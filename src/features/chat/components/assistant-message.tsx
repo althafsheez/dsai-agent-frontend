@@ -5,6 +5,8 @@ import type { AgentRunDto } from "@/lib/api";
 import type { ContextFile } from "@/features/context-sidebar";
 import { Button } from "@/components/ui/button";
 import type { AssistantMessage as AssistantMessageType, MessageBlock } from "../types";
+import { diagnosticHeadline } from "../execution-diagnostic";
+import { ErrorDetails } from "./error-details";
 import { AgentTrace } from "./agent-trace";
 import { ChartBlock } from "./chart-block";
 import { CodeBlock } from "./code-block";
@@ -248,7 +250,7 @@ export function AssistantMessage({
   const hasText = message.blocks.some(
     (b) => (b.type === "markdown" && b.content.trim().length > 0) || b.type !== "markdown"
   );
-  const isRecoverable = message.errorType !== "unrecoverable";
+  const isRecoverable = message.diagnostic?.retryable ?? message.errorType !== "unrecoverable";
 
   const resolvedResources = useMemo(() => {
     const map = new Map<string, DataReferenceResource>();
@@ -310,13 +312,13 @@ export function AssistantMessage({
             <div className="flex-1">
               <div className="flex items-center gap-2">
                 <p className="text-xs font-semibold text-foreground">
-                  {message.status === "failed"
+                  {message.diagnostic ? diagnosticHeadline(message.diagnostic) : message.status === "failed"
                     ? isRecoverable
                       ? "The Gemini response failed"
                       : "Unrecoverable response error"
                     : "The Gemini response was interrupted"}
                 </p>
-                <span
+                {!message.diagnostic && <span
                   className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${
                     isRecoverable
                       ? "bg-amber-400/10 text-amber-300 border border-amber-400/20"
@@ -324,16 +326,16 @@ export function AssistantMessage({
                   }`}
                 >
                   {isRecoverable ? "Recoverable failure" : "Unrecoverable failure"}
-                </span>
+                </span>}
               </div>
-              <p className="mt-1 text-[11px] text-muted-foreground">
+              {message.diagnostic ? <ErrorDetails error={message.diagnostic} /> : <p className="mt-1 text-[11px] text-muted-foreground">
                 {message.error
                   ? message.error
                   : message.status === "failed"
                     ? "A temporary error halted response generation. Any completed output remains saved."
                     : "The run was stopped or interrupted. Any partial output remains saved in this conversation."}
-              </p>
-              {!isRecoverable && (
+              </p>}
+              {!message.diagnostic && !isRecoverable && (
                 <p className="mt-1 text-[10px] text-red-300/80">
                   This failure cannot be resolved by retrying with the same parameters. Please adjust your prompt or configuration.
                 </p>

@@ -49,7 +49,10 @@ async def test_unconfigured_external_tools_fail_safely(tool_setup) -> None:
     registry, context = tool_setup
     assert "TAVILY_API_KEY" in (await registry.execute("web_search", {"query": "latest data"}, context))["error"]
     execution = await registry.execute("execute_python", {"code": "print(1)"}, context)
-    assert execution == {"success": False, "error": "E2B_API_KEY is not configured."}
+    assert execution["success"] is False
+    assert execution["error"] == "E2B is not configured"
+    assert execution["diagnostic"]["code"] == "e2b_not_configured"
+    assert execution["diagnostic"]["stage"] == "sandbox_startup"
 
 
 async def test_dataset_lookup_rejects_mutating_sql_before_sandbox(tool_setup) -> None:

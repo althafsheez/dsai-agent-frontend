@@ -15,7 +15,7 @@ class APIError(Exception):
 
 
 async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
-    request_id = request.headers.get("X-Request-Id", str(uuid4()))
+    request_id = str(uuid4())
     error: dict[str, object] = {
         "code": exc.code,
         "message": exc.message,

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from ipaddress import IPv4Network, IPv6Network
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -39,12 +40,26 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DSAI_E2B_API_KEY", "E2B_API_KEY"),
     )
     max_agent_steps: int = Field(default=8, ge=1)
+    connector_encryption_key: SecretStr | None = None
+    postgres_allowed_targets: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    postgres_private_targets: dict[str, list[IPv4Network | IPv6Network]] = Field(default_factory=dict)
+    postgres_ca_file: Path | None = None
+    postgres_statement_timeout_ms: int = Field(default=5000, ge=100, le=15000)
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", "postgres_allowed_targets", mode="before")
     @classmethod
     def parse_origins(cls, value: object) -> object:
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("postgres_private_targets")
+    @classmethod
+    def validate_private_targets(cls, value: dict[str, list[IPv4Network | IPv6Network]]):
+        private = (IPv4Network("10.0.0.0/8"), IPv4Network("172.16.0.0/12"), IPv4Network("192.168.0.0/16"), IPv6Network("fc00::/7"))
+        if any(not any(network.version == allowed.version and network.subnet_of(allowed) for allowed in private)
+               for ranges in value.values() for network in ranges):
+            raise ValueError("Private PostgreSQL targets require RFC 1918 or IPv6 unique-local network ranges.")
         return value
 
 

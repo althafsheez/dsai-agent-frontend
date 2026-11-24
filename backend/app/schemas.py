@@ -115,6 +115,7 @@ class ChatCreate(BaseModel):
     workspace_id: str | None = None
     content: str = Field(min_length=1, max_length=100_000)
     client_request_id: str = Field(min_length=1, max_length=100)
+    connection_ids: list[str] = Field(default_factory=list, max_length=5)
 
 
 class ChatUpdate(BaseModel):
@@ -152,6 +153,11 @@ class MessageAttachment(APIModel):
     size_bytes: int
 
 
+class MessageConnection(APIModel):
+    id: str
+    name: str
+
+
 class MessageResponse(APIModel):
     id: str
     chat_id: str
@@ -162,12 +168,15 @@ class MessageResponse(APIModel):
     created_at: datetime
     updated_at: datetime
     attachment_refs: list[MessageAttachment] = Field(default_factory=list)
+    connection_ids: list[str] = Field(default_factory=list)
+    connection_refs: list[MessageConnection] = Field(default_factory=list)
 
 
 class MessageCreate(BaseModel):
     content: str = Field(min_length=1, max_length=100_000)
     client_request_id: str = Field(min_length=1, max_length=100)
     resource_ids: list[str] = Field(default_factory=list)
+    connection_ids: list[str] = Field(default_factory=list, max_length=5)
 
 
 class QuickMessageCreate(BaseModel):
@@ -234,6 +243,7 @@ class QueueStart(BaseModel):
     effort: str | None = None
     client_request_id: str = Field(min_length=1, max_length=100)
     resource_ids: list[str] = Field(default_factory=list)
+    connection_ids: list[str] = Field(default_factory=list, max_length=5)
 
 
 class QueueUpdate(BaseModel):

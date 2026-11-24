@@ -42,6 +42,7 @@ const models = {
     { id: "gemini-pro", label: "Gemini Pro", supported_efforts: ["low", "high"], default_effort: "high" },
   ],
 };
+const postgres = { id: "database-sales", name: "Production sales", database: "sales", workspace_id: null, status: "connected" };
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
@@ -89,6 +90,7 @@ describe("live chat page", () => {
     fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/models")) return json(models);
+      if (url.includes("/connectors?")) return json({ items: [postgres] });
       if (url.endsWith("/workspaces")) return json({ items: [], next_cursor: null });
       if (url.endsWith(`/chats/${chat.id}`)) return json(chat);
       if (url.endsWith(`/chats/${chat.id}/messages`) && !init?.method) {
@@ -97,11 +99,12 @@ describe("live chat page", () => {
       if (url.endsWith(`/chats/${chat.id}/runs`) && !init?.method) return json({ items: [], next_cursor: null });
       if (url.endsWith(`/chats/${chat.id}/messages`) && init?.method === "POST") {
         if (pendingCreate) await pendingCreate;
-        const body = JSON.parse(String(init.body)) as { content: string };
+        const body = JSON.parse(String(init.body)) as { content: string; connection_ids?: string[] };
         const message: MessageDto = {
           ...initialMessage,
           id: `message-follow-up-${nextUser++}`,
           content: body.content,
+          connection_refs: body.connection_ids?.map((id) => ({ id, name: postgres.name })),
           created_at: "2026-11-09T00:01:00Z",
           updated_at: "2026-11-09T00:01:00Z",
         };
@@ -276,6 +279,26 @@ describe("live chat page", () => {
     expect(screen.getByRole("button", { name: "Go to question: Show this immediately" })).toHaveAttribute("aria-current", "location");
     resolvePendingCreate?.();
     expect(await screen.findByText("Streamed answer")).toBeVisible();
+  });
+
+  it("shows the selected PostgreSQL source and submits it with the question", async () => {
+    const user = userEvent.setup();
+    renderChat();
+    await screen.findByText("Stored question");
+    await user.click(screen.getByRole("button", { name: "Add files or connectors" }));
+    await user.click(screen.getByRole("tab", { name: "Data Sources" }));
+    await user.click(await screen.findByRole("button", { name: /Production sales/ }));
+    expect(within(screen.getByLabelText("Selected databases")).getByText(postgres.name)).toBeVisible();
+    const composer = screen.getByRole("combobox", { name: "Ask anything about your data" });
+    await user.type(composer, "Query this database");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(await screen.findByText("Streamed answer")).toBeVisible();
+    expect(screen.queryByLabelText("Selected databases")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("PostgreSQL sources")).toHaveTextContent(postgres.name);
+    const sent = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith("/messages") && init?.method === "POST");
+    expect(JSON.parse(String(sent?.[1]?.body))).toMatchObject({ connection_ids: [postgres.id] });
+    expect(sent?.[1]?.headers).toHaveProperty("X-Demo-User-Id", "user-you");
+    expect(sent?.[1]?.headers).not.toHaveProperty("Authorization");
   });
 
   it("adds multiple files, uploads them before the run, and catalogs datasets and artifacts", async () => {

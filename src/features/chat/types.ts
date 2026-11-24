@@ -1,3 +1,5 @@
+import type { ExecutionDiagnostic } from "./execution-diagnostic";
+
 export type ChatStatus = "completed" | "running" | "failed" | "interrupted";
 
 export type TraceStep = {
@@ -16,9 +18,11 @@ export type TraceStep = {
   code?: string;
   sql?: string;
   results?: unknown;
+  queryTable?: Omit<Extract<MessageBlock, { type: "table" }>, "type">;
   stdout?: string;
   stderr?: string;
   error?: string;
+  diagnostic?: ExecutionDiagnostic;
 };
 
 export type TraceResourceReference = {
@@ -39,6 +43,7 @@ export type MessageBlock =
   | { type: "file"; id: string; name: string; kind: string; size: string; description?: string };
 
 export type UserMessage = {
+  databases?: { id: string; name: string }[];
   id: string;
   role: "user";
   content: string;
@@ -55,6 +60,7 @@ export type AssistantMessage = {
   trace?: TraceStep[];
   retryOf?: string;
   error?: string;
+  diagnostic?: ExecutionDiagnostic;
   errorType?: "recoverable" | "unrecoverable";
 };
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { CirclePause, GripVertical, LoaderCircle, Paperclip, Pencil, Trash2 } from "lucide-react";
+import { CirclePause, Database, GripVertical, LoaderCircle, Paperclip, Pencil, Trash2 } from "lucide-react";
 import { useRef, useState, type PointerEvent } from "react";
 import type { MessageDto } from "@/lib/api";
 
@@ -90,6 +90,11 @@ export function QueuedQuestions({ items, editingId, busy, onMove, onEdit, onRemo
               <span className="shrink-0 font-medium text-foreground">{editing ? "Editing" : "Paused"}</span>
             )}
             <span className="min-w-0 flex-1 truncate text-muted-foreground">{item.message.content}</span>
+            {item.message.connection_refs?.map((source) => (
+              <span key={source.id} title={source.name} aria-label={source.name} className="shrink-0 text-muted-foreground">
+                <Database aria-hidden="true" className="size-3.5" />
+              </span>
+            ))}
             {names.length > 0 && (
               <span title={names.join(", ")} aria-label={names.join(", ")} className="flex shrink-0 items-center gap-1 text-muted-foreground">
                 <Paperclip aria-hidden="true" className="size-3" />{names.length}

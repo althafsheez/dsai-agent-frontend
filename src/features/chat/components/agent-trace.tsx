@@ -7,6 +7,8 @@ import type { AgentRunDto } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { SyntaxHighlightedCode } from "./syntax-highlighted-code";
 import type { TraceStep } from "../types";
+import { ErrorDetails } from "./error-details";
+import { TableBlock } from "./table-block";
 
 /*
  * Reasoning Trace — ported from the DSAI reference frontend (agentic-ds-frontend,
@@ -78,7 +80,7 @@ function TraceCodeBlock({ step }: { step: TraceStep }) {
   const description = step.summary || step.label;
   const [isOpen, setIsOpen] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
-  const hasOutput = Boolean(step.stdout || step.stderr || step.error);
+  const hasOutput = Boolean(step.stdout || step.stderr || step.error || step.queryTable);
   const outputStatus = step.status === "failed" ? "(failed)" : step.status === "running" ? "(running...)" : "(success)";
 
   const handleCopy = async () => {
@@ -141,9 +143,10 @@ function TraceCodeBlock({ step }: { step: TraceStep }) {
               {step.stdout && (
                 <div className="whitespace-pre-wrap rounded border border-emerald-800/30 bg-emerald-950/20 p-2.5 text-emerald-400">{step.stdout}</div>
               )}
-              {(step.stderr || step.error) && (
+              {(step.stderr || (step.error && !step.diagnostic)) && (
                 <div className="whitespace-pre-wrap rounded border border-rose-800/30 bg-rose-950/20 p-2.5 text-rose-400">{step.stderr || step.error}</div>
               )}
+              {step.queryTable && <TableBlock {...step.queryTable} />}
             </div>
           )}
         </div>
@@ -153,7 +156,7 @@ function TraceCodeBlock({ step }: { step: TraceStep }) {
 }
 
 /** Inline error, matching the reference error card. */
-function TraceError({ message }: { message: string }) {
+function TraceError({ message, diagnostic }: { message: string; diagnostic?: TraceStep["diagnostic"] }) {
   return (
     <div className="w-full min-w-0 overflow-hidden rounded-lg border border-[color-mix(in_oklch,var(--destructive)_50%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_5%,transparent)] p-4">
       <div className="flex items-center gap-2">
@@ -161,6 +164,7 @@ function TraceError({ message }: { message: string }) {
         <span className="text-sm font-medium text-destructive">Error</span>
       </div>
       <p className="mt-2 w-full min-w-0 whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">{message}</p>
+      {diagnostic?.tool && <ErrorDetails error={diagnostic} />}
     </div>
   );
 }
@@ -269,7 +273,27 @@ export function AgentTrace({
                 ) : (
                   <IndividualThoughtTextRenderer text={thoughtText(step)} isStreaming={isStreaming && isLast} />
                 )}
-                {step.error && !hasCode && <TraceError message={step.error} />}
+                {step.status === "running" && <span className="text-[11px] text-muted-foreground">Running…</span>}
+                {step.error && (!hasCode || step.diagnostic) && (
+                  <TraceError message={step.error} diagnostic={step.diagnostic} />
+                )}
+                {!hasCode && step.queryTable && <TableBlock {...step.queryTable} />}
+                {!hasCode && !step.queryTable && step.results !== undefined && (
+                  <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded border border-border p-2 text-[11px]">
+                    {typeof step.results === "string" ? step.results : JSON.stringify(step.results, null, 2)}
+                  </pre>
+                )}
+                {step.inputs?.map((resource) => (
+                  <button
+                    key={resource.id}
+                    type="button"
+                    aria-label={`Select ${resource.name}`}
+                    onClick={() => onResourceSelect?.(resource.id)}
+                    className={cn("mt-1.5 block max-w-full truncate text-left text-[13px] hover:text-foreground hover:underline", fg80)}
+                  >
+                    Input: {resource.name}
+                  </button>
+                ))}
                 {step.outputs?.map((resource) => (
                   <button
                     key={resource.id}

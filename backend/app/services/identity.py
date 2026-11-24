@@ -22,6 +22,8 @@ def seed_demo_users(session: Session) -> None:
 
 def require_demo_user(session: Session, user_id: str | None) -> User:
     selected_id = user_id or "user-you"
+    if selected_id not in {demo.id for demo in DEMO_USERS}:
+        raise APIError(401, "invalid_demo_user", "Unknown demo user identity.")
     user = session.scalar(select(User).where(User.id == selected_id))
     if user is None:
         raise APIError(401, "invalid_demo_user", "Unknown demo user identity.")

@@ -1,4 +1,4 @@
-import { FileText } from "lucide-react";
+import { Database, FileText } from "lucide-react";
 import type { UserMessage as UserMessageType } from "../types";
 import type { ContextFile } from "@/features/context-sidebar";
 import { LibraryButton } from "./library-button";
@@ -10,6 +10,11 @@ export function UserMessage({ message, onFileSelect, resources, onLibraryToggle 
         <div className="rounded-2xl rounded-br-sm border border-white/20 bg-primary px-4 py-2.5 text-[13px] leading-relaxed text-primary-foreground shadow-sm">
           {message.content}
         </div>
+        {!!message.databases?.length && <div aria-label="PostgreSQL sources" className="mt-2 flex flex-wrap justify-end gap-2">
+          {message.databases.map((database) => <span key={database.id} className="inline-flex max-w-full items-center gap-1.5 rounded-lg border bg-surface px-2.5 py-1.5 text-[11px]">
+            <Database aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate">{database.name}</span>
+          </span>)}
+        </div>}
         {message.attachments?.length ? (
           <div className="mt-2 flex flex-wrap justify-end gap-2">
             {message.attachments.map((attachment) => (

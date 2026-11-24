@@ -147,5 +147,5 @@ async def post_message(
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> MessageResponse:
-    message = create_message(session, user, chat_id, data.content, data.client_request_id, data.resource_ids)
+    message = create_message(session, user, chat_id, data.content, data.client_request_id, data.resource_ids, data.connection_ids)
     return message_response(session, message)

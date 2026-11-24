@@ -74,3 +74,9 @@ Updated 2026-11-09 from final user decisions. Implement and verify sequentially.
 
 ## Known prerequisites
 No backend code, reusable runner, credentials or runtime state existed in the new project at inspection. Obtain runtime keys through backend environment during integration, never commit them. Phase 1 does not need provider keys. Real provider acceptance cannot pass with mocks alone. Demo auth is local/demo only; sharing/voice/external connectors/builders remain explicitly deferred.
+
+## PostgreSQL connector — local verification
+- Implemented local demo access, encrypted connection persistence, schema browsing and previews, bounded read-only queries, and per-question source selection. Queue and Retry retain the original message's source.
+- Verified with TLS-enabled PostgreSQL 16. The backend regression suite and desktop/mobile connection-management and chat-submission checks passed. The browser checks cover real PostgreSQL credentials, saved connections, table previews, source selection, and disconnection.
+- Live Gemini called the PostgreSQL tools and returned the expected aggregate data to the agent. The existing E2B path produced and registered a valid PNG from those results. Gemini returned HTTP 503 during final synthesis, so the combined final-answer gate remains open.
+- The connector is restricted to local development and testing. See the backend README for TLS and network configuration.

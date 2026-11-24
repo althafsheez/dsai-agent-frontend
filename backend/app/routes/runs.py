@@ -10,7 +10,6 @@ from ..errors import APIError
 from ..models import AgentRun, ExecutionEvent, Message, ResourceLink, User, utc_now
 from ..schemas import (
     CancelRun,
-    EventEnvelope,
     MessageResponse,
     QueueOrder,
     QueueResponse,
@@ -26,6 +25,7 @@ from ..schemas import (
 from ..services.records import message_response, require_chat
 from ..services.resource_uploads import read_upload, register_upload
 from ..services.runs import (
+    execution_event_envelope,
     execute_run_in_background,
     prepare_queued_run,
     prepare_retry,
@@ -147,20 +147,7 @@ async def get_run_events(
         .where(ExecutionEvent.run_id == run_id, ExecutionEvent.sequence > after_sequence)
         .order_by(ExecutionEvent.sequence)
     )
-    return {
-        "items": [
-            EventEnvelope(
-                event_id=event.event_id,
-                run_id=event.run_id,
-                type=event.type,
-                data=event.data,
-                timestamp=event.timestamp,
-                sequence=event.sequence,
-            )
-            for event in events
-        ],
-        "next_cursor": None,
-    }
+    return {"items": [execution_event_envelope(event) for event in events], "next_cursor": None}
 
 
 @router.post("/api/runs/{run_id}/retry/stream")
@@ -209,6 +196,7 @@ async def queue_run_with_files(
     client_request_id: str = Form(min_length=1, max_length=100),
     effort: str | None = Form(default=None),
     resource_ids: list[str] = Form(default=[]),
+    connection_ids: list[str] = Form(default=[], max_length=5),
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> QueueResponse:
@@ -221,7 +209,7 @@ async def queue_run_with_files(
     session.refresh(active_run)
     data = QueueStart(
         content=content, model_id=model_id, client_request_id=client_request_id,
-        effort=effort, resource_ids=resource_ids,
+        effort=effort, resource_ids=resource_ids, connection_ids=connection_ids,
     )
 
     def register_files(message: Message) -> None:

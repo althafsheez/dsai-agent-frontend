@@ -64,7 +64,7 @@ Create directories when needed. Keep route composition separate from business ru
 - /workspaces: generic list/create. /workspaces/[workspaceId]: chats and workspace datasets; direct workspace uploads.
 - /history: chats and workspaces only.
 - /library: saved artifact references across accessible contexts.
-- /connectors: functional upload when backend exists; other connectors marked coming soon.
+- /connectors: connect and manage PostgreSQL from its catalog card. Other external connectors are marked coming soon.
 - Dashboards/Workflows navigation and placeholders; full builders deferred.
 
 Sidebar: logo/name, search icon, collapse control, New Analysis. Exact nav order: Recent Analyses, Workspaces, Dashboards, Workflows, Library, Connectors. First four have compact recent-item hover flyouts, also keyboard-accessible; click navigates. Collapsible Pinned and Activity below. Avatar/name/settings footer. No inline expanded recent list. Approximately 240px expanded, 56px collapsed; mobile drawer and readable focus styles.
@@ -108,5 +108,5 @@ New Analysis -> select/create workspace -> attach multiple CSVs (browser only) -
 Also: standalone chat -> move to workspace -> same ID/messages/datasets/artifacts; queue during run -> automatic next execution; steer -> applied at checkpoint; refresh/leave -> interrupted run preserved; retry -> new run without duplicate question; workspace archive does not archive chats; soft delete preserves stored files.
 
 ## Deferred
-Real password/multi-user production auth, sharing flows/live collaboration, external connectors, advanced dashboard/workflow builders, skills management, background execution/reconnection, voice transcription. Quick Assistant, Queue, checkpoint Steer, multi-file registration and file previews are required MVP work, not deferred.
+Self-service authentication, sharing/live collaboration, external connectors beyond PostgreSQL, advanced dashboard/workflow builders, skills management, background execution/reconnection, and voice transcription are deferred. PostgreSQL uses the local demo account and scoped per-question selection. Quick Assistant, Queue, checkpoint Steer, multi-file registration and file previews are required MVP work.
 

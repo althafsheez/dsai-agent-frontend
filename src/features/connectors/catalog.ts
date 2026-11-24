@@ -7,7 +7,7 @@ export interface DataSourceConnector {
   icon: LucideIcon;
 }
 
-/** Data sources offered across the app; none can be connected yet, so callers show them as coming soon. */
+/** Data sources offered across the app. PostgreSQL is available for local testing. */
 export const DATA_SOURCE_CONNECTORS: DataSourceConnector[] = [
   { id: "postgresql", name: "PostgreSQL", description: "Query and analyze data from your database.", icon: Database },
   { id: "mysql", name: "MySQL", description: "Pull tables from a MySQL database.", icon: Database },

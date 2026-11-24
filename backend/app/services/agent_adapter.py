@@ -12,6 +12,8 @@ from sqlalchemy.orm import aliased
 from sqlalchemy.orm import Session, sessionmaker
 
 from agentic.runtime.contracts import InputSource, ToolContext
+from ..connectors.service import ConnectionService
+from ..connectors.tools import database_inventory
 
 from ..models import AgentMemory, AgentRun, Chat, FileObject, Message, Resource, ResourceLink, WorkspaceContextFile
 from ..storage import LocalFileStorage
@@ -23,9 +25,11 @@ class AgentToolAdapter:
         self,
         session_factory: sessionmaker[Session],
         storage: LocalFileStorage,
+        connections: ConnectionService | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._storage = storage
+        self._connections = connections
 
     def _authorized_inputs(
         self, session: Session, context: ToolContext, workspace_id: str | None,
@@ -97,6 +101,10 @@ class AgentToolAdapter:
                 prepared["files"] = inputs
             if workspace_context:
                 prepared["workspace_context"] = workspace_context
+            if self._connections:
+                databases = database_inventory(session, context, self._connections)
+                if databases:
+                    prepared["database_connections"] = databases
             return prepared
 
     def resolve_inputs(self, context: ToolContext, resource_ids: tuple[str, ...]) -> dict[str, InputSource]:

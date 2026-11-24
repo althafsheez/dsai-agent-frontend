@@ -9,6 +9,11 @@ import type {
   ModelsResponse,
   QueueRunInput,
   QueueRunResponse,
+  PostgresConnection,
+  PostgresConnectionInput,
+  PostgresSchemaList,
+  PostgresTable,
+  PostgresTableDetails,
   RunStartInput,
   SteeringInstructionDto,
   WorkspaceDto,
@@ -31,6 +36,7 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly code = "api_error",
+    readonly requestId?: string,
   ) {
     super(message);
   }
@@ -50,6 +56,7 @@ function resourceUrl(path: string): string {
   return `${API_ROOT}${apiPath.startsWith("/") ? apiPath : `/${apiPath}`}`;
 }
 
+
 async function apiError(response: Response): Promise<ApiError> {
   let body: ApiErrorBody | null = null;
   try {
@@ -61,6 +68,9 @@ async function apiError(response: Response): Promise<ApiError> {
     body?.error?.message ?? `Request failed with status ${response.status}.`,
     response.status,
     body?.error?.code,
+    typeof body?.error?.request_id === "string" && /^[0-9a-f-]{36}$/i.test(body.error.request_id)
+      ? body.error.request_id
+      : undefined,
   );
 }
 
@@ -71,6 +81,51 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) throw await apiError(response);
   return response.json() as Promise<T>;
+}
+
+
+export function getPostgresConnections(scope?: { chatId?: string; workspaceId?: string | null }): Promise<{ items: PostgresConnection[] }> {
+  const params = new URLSearchParams();
+  if (scope) params.set("for_analysis", "true");
+  if (scope?.chatId) params.set("chat_id", scope.chatId);
+  if (scope?.workspaceId) params.set("workspace_id", scope.workspaceId);
+  return requestJson(`/connectors${params.size ? `?${params}` : ""}`);
+}
+
+const connectionPath = (id: string) => `/connectors/${encodeURIComponent(id)}`;
+
+export function testPostgresConnection(input: PostgresConnectionInput, id?: string): Promise<{ schemas: PostgresSchemaList }> {
+  return requestJson(id ? `${connectionPath(id)}/test` : "/connectors/postgresql/test", {
+    method: "POST", body: JSON.stringify(input),
+  });
+}
+
+export function savePostgresConnection(input: PostgresConnectionInput, id?: string): Promise<PostgresConnection> {
+  return requestJson(id ? connectionPath(id) : "/connectors", {
+    method: id ? "PATCH" : "POST", body: JSON.stringify(input),
+  });
+}
+
+export async function disconnectPostgres(id: string): Promise<void> {
+  const response = await fetch(`${API_ROOT}${connectionPath(id)}`, { method: "DELETE", headers: requestHeaders() });
+  if (!response.ok) throw await apiError(response);
+}
+
+export function getPostgresSchemas(id: string): Promise<PostgresSchemaList> {
+  return requestJson(`${connectionPath(id)}/schemas`);
+}
+
+export function refreshPostgresSchema(id: string): Promise<PostgresSchemaList> {
+  return requestJson(`${connectionPath(id)}/refresh-schema`, { method: "POST" });
+}
+
+export function getPostgresTables(id: string, schema: string, search: string): Promise<{ items: PostgresTable[]; truncated: boolean }> {
+  const params = new URLSearchParams({ search, ...(schema ? { schema } : {}) });
+  return requestJson(`${connectionPath(id)}/tables?${params}`);
+}
+
+export function getPostgresTable(id: string, schema: string, table: string, preview: boolean): Promise<PostgresTableDetails> {
+  return requestJson(`${connectionPath(id)}/tables/${encodeURIComponent(schema)}/${encodeURIComponent(table)}?preview=${preview}`);
 }
 
 export function getModels(): Promise<ModelsResponse> {
@@ -161,6 +216,7 @@ export function createChat(input: {
   workspace_id: string | null;
   content: string;
   client_request_id: string;
+  connection_ids?: string[];
 }): Promise<CreateChatResponse> {
   return requestJson<CreateChatResponse>("/chats", {
     method: "POST",
@@ -315,6 +371,7 @@ export function createMessage(chatId: string, input: {
   content: string;
   client_request_id: string;
   resource_ids?: string[];
+  connection_ids?: string[];
 }): Promise<MessageDto> {
   return requestJson<MessageDto>(`/chats/${encodeURIComponent(chatId)}/messages`, {
     method: "POST",
@@ -330,6 +387,7 @@ export async function queueRun(runId: string, input: QueueRunInput, files: File[
     body.set("client_request_id", input.client_request_id);
     if (input.effort) body.set("effort", input.effort);
     input.resource_ids?.forEach((id) => body.append("resource_ids", id));
+    input.connection_ids?.forEach((id) => body.append("connection_ids", id));
     files.forEach((file) => body.append("files", file));
     const response = await fetch(`${API_ROOT}/runs/${encodeURIComponent(runId)}/queue/with-files`, {
       method: "POST", headers: requestHeaders(), body,

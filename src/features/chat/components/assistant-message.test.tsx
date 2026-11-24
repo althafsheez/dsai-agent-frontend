@@ -4,6 +4,30 @@ import { describe, expect, it, vi } from "vitest";
 import { AssistantMessage } from "./assistant-message";
 
 describe("AssistantMessage", () => {
+  it("shows and copies the public structured diagnostic", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText");
+    render(<AssistantMessage message={{
+      id: "assistant-1", role: "assistant", status: "failed",
+      createdAt: "2026-11-13T00:00:00Z", blocks: [],
+      error: "raw exception text",
+      diagnostic: {
+        component: "Gemini API", code: "gemini_http_503", category: "unavailable", message: "Service unavailable",
+        stage: "model_generation", retryable: true, http_status: 503, turn: 3, retry_attempts: 2,
+        duration_ms: 450, correlation_id: "run-1",
+      },
+    }} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Gemini API · HTTP 503 — Service unavailable");
+    expect(screen.queryByText("raw exception text")).not.toBeInTheDocument();
+    await user.click(screen.getByText("Error Details"));
+    expect(screen.getByText("gemini_http_503")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Copy Error Details" }));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("Retry attempts: 2"));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("Correlation ID: run-1"));
+    expect(writeText).not.toHaveBeenCalledWith(expect.stringContaining("raw exception text"));
+    writeText.mockRestore();
+  });
+
   it("shows total run time in the reasoning trace header", () => {
     render(<AssistantMessage message={{
       id: "assistant-1", role: "assistant", status: "completed",

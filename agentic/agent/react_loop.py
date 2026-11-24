@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from agentic.engine.python_worker import WarmPythonWorker
 
 from agentic.agent.prompts import SYSTEM_PROMPT
+from agentic.runtime.diagnostics import GeminiRequests, diagnostic, gemini_diagnostic
 
 logger = logging.getLogger("agentic.performance")
 
@@ -274,15 +275,14 @@ class ReActAgent:
                     "Explain any incomplete work or tool errors. Do not request additional tools."
                 )]))
             label = "Synthesizing analytical findings…" if synthesis else f"Analysis turn {turn} of {max_turns}"
-            yield {"type": "status", "content": label}
+            yield {"type": "status", "content": label, "turn": turn}
+            model_started = time.perf_counter()
             calls = []
             seen_ids = set()
             model_parts = []
+            requests = GeminiRequests()
             try:
-                stream = await client.aio.models.generate_content_stream(
-                    model=model, contents=contents, config=turn_config,
-                )
-                async for chunk in stream:
+                async for chunk in requests.stream(client, model=model, contents=contents, config=turn_config):
                     if first_response:
                         logger.info("gemini_first_response duration_ms=%.1f", (time.perf_counter() - start) * 1000)
                         first_response = False
@@ -304,17 +304,27 @@ class ReActAgent:
                                 logger.info("gemini_first_text duration_ms=%.1f", (time.perf_counter() - start) * 1000)
                             final_answer.append(part.text)
                             yield {"type": "delta", "content": part.text}
-            except Exception:
-                yield {"type": "error", "content": "Gemini generation failed."}
+            except Exception as exc:
+                error = gemini_diagnostic(
+                    exc, turn=turn, stage="final_synthesis" if synthesis else "model_generation",
+                    duration_ms=round((time.perf_counter() - model_started) * 1000), requests=requests.count,
+                )
+                logger.warning("gemini_generation_failed turn=%d code=%s", turn, error["code"])
+                yield {"type": "error", "content": error["message"], "diagnostic": error}
+                return
+            if (synthesis and calls) or (not calls and not any(part.text and not part.thought for part in model_parts)):
+                error = diagnostic(
+                    "Agent" if synthesis else "Gemini API",
+                    "maximum_tool_steps" if synthesis else "gemini_empty_response",
+                    "limit" if synthesis else "empty_response",
+                    "Maximum tool steps reached" if synthesis else "Gemini returned no public answer",
+                    "final_synthesis" if synthesis else "model_generation",
+                    turn=turn, duration_ms=round((time.perf_counter() - model_started) * 1000),
+                )
+                yield {"type": "error", "content": error["message"], "diagnostic": error}
                 return
             if not calls:
-                if not any(part.text and not part.thought for part in model_parts):
-                    yield {"type": "error", "content": "Gemini returned no public answer."}
-                    return
                 break
-            if synthesis:
-                yield {"type": "error", "content": "Gemini requested another tool during final synthesis."}
-                return
             contents.append(types.Content(role="model", parts=model_parts))
             responses = []
             for index, call in enumerate(calls, 1):
@@ -323,9 +333,9 @@ class ReActAgent:
                 name = str(call.name or "")
                 args = dict(call.args or {})
                 call_id = call.id or f"turn-{turn}-call-{index}"
-                yield {"type": "tool_call", "tool": name, "arguments": args, "tool_call_id": call_id}
+                yield {"type": "tool_call", "tool": name, "arguments": args, "tool_call_id": call_id, "turn": turn}
                 result = await execute_tool(name, args)
-                yield {"type": "tool_result", "tool": name, "result": result, "tool_call_id": call_id}
+                yield {"type": "tool_result", "tool": name, "result": result, "tool_call_id": call_id, "turn": turn}
                 responses.append(types.Part(function_response=types.FunctionResponse(
                     name=name, id=call.id, response=result,
                 )))

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDownUp,
   ArrowRight,
@@ -22,8 +23,12 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { disconnectPostgres, getPostgresConnections, type PostgresConnection } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { dataSourceConnector } from "../catalog";
+import { PostgresSetup } from "./postgres-setup";
+import { PostgresBrowser } from "./postgres-browser";
 
 type ConnectorCategory = "all" | "skill" | "data" | "app";
 type Sort = "popular" | "name";
@@ -62,8 +67,9 @@ function categoryLabel(category: ConnectorPreview["category"]) {
   return "App";
 }
 
-function ConnectorRow({ connector }: { connector: ConnectorPreview }) {
+function ConnectorRow({ connector, onAdd }: { connector: ConnectorPreview; onAdd: () => void }) {
   const Icon = connector.icon;
+  const postgres = connector.id === "postgresql";
   return (
     <article className="flex min-w-0 items-center gap-3.5 rounded-xl border bg-surface/50 p-3.5 transition-colors hover:border-border-strong hover:bg-surface">
       <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-raised text-foreground">
@@ -80,23 +86,22 @@ function ConnectorRow({ connector }: { connector: ConnectorPreview }) {
           {connector.description}
         </p>
       </div>
-      <button
-        type="button"
-        disabled
-        title={`${connector.name} is coming soon`}
-        className="hidden h-8 shrink-0 cursor-not-allowed items-center gap-1.5 rounded-md bg-raised px-2.5 text-xs text-muted-foreground opacity-70 sm:flex"
-      >
-        <Play className="size-3" /> Try
-      </button>
-      <button
-        type="button"
-        disabled
-        title={`${connector.name} is coming soon`}
-        aria-label={`Add ${connector.name} — coming soon`}
-        className="grid size-8 shrink-0 cursor-not-allowed place-items-center rounded-md bg-raised text-muted-foreground opacity-70"
-      >
-        <Plus className="size-3.5" />
-      </button>
+      {postgres ? (
+        <Button type="button" variant="outline" className="h-8 px-2.5" aria-label="Connect PostgreSQL" onClick={onAdd}>
+          Connect
+        </Button>
+      ) : (
+        <>
+          <button type="button" disabled title={`${connector.name} is coming soon`}
+            className="hidden h-8 shrink-0 cursor-not-allowed items-center gap-1.5 rounded-md bg-raised px-2.5 text-xs text-muted-foreground opacity-70 sm:flex">
+            <Play className="size-3" /> Try
+          </button>
+          <button type="button" disabled aria-label={`Add ${connector.name} — coming soon`} title={`${connector.name} is coming soon`}
+            className="grid size-8 shrink-0 cursor-not-allowed place-items-center rounded-md bg-raised text-muted-foreground opacity-70">
+            <Plus className="size-3.5" />
+          </button>
+        </>
+      )}
     </article>
   );
 }
@@ -106,7 +111,32 @@ export function ConnectorsPage() {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("popular");
   const [dataOnly, setDataOnly] = useState(false);
-  const [showAddHelp, setShowAddHelp] = useState(false);
+  const [setup, setSetup] = useState<"new" | PostgresConnection | null>(null);
+  const [browsing, setBrowsing] = useState<PostgresConnection | null>(null);
+  const [disconnecting, setDisconnecting] = useState<PostgresConnection | null>(null);
+  const [disconnectError, setDisconnectError] = useState("");
+  const [pending, setPending] = useState(false);
+  const [notice, setNotice] = useState("");
+  const client = useQueryClient();
+  const saved = useQuery({
+    queryKey: ["postgres-connections"], queryFn: () => getPostgresConnections(), retry: false,
+  });
+
+  async function disconnect() {
+    if (!disconnecting || pending) return;
+    setPending(true);
+    setDisconnectError("");
+    try {
+      await disconnectPostgres(disconnecting.id);
+      await client.invalidateQueries({ queryKey: ["postgres-connections"] });
+      setNotice(`${disconnecting.name} disconnected.`);
+      setDisconnecting(null);
+    } catch (error) {
+      setDisconnectError(error instanceof Error ? error.message : "Could not disconnect PostgreSQL.");
+    } finally {
+      setPending(false);
+    }
+  }
 
   const connectors = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -133,12 +163,7 @@ export function ConnectorsPage() {
             <Layers3 className="size-5" strokeWidth={1.5} />
           </div>
           <div>
-            <div className="flex items-center gap-2.5">
               <h1 className="text-xl font-semibold tracking-tight">Connectors</h1>
-              <span className="rounded border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-muted-foreground">
-                Preview
-              </span>
-            </div>
             <p className="mt-1 text-xs text-muted-foreground">
               Extend DSAI with external data sources, analytical skills, and productivity integrations
             </p>
@@ -146,15 +171,23 @@ export function ConnectorsPage() {
         </div>
       </header>
 
-      {showAddHelp && (
-        <div
-          role="status"
-          className="mb-5 rounded-md border border-slate/30 bg-surface px-4 py-3 text-xs leading-relaxed text-muted-foreground"
-        >
-          External connectors are coming soon. Local file selection is available when starting an analysis;
-          direct connector installation is not connected yet.
-        </div>
-      )}
+      <section aria-label="Saved PostgreSQL connections" className="mb-6 space-y-2">
+        <h2 className="text-sm font-semibold">Saved PostgreSQL connections</h2>
+        {saved.isPending && <p role="status" className="text-xs text-muted-foreground">Loading connections…</p>}
+        {saved.error && <p role="alert" className="text-xs text-red-300">{saved.error.message}</p>}
+        {notice && <p role="status" className="text-xs text-muted-foreground">{notice}</p>}
+        {saved.data?.items.length === 0 && <p className="text-xs text-muted-foreground">No saved PostgreSQL connections.</p>}
+        {saved.data?.items.map((connection) => <article key={connection.id} className="flex flex-wrap items-center gap-2 rounded-xl border bg-surface p-3">
+          <Database className="size-4 text-muted-foreground" aria-hidden="true" />
+          <div className="min-w-32 flex-1">
+            <h3 className="break-all text-sm font-medium">{connection.name}</h3>
+            <p className="text-xs text-muted-foreground">{connection.database} · {connection.status === "connected" ? "Connected" : "Connection failed"}</p>
+          </div>
+          <Button type="button" variant="outline" onClick={() => setBrowsing(connection)}>Browse tables</Button>
+          <Button type="button" variant="ghost" onClick={() => setSetup(connection)}>Edit</Button>
+          <Button type="button" variant="ghost" onClick={() => { setDisconnectError(""); setDisconnecting(connection); }}>Disconnect</Button>
+        </article>)}
+      </section>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div
@@ -231,8 +264,7 @@ export function ConnectorsPage() {
           <Button
             type="button"
             className="h-9 px-3.5 text-xs"
-            onClick={() => setShowAddHelp((current) => !current)}
-            aria-expanded={showAddHelp}
+            onClick={() => setSetup("new")}
           >
             <Plus className="size-3.5" /> Add
           </Button>
@@ -261,7 +293,7 @@ export function ConnectorsPage() {
               </div>
               <div className="grid gap-3 lg:grid-cols-2">
                 {popular.map((connector) => (
-                  <ConnectorRow key={connector.id} connector={connector} />
+                  <ConnectorRow key={connector.id} connector={connector} onAdd={() => setSetup("new")} />
                 ))}
               </div>
             </section>
@@ -287,7 +319,7 @@ export function ConnectorsPage() {
               </div>
               <div className="grid gap-3 lg:grid-cols-2">
                 {yours.map((connector) => (
-                  <ConnectorRow key={connector.id} connector={connector} />
+                  <ConnectorRow key={connector.id} connector={connector} onAdd={() => setSetup("new")} />
                 ))}
               </div>
             </section>
@@ -311,6 +343,20 @@ export function ConnectorsPage() {
           </button>
         </div>
       )}
+      {setup && <PostgresSetup open connection={setup === "new" ? undefined : setup} onClose={() => setSetup(null)}
+        onSaved={(connection) => setNotice(`${connection.name} saved.`)} />}
+      {browsing && <PostgresBrowser connection={browsing} onClose={() => setBrowsing(null)} />}
+      {disconnecting && <Dialog open onOpenChange={(open) => { if (!open && !pending) setDisconnecting(null); }}>
+        <DialogContent>
+          <DialogTitle className="font-semibold">Disconnect PostgreSQL</DialogTitle>
+          <DialogDescription className="my-3 text-sm text-muted-foreground">Remove the saved connection to {disconnecting.name}?</DialogDescription>
+          {disconnectError && <p role="alert" className="mb-3 text-sm text-red-300">{disconnectError}</p>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" disabled={pending} onClick={() => setDisconnecting(null)}>Cancel</Button>
+            <Button type="button" disabled={pending} onClick={() => void disconnect()}>{pending ? "Disconnecting…" : "Disconnect"}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>}
     </section>
   );
 }

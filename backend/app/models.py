@@ -134,8 +134,26 @@ class Message(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(24), default="completed")
     position: Mapped[int] = mapped_column(Integer)
     client_request_id: Mapped[str | None] = mapped_column(String(100))
+    connection_ids: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
 
     chat: Mapped[Chat] = relationship(back_populates="messages")
+
+
+class DataConnection(TimestampMixin, Base):
+    __tablename__ = "data_connections"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    provider: Mapped[str] = mapped_column(String(24), default="postgresql")
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    workspace_id: Mapped[str | None] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    encrypted_credentials: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(24))
+    include_schema_for_ai: Mapped[bool] = mapped_column(Boolean, default=True)
+    enable_previews: Mapped[bool] = mapped_column(Boolean, default=True)
+    schema_filter: Mapped[list[str]] = mapped_column(JSON)
+    last_tested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class QuickMessage(TimestampMixin, Base):

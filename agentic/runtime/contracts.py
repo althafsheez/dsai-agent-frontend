@@ -76,8 +76,9 @@ class ToolHost(Protocol):
 
 
 class ProviderError(Exception):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, diagnostic: dict[str, Any] | None = None):
         self.code = code
+        self.diagnostic = diagnostic
         super().__init__(message)
 
 

@@ -151,11 +151,9 @@ async def test_unexpected_runner_error_is_sanitized(tmp_path, demo_headers: dict
             created = await create_chat(client, demo_headers)
             events = await start_run(client, demo_headers, created["chat"]["id"], created["message"]["id"])
             assert events[-1]["type"] == "agent.failed"
-            assert events[-1]["data"]["error"] == {
-                "code": "agent_error",
-                "message": "Agent execution failed.",
-            }
-            assert "secret" not in events[-1]["data"]["error"]["message"]
+            error = events[-1]["data"]["error"]
+            assert (error["component"], error["code"], error["message"]) == ("Agent", "execution_failed", "Execution failed")
+            assert "secret" not in str(error)
 
 
 @pytest.mark.asyncio
@@ -394,6 +392,36 @@ async def test_gemini_uses_tools_only_when_greeting_includes_a_request(monkeypat
         [ChatTurn("user", message)], "gemini-test", "medium",
         (ProviderTool("list_files", "List files", {"type": "object"}),), execute_tool, 8,
         tool_context={"files": [{"name": "input.csv"}]},
+    )]
+    assert events == [ProviderEvent("message.delta", {"text": "Test response"})]
+
+
+@pytest.mark.parametrize("with_database", [False, True])
+async def test_gemini_postgres_artifact_instructions_are_scoped_to_selected_connections(monkeypatch, with_database):
+    from agentic.agent.react_loop import ReActAgent
+    from agentic.providers.gemini import GeminiProvider
+
+    provider = GeminiProvider(api_key=None, models="gemini-test:medium", default_model_id="gemini-test")
+    monkeypatch.setattr(provider, "_client", object())
+
+    async def stream_turns(**kwargs):
+        instruction = kwargs["config"].system_instruction
+        assert ("Use query_database for all PostgreSQL SQL" in instruction) is with_database
+        assert ("must not connect to PostgreSQL or import database drivers" in instruction) is with_database
+        assert ("reuse successful query results" in instruction) is with_database
+        assert ("the provided reportlab for PDFs" in instruction) is with_database
+        yield {"type": "delta", "content": "Test response"}
+
+    async def execute_tool(name, arguments):
+        pytest.fail("The mock stream does not execute tools.")
+
+    monkeypatch.setattr(ReActAgent, "stream_turns", staticmethod(stream_turns))
+    context = {"files": [{"name": "input.csv"}]}
+    if with_database:
+        context["database_connections"] = [{"connection_id": "test", "schemas": ["public"]}]
+    events = [event async for event in provider.stream_with_tools(
+        [ChatTurn("user", "Analyze the selected data")], "gemini-test", "medium", (), execute_tool, 8,
+        tool_context=context,
     )]
     assert events == [ProviderEvent("message.delta", {"text": "Test response"})]
 
@@ -709,6 +737,11 @@ async def test_stop_during_run_cancels_without_completing(tmp_path, demo_headers
             events = parse_sse(response.text)
             assert events[-1]["type"] == "agent.cancelled"
             assert "agent.completed" not in [event["type"] for event in events]
+            cancelled = events[-1]["data"]["error"]
+            assert cancelled["code"] == "run_cancelled"
+            assert cancelled["correlation_id"] == active_run_id
+            history = (await client.get(f"/api/runs/{active_run_id}/events", headers=demo_headers)).json()["items"]
+            assert history[-1] == events[-1]
             with app.state.session_factory() as session:
                 run = session.get(AgentRun, active_run_id)
                 assert run is not None and run.status == "cancelled"
@@ -794,7 +827,8 @@ async def test_paused_queue_can_be_resumed_after_a_failed_run(tmp_path, demo_hea
                 assert statuses == ["failed", "completed", "completed"]
 
 
-async def test_chat_stream_runs_react_tool_turn_and_final_synthesis(tmp_path, demo_headers, monkeypatch):
+@pytest.mark.parametrize("exhausted", [False, True])
+async def test_chat_stream_runs_react_tool_turn_and_final_synthesis(tmp_path, demo_headers, monkeypatch, exhausted):
     from google.genai import models, types
 
     from app.config import Settings
@@ -813,7 +847,10 @@ async def test_chat_stream_runs_react_tool_turn_and_final_synthesis(tmp_path, de
             response = contents[-2].parts[0].function_response
             assert response.id == "memory-1"
             assert response.response == {"memories": []}
-            parts = [types.Part.from_text(text="No saved memories.")]
+            parts = (
+                [types.Part(function_call=types.FunctionCall(name="load_memory", id="unexpected-tool", args={}))]
+                if exhausted else [types.Part.from_text(text="No saved memories.")]
+            )
 
         async def chunks():
             yield types.GenerateContentResponse(candidates=[
@@ -836,8 +873,134 @@ async def test_chat_stream_runs_react_tool_turn_and_final_synthesis(tmp_path, de
             })
             events = parse_sse(response.text)
             assert [e["type"] for e in events if e["type"].startswith("tool.")] == ["tool.started", "tool.completed"]
-            assert events[-1]["type"] == "agent.completed"
+            if exhausted:
+                assert events[-1]["type"] == "agent.failed"
+                error = events[-1]["data"]["error"]
+                assert (error["component"], error["code"], error["turn"]) == ("Agent", "maximum_tool_steps", 2)
+            else:
+                assert events[-1]["type"] == "agent.completed"
+                messages = (await client.get(path, headers=demo_headers)).json()["items"]
+                assert messages[-1]["content"] == "No saved memories."
             assert "internal" not in response.text
-            messages = (await client.get(path, headers=demo_headers)).json()["items"]
-            assert messages[-1]["content"] == "No saved memories."
             assert len(calls) == 2
+
+
+@pytest.mark.parametrize(("status", "category", "message", "retryable", "retries"), [
+    (503, "unavailable", "Service unavailable", True, 2),
+    (429, "rate_limit", "Rate limit exceeded", True, 0),
+    (400, "invalid_request", "Invalid request", False, 0),
+    (None, "timeout", "Request timed out", True, 2),
+])
+async def test_gemini_http_diagnostics_survive_sse_and_history(
+    tmp_path, demo_headers, monkeypatch, caplog, status, category, message, retryable, retries,
+):
+    import httpx
+    from google import genai
+
+    from agentic.providers.gemini import GeminiProvider
+    from app.config import Settings
+    from app.main import create_app
+
+    received = 0
+    secret = "Authorization: Bearer private-upstream-token"
+    real_client = genai.Client
+
+    async def respond(request):
+        nonlocal received
+        received += 1
+        if status is None:
+            raise httpx.ReadTimeout(secret, request=request)
+        return httpx.Response(
+            status, headers={"x-request-id": "upstream-request-42"},
+            json={"error": {"code": status, "message": secret}},
+        )
+
+    def sdk_client(*args, http_options, **kwargs):
+        http_options.async_client_args["transport"] = httpx.MockTransport(respond)
+        http_options.retry_options.initial_delay = 0
+        http_options.retry_options.max_delay = 0
+        return real_client(*args, http_options=http_options, **kwargs)
+
+    monkeypatch.setattr("agentic.providers.gemini.genai.Client", sdk_client)
+    provider = GeminiProvider(api_key="fake-key", models="gemini-test:high", default_model_id="gemini-test")
+    app = create_app(Settings(
+        environment="production" if status == 400 else "development", connector_encryption_key=None,
+        database_url=f"sqlite:///{tmp_path / 'gemini.db'}", storage_root=tmp_path / "storage",
+    ), provider=provider)
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            created = await create_chat(client, demo_headers)
+            events = await start_run(client, demo_headers, created["chat"]["id"], created["message"]["id"])
+            failed = events[-1]
+            assert failed["type"] == "agent.failed"
+            run_id = failed["run_id"]
+            error = failed["data"]["error"]
+            assert error["component"] == "Gemini API"
+            assert error["code"] == (f"gemini_http_{status}" if status else "gemini_timeout")
+            assert error["category"] == category
+            assert error["message"] == message
+            assert error.get("http_status") == status
+            assert error.get("request_id") == ("upstream-request-42" if status else None)
+            assert error["retryable"] is retryable
+            assert received == retries + 1
+            assert error["retry_attempts"] == retries
+            assert error["turn"] == 1
+            assert error["stage"] == "model_generation"
+            assert error["duration_ms"] >= 0
+            assert error["correlation_id"] == run_id
+            assert ("development" in error) == (status != 400)
+            assert secret not in str(events) and secret not in caplog.text
+            saved = (await client.get(f"/api/runs/{run_id}/events", headers=demo_headers)).json()["items"]
+            assert saved[-1] == failed
+            run = (await client.get(f"/api/runs/{run_id}", headers=demo_headers)).json()
+            assert (run["status"], run["error_code"], run["error_detail"]) == ("failed", error["code"], message)
+
+
+async def test_e2b_python_failure_is_sanitized_at_the_tool_step(tmp_path, demo_headers, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.config import Settings
+    from app.main import create_app
+
+    class SandboxFailureProvider(FakeProvider):
+        async def stream_with_tools(self, messages, model_id, effort, tools, execute_tool, max_steps):
+            tool = {
+                "tool_call_id": "python-error", "name": "execute_python", "turn": 3,
+                "arguments": {"code": 'password = "raw-python-password"\n1 / 0'},
+            }
+            yield ProviderEvent("tool.started", tool)
+            yield ProviderEvent("tool.failed", {**tool, "output": await execute_tool(tool["name"], tool["arguments"])})
+            yield ProviderEvent("message.delta", {"text": "Python returned an error."})
+
+    sandbox = SimpleNamespace(
+        run_code=lambda *_args, **_kwargs: SimpleNamespace(
+            error=SimpleNamespace(name="ZeroDivisionError", value="raw-e2b-secret"),
+            logs=SimpleNamespace(stdout=["raw-e2b-secret"], stderr=["raw-e2b-secret"]),
+        ),
+        files=SimpleNamespace(list=lambda _path: []),
+    )
+
+    async def start(_self, _run_id):
+        return sandbox
+
+    monkeypatch.setattr(E2BSandboxPool, "_start", start)
+    app = create_app(Settings(
+        environment="development", connector_encryption_key=None, e2b_api_key="unused-test-key",
+        database_url=f"sqlite:///{tmp_path / 'e2b.db'}", storage_root=tmp_path / "storage",
+    ), provider=SandboxFailureProvider())
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            created = await create_chat(client, demo_headers)
+            events = await start_run(client, demo_headers, created["chat"]["id"], created["message"]["id"])
+            start_event = next(event for event in events if event["type"] == "tool.started")
+            failure = next(event for event in events if event["type"] == "tool.failed")["data"]
+            error = failure["diagnostic"]
+            assert error["component"] == "E2B"
+            assert error["code"] == "e2b_python_failed"
+            assert error["stage"] == "python_execution" and error["turn"] == 3
+            assert error["step_id"] == start_event["data"]["step_id"]
+            assert error["development"] == {"Python exception": "ZeroDivisionError"}
+            assert error["message"] == "Python attempted to divide by zero"
+            assert "raw-e2b-secret" not in str(events)
+            assert "raw-python-password" not in str(events)
+            assert events[-1]["type"] == "agent.completed"

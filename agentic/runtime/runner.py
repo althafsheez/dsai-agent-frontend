@@ -7,7 +7,8 @@ from typing import Any
 from uuid import uuid4
 
 from ..tools.registry import ToolRegistry
-from .contracts import ChatTurn, LLMProvider, ProviderTool, ToolContext
+from .contracts import ChatTurn, LLMProvider, ProviderError, ProviderTool, ToolContext
+from .diagnostics import diagnostic, public_tool_value, tool_component, unexpected_diagnostic
 from .events import RunnerCancelled, RunnerEvent, RunnerSteered
 
 
@@ -45,15 +46,27 @@ class AgentRunner:
         if definitions and context is not None and callable(stream_with_tools):
             provider_tools = tuple(ProviderTool(tool.name, tool.description, tool.parameters) for tool in definitions)
             steering_after_tool: list[str] = []
-            pending_steps: list[ToolContext] = []
+            pending_steps: list[tuple[ToolContext, float, int | None]] = []
             steps: dict[str, tuple[str, float, str]] = {}
 
             async def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
                 if is_cancelled():
                     raise RunnerCancelled
                 check_control("before.tool")
-                step_context = pending_steps.pop(0) if pending_steps else context.for_step(str(uuid4()), name)
-                result = await self._tools.execute(name, arguments, step_context)
+                step_context, started_at, turn = pending_steps.pop(0) if pending_steps else (
+                    context.for_step(str(uuid4()), name), time.perf_counter(), None,
+                )
+                try:
+                    result = await self._tools.execute(name, arguments, step_context)
+                except (RunnerCancelled, RunnerSteered):
+                    raise
+                except Exception as exc:
+                    error = unexpected_diagnostic(
+                        exc, component=tool_component(name), stage="tool_execution",
+                        step_id=step_context.step_id, tool=name, turn=turn, retry_attempts=0,
+                        duration_ms=round((time.perf_counter() - started_at) * 1000),
+                    )
+                    raise ProviderError(error["code"], error["message"], error) from None
                 if poll_steering is not None:
                     steering_after_tool.extend(poll_steering("after.tool"))
                 return result
@@ -77,15 +90,16 @@ class AgentRunner:
             async for event in provider_stream:
                 # A completed tool result is public progress and must be
                 # persisted before cancellation/steering ends the loop.
-                if event.type != "tool.completed":
+                if event.type not in ("tool.completed", "tool.failed"):
                     check_control("provider.event")
                 event_data = dict(event.data)
                 if event.type == "tool.started":
                     provider_call_id = str(event_data.get("tool_call_id") or uuid4())
                     name = str(event_data.get("name") or "tool")
                     step_id = str(uuid4())
-                    pending_steps.append(context.for_step(step_id, name))
-                    steps[provider_call_id] = (step_id, time.perf_counter(), name)
+                    started_at = time.perf_counter()
+                    pending_steps.append((context.for_step(step_id, name), started_at, event_data.get("turn")))
+                    steps[provider_call_id] = (step_id, started_at, name)
                     arguments = event_data.get("arguments") if isinstance(event_data.get("arguments"), dict) else {}
                     event_data.update({
                         "step_id": step_id,
@@ -100,11 +114,24 @@ class AgentRunner:
                     provider_call_id = str(event_data.get("tool_call_id") or "")
                     step_id, started_at, name = steps.get(provider_call_id, (str(uuid4()), time.perf_counter(), str(event_data.get("name") or "tool")))
                     output = event_data.get("output") if isinstance(event_data.get("output"), dict) else {}
+                    duration_ms = max(0, round((time.perf_counter() - started_at) * 1000))
+                    if event.type == "tool.failed":
+                        error = output.get("diagnostic") or diagnostic(
+                            tool_component(name), "tool_failed", "execution", "Tool execution failed",
+                            "tool_execution", retryable=output.get("retryable") is True, retry_attempts=0,
+                        )
+                        event_data["diagnostic"] = {
+                            **error, "step_id": step_id, "tool": name, "duration_ms": duration_ms,
+                            "correlation_id": context.run_id,
+                            **({"turn": event_data["turn"]} if event_data.get("turn") is not None else {}),
+                        }
+                        event_data["error"] = error["message"]
+                        event_data["output"] = {"error": error["message"], "resources": output.get("resources", [])}
                     event_data.update({
                         "step_id": step_id,
                         "run_id": context.run_id,
                         "message_id": context.assistant_message_id,
-                        "duration_ms": max(0, round((time.perf_counter() - started_at) * 1000)),
+                        "duration_ms": duration_ms,
                         "summary": (
                             f"{name.replace('_', ' ').capitalize()} failed."
                             if event.type == "tool.failed"
@@ -112,8 +139,10 @@ class AgentRunner:
                         ),
                         "resources": output.get("resources", []),
                     })
+                if event.type.startswith("tool."):
+                    event_data = public_tool_value(event_data)
                 yield RunnerEvent(type=event.type, data=event_data)
-                if event.type == "tool.completed" and is_cancelled():
+                if event.type in ("tool.completed", "tool.failed") and is_cancelled():
                     raise RunnerCancelled
                 if steering_after_tool:
                     instructions = steering_after_tool.copy()

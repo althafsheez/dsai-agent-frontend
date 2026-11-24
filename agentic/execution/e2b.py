@@ -8,6 +8,41 @@ from pathlib import PurePosixPath
 from threading import RLock
 from typing import Any
 
+from ..runtime.diagnostics import HTTP_ERRORS, diagnostic, http_status, is_timeout, upstream_request_id
+
+PYTHON_ERRORS = {
+    "ModuleNotFoundError": "Python could not import a required module",
+    "ImportError": "Python could not import a required module",
+    "FileNotFoundError": "Python could not find a requested file",
+    "SyntaxError": "Python code contains a syntax error",
+    "NameError": "Python referenced an undefined name",
+    "TypeError": "Python received a value of an incompatible type",
+    "ValueError": "Python received an invalid value",
+    "ZeroDivisionError": "Python attempted to divide by zero",
+    "PermissionError": "Python was denied access to a resource",
+}
+
+
+def _failure(code: str, category: str, message: str, stage: str, **metadata: Any) -> dict[str, Any]:
+    return {"success": False, "error": message, "diagnostic": diagnostic("E2B", code, category, message, stage, **metadata)}
+
+
+def _service_failure(exc: Exception, stage: str) -> dict[str, Any]:
+    status = http_status(exc)
+    if is_timeout(exc):
+        category, message = "timeout", "Sandbox operation timed out"
+    elif status:
+        category, message = HTTP_ERRORS.get(status, ("service_error", "Sandbox request failed"))
+    else:
+        category, message = "execution", "Sandbox operation failed"
+    return _failure(
+        f"e2b_http_{status}" if status else f"e2b_{category}", category, message, stage,
+        retryable=category == "timeout" or status == 429 or bool(status and status >= 500),
+        http_status=status, request_id=upstream_request_id(exc), retry_attempts=0,
+        development={"Exception type": type(exc).__name__},
+    )
+
+
 logger = logging.getLogger("agentic.performance")
 
 
@@ -80,50 +115,55 @@ class E2BSandboxPool:
                             sandbox.kill()
                         except Exception:
                             pass
-                    raise SandboxUnavailable(f"Could not start the E2B sandbox: {type(exc).__name__}.") from exc
+                    raise SandboxUnavailable("Could not start the E2B sandbox.") from exc
                 self._sandboxes[run_id] = sandbox
                 self._output_hashes[run_id] = {}
             return sandbox
 
     async def execute(self, run_id: str, code: str, timeout_seconds: int) -> dict[str, Any]:
         if not isinstance(code, str) or not code.strip():
-            return {"success": False, "error": "Python code cannot be empty."}
+            return _failure("e2b_missing_code", "invalid_request", "Python code cannot be empty", "python_execution")
         if not self._api_key:
-            return {"success": False, "error": "E2B_API_KEY is not configured."}
+            return _failure("e2b_not_configured", "configuration", "E2B is not configured", "sandbox_startup")
         bounded_timeout = max(1, min(timeout_seconds, 60))
         try:
             sandbox = await self._start(run_id)
         except SandboxUnavailable as exc:
-            return {"success": False, "error": str(exc)}
+            return _service_failure(exc.__cause__ or exc, "sandbox_startup")
 
         def run() -> dict[str, Any]:
+            stage = "python_execution"
             try:
                 execution = sandbox.run_code(code, timeout=bounded_timeout)
+                stage = "output_collection"
                 generated = self._scan_outputs_sync(run_id, sandbox)
                 execution_error = getattr(execution, "error", None)
-                error = None
                 if execution_error:
-                    error = (
-                        f"{getattr(execution_error, 'name', 'ExecutionError')}: "
-                        f"{getattr(execution_error, 'value', str(execution_error))}"
-                    )[:500]
+                    kind = getattr(execution_error, "name", "")
+                    message = PYTHON_ERRORS.get(kind, "Python execution failed")
+                    failure = _failure(
+                        "e2b_python_failed", "python_execution", message, "python_execution",
+                        retry_attempts=0, development={"Python exception": kind} if kind in PYTHON_ERRORS else None,
+                    )
+                    # Give the agent a safe exception name for input staging recovery.
+                    if kind in PYTHON_ERRORS:
+                        failure["error"] = f"{kind}: {message}."
+                    return {**failure, "generated_files": generated}
                 logs = getattr(execution, "logs", None)
                 stdout_items = getattr(logs, "stdout", []) or []
                 stderr_items = getattr(logs, "stderr", []) or []
                 return {
-                    "success": execution_error is None,
+                    "success": True,
                     "stdout": "".join(str(getattr(item, "line", item)) for item in stdout_items)[:4000],
                     "stderr": "".join(str(getattr(item, "line", item)) for item in stderr_items)[:1000],
-                    "error": error,
+                    "error": None,
                     "generated_files": generated,
                 }
             except Exception as exc:
                 # Keep the run sandbox alive so staged inputs and prior state
                 # remain available to the next tool call. Cleanup happens once
                 # at the end of the run; restarting here silently loses files.
-                detail = str(exc).strip().replace("\n", " ")[:240]
-                suffix = f": {detail}" if detail else ""
-                return {"success": False, "error": f"Sandbox execution failed ({type(exc).__name__}){suffix}."}
+                return _service_failure(exc, stage)
 
         return await asyncio.to_thread(run)
 
@@ -157,8 +197,10 @@ class E2BSandboxPool:
             sandbox = await self._start(run_id)
             entries = await asyncio.to_thread(sandbox.files.list, safe)
             return {"directory": safe, "files": sorted(str(entry.name) for entry in entries if not str(entry.name).startswith("."))}
-        except (SandboxUnavailable, ValueError) as exc:
+        except ValueError as exc:
             return {"error": str(exc)}
+        except SandboxUnavailable as exc:
+            return _service_failure(exc.__cause__ or exc, "sandbox_startup")
 
     async def read_text(self, run_id: str, path: str) -> dict[str, Any]:
         try:
@@ -167,10 +209,12 @@ class E2BSandboxPool:
             content = await asyncio.to_thread(sandbox.files.read, safe)
             text = str(content)
             return {"path": safe, "content": text[:12_000], "truncated": len(text) > 12_000}
-        except (SandboxUnavailable, ValueError) as exc:
+        except ValueError as exc:
             return {"error": str(exc)}
-        except Exception:
-            return {"error": "Could not read the sandbox file."}
+        except SandboxUnavailable as exc:
+            return _service_failure(exc.__cause__ or exc, "sandbox_startup")
+        except Exception as exc:
+            return _service_failure(exc, "file_read")
 
     async def write_text(self, run_id: str, path: str, content: str) -> dict[str, Any]:
         try:
@@ -180,10 +224,12 @@ class E2BSandboxPool:
             sandbox = await self._start(run_id)
             await asyncio.to_thread(sandbox.files.write, safe, content)
             return {"success": True, "path": safe, "bytes_written": len(content.encode("utf-8"))}
-        except (SandboxUnavailable, ValueError) as exc:
+        except ValueError as exc:
             return {"error": str(exc)}
-        except Exception:
-            return {"error": "Could not write the sandbox file."}
+        except SandboxUnavailable as exc:
+            return _service_failure(exc.__cause__ or exc, "sandbox_startup")
+        except Exception as exc:
+            return _service_failure(exc, "file_write")
 
     async def read_output_bytes(self, run_id: str, path: str) -> bytes:
         safe = self._safe_path(path, writable=True)

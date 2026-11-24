@@ -79,15 +79,17 @@ CSV/XLSX/XLS/Parquet structured formats -> Dataset. Images/PDF/documents/charts 
 text/event-stream, Cache-Control:no-cache. SSE id is event_id; event is type; data is JSON envelope {event_id,run_id,type,data,timestamp,sequence}. Parse UTF-8 incrementally with multiline frames and chunk boundaries; ignore comment heartbeats. Main stream may contain successive queued runs; use run_id to route events.
 Events:
 - message.created: {message}
-- agent.started: {run}; agent.completed: {run_id}; agent.failed: {run_id,error}; agent.cancelled/agent.interrupted: {run_id,reason}
+- agent.started: {run}; agent.completed: {run_id}; agent.failed: {run_id,message_id,error}; agent.cancelled/agent.interrupted: {run_id,message_id,reason,error}
 - progress: {label,detail?}
 - reasoning.summary: {text,source:model}; only explicit model-exposed summaries
-- tool.started: {tool_call_id,name,arguments}; tool.completed: {tool_call_id,output,duration_ms}; tool.failed: {tool_call_id,error}
+- tool.started: {tool_call_id,name,arguments}; tool.completed: {tool_call_id,output,duration_ms}; tool.failed: {tool_call_id,step_id,error,diagnostic}
 - message.delta: {message_id,text}; message.completed: {message_id,content,status}
 - dataset.created: {dataset,scope}; artifact.created: {artifact,scope}
 - queue.updated: {items}; steer.received/applied/unapplied: {instruction}
 - chat.updated: {chat} after title generation, never overwrite manual rename
 - error: {code,message,request_id}
+For main chat, terminal `error` objects and `tool.failed.diagnostic` carry public `component`, `category`, `message`, `code`, `stage` and `retryable` fields. Known HTTP statuses, tool/step IDs, agent turn, retry counts and limit, duration, upstream request ID and run correlation ID are included when available. The run's stored events expose the same diagnostics on reload. Development may also include safe exception names or SQLSTATE codes.
+
 Persist serializable public tool arguments/results with secret redaction and size limits; large output referenced as stored file instead. Flush events and partial answer before terminal state. Persist only metadata after client disconnect, never continue analysis in background.
 
 ## Quick Assistant
@@ -99,3 +101,13 @@ Only backend/storage contains durable bytes, under generated IDs. SQLite metadat
 Dedup registration by run_id + normalized output path + content hash. Repeated scan unchanged -> same record; changed bytes at same path -> preserved new version. Shared FileObject can back links without byte duplication.
 Register structured outputs as Datasets, other supported outputs as Artifacts; emit corresponding event after durable copy/metadata commit. Cleanup partial failed copies, never delete registered files on unstar/archive/soft delete.
 GET /api/health reports readiness; keys backend environment only. Configurable origins/limits; public deployment of demo identity is explicitly unsupported.
+
+## PostgreSQL connections
+
+PostgreSQL is restricted to loopback requests to a development or test backend and uses the existing `user-you` demo identity. A development or test backend configured with a connector encryption key also restricts its API to loopback so saved runs and chat history stay local.
+
+- `POST /api/connectors/postgresql/test` validates credentials and returns accessible application schemas. `POST /api/connectors` tests and saves the connection. Responses never contain passwords or encrypted credentials.
+- `GET /api/connectors` lists the owner's connections. `?for_analysis=true&chat_id=…` or `?for_analysis=true&workspace_id=…` limits selection to the active analysis scope. `GET/PATCH/DELETE /api/connectors/{id}` reads, edits, or disconnects a saved connection. `POST /api/connectors/{id}/test` tests proposed edits without saving.
+- `GET /api/connectors/{id}/schemas`, `GET /api/connectors/{id}/tables?schema=&search=`, and `GET /api/connectors/{id}/tables/{schema}/{table}?preview=true&limit=20` expose live metadata and optional bounded previews. `POST /api/connectors/{id}/refresh-schema` retests the live schema and records connection status.
+- `POST /api/connectors/{id}/query` accepts `{sql, limit?}` and returns `{columns, rows, truncated}` after authorization, parser validation, and read-only execution. Fractional numbers and integers outside JavaScript's safe range are represented as strings to preserve precision.
+- `connection_ids` is optional on new chats, messages and queued follow-ups, including multipart queue requests. Message responses include `connection_refs` for display. The selected IDs belong to the original message and remain bound to it when queued, edited, or retried. The agent rechecks that selection and its access before executing each database tool.

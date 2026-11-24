@@ -23,7 +23,10 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { createChat, getModels, getWorkspaces, uploadResource } from "@/lib/api";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { createChat, getModels, getWorkspaces, uploadResource, type PostgresConnection } from "@/lib/api";
+import { PostgresChips, PostgresSources } from "@/features/connectors/components/postgres-sources";
+import { PostgresSetup } from "@/features/connectors/components/postgres-setup";
 import { cn } from "@/lib/utils";
 import { savePendingRun } from "@/features/chat/pending-run";
 
@@ -63,6 +66,8 @@ export function WelcomeComposer({ initialWorkspaceId = null }: { initialWorkspac
   const workspacesQuery = useQuery({ queryKey: ["workspaces"], queryFn: getWorkspaces });
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
+  const [postgresSelection, setPostgresSelection] = useState<PostgresConnection | null>(null);
+  const [postgresDialog, setPostgresDialog] = useState<"select" | "setup" | null>(null);
   const [workspaceId, setWorkspaceId] = useState<string | null>(initialWorkspaceId);
   const [modelId, setModelId] = useState("");
   const [effort, setEffort] = useState("");
@@ -176,6 +181,7 @@ export function WelcomeComposer({ initialWorkspaceId = null }: { initialWorkspac
         content: draft,
         workspace_id: workspaceId,
         client_request_id: createRequestId,
+        ...(postgresSelection ? { connection_ids: [postgresSelection.id] } : {}),
       });
       for (const attachment of attachments) {
         await uploadResource({
@@ -220,6 +226,20 @@ export function WelcomeComposer({ initialWorkspaceId = null }: { initialWorkspac
         </div>)}
       </div>}
 
+      {postgresSelection && <div className="px-3 pt-3"><PostgresChips connections={[postgresSelection]} onRemove={() => setPostgresSelection(null)} /></div>}
+      {postgresDialog === "select" && <Dialog open onOpenChange={(open) => { if (!open) setPostgresDialog(null); }}>
+        <DialogContent>
+          <DialogTitle className="text-lg font-semibold">Data Sources</DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground">Select a PostgreSQL connection for this question.</DialogDescription>
+          <PostgresSources workspaceId={workspaceId} selected={postgresSelection ? [postgresSelection] : []}
+            onSelect={(source) => { setPostgresSelection(source); setPostgresDialog(null); }}
+            onAdd={() => setPostgresDialog("setup")} />
+        </DialogContent>
+      </Dialog>}
+      {postgresDialog === "setup" && <PostgresSetup open workspaceId={workspaceId} onClose={() => setPostgresDialog(null)}
+        onSaved={(source) => {
+          if (source.include_schema_for_ai && (!source.workspace_id || source.workspace_id === workspaceId)) setPostgresSelection(source);
+        }} />}
       <label htmlFor="analysis-question" className="sr-only">Analysis question</label>
       <textarea
         ref={inputRef}
@@ -245,7 +265,7 @@ export function WelcomeComposer({ initialWorkspaceId = null }: { initialWorkspac
           {openMenu === "add" && <div role="menu" aria-label="Add to analysis" className="absolute bottom-10 left-0 z-20 w-52 rounded-lg border border-border-strong bg-raised p-1.5 shadow-2xl">
             <button role="menuitem" type="button" onClick={() => { setOpenMenu(null); fileInputRef.current?.click(); }} className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs hover:bg-surface"><FilePlus2 className="size-4 text-muted-foreground" />Upload file</button>
             <button role="menuitem" type="button" onClick={() => { setOpenMenu(null); datasetInputRef.current?.click(); }} className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs hover:bg-surface"><Database className="size-4 text-muted-foreground" />Add dataset</button>
-            <button role="menuitem" type="button" disabled className="flex w-full cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs text-muted-foreground opacity-60"><Link2 className="size-4" />Connect source<span className="ml-auto text-[9px] uppercase">Soon</span></button>
+            <button role="menuitem" type="button" onClick={() => { setOpenMenu(null); setPostgresDialog("select"); }} className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs hover:bg-surface"><Link2 className="size-4 text-muted-foreground" />Data Sources</button>
             <button role="menuitem" type="button" disabled className="flex w-full cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs text-muted-foreground opacity-60"><Sparkles className="size-4" />Add skill<span className="ml-auto text-[9px] uppercase">Soon</span></button>
           </div>}
         </div>
@@ -258,7 +278,11 @@ export function WelcomeComposer({ initialWorkspaceId = null }: { initialWorkspac
           {openMenu === "workspace" && <div role="menu" aria-label="Select workspace" className="absolute bottom-10 left-0 z-20 w-52 rounded-lg border border-border-strong bg-raised p-1.5 shadow-2xl">
             <p className="px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Save analysis in</p>
             {workspaces.map((workspace) => <button key={workspace.id ?? "standalone"} type="button" role="menuitemradio" aria-checked={workspace.id === workspaceId}
-              onClick={() => { setWorkspaceId(workspace.id); setOpenMenu(null); }} className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs hover:bg-surface">
+              onClick={() => {
+                setWorkspaceId(workspace.id);
+                if (postgresSelection?.workspace_id && postgresSelection.workspace_id !== workspace.id) setPostgresSelection(null);
+                setOpenMenu(null);
+              }} className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs hover:bg-surface">
               <Folder className="size-4 text-muted-foreground" /><span className="truncate">{workspace.label}</span>{workspace.id === workspaceId && <Check className="ml-auto size-3.5 text-sage" />}
             </button>)}
           </div>}
