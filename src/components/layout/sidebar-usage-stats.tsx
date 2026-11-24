@@ -64,9 +64,6 @@ export function SidebarUsageStats({ compact = false, className }: SidebarUsageSt
           ))}
         </div>
       </section>
-      <p className="mt-3 px-0.5 text-xs leading-snug text-muted-foreground">
-        AI can make mistakes. Always verify important results.
-      </p>
     </div>
   );
 }

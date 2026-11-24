@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { LoaderCircle, PanelLeftClose, PanelLeftOpen, Plus, Settings, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { getActivity } from "@/lib/api";
@@ -17,6 +18,7 @@ import { useAuth } from "@/features/auth";
 
 export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
   const { user } = useAuth();
+  const [usageOpen, setUsageOpen] = useState(true);
   const collapsed = useUiStore((state) => state.sidebarCollapsed);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
   const setMobileOpen = useUiStore((state) => state.setMobileSidebarOpen);
@@ -121,21 +123,22 @@ export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
       </div>
 
       <div className="mt-auto border-t border-sidebar-border/40 pt-2.5">
-        <SidebarUsageStats compact={compact} />
+        {usageOpen && <SidebarUsageStats compact={compact} />}
         <div className={compact ? "flex flex-col items-center gap-2 py-2" : "flex items-center gap-2.5 px-3.5 py-2.5"}>
-          <Link
-            href="/login"
-            onClick={closeMobile}
-            aria-label={`${userName} account`}
+          <button
+            type="button"
+            onClick={() => setUsageOpen((open) => !open)}
+            aria-label={`${userName} usage statistics`}
+            aria-expanded={usageOpen}
             className="grid size-7 shrink-0 place-items-center rounded-full border border-border-strong bg-raised text-[10px] font-semibold text-foreground hover:border-foreground/30 transition-colors"
           >
             {userInitials}
-          </Link>
+          </button>
           {!compact && (
-            <div className="min-w-0 flex-1">
+            <button type="button" onClick={() => setUsageOpen((open) => !open)} aria-expanded={usageOpen} className="min-w-0 flex-1 text-left">
               <p className="text-xs font-medium text-foreground truncate">{userName}</p>
               <p className="text-[10px] text-muted-foreground truncate">{user?.role ?? "Personal workspace"}</p>
-            </div>
+            </button>
           )}
           <Button asChild variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-foreground">
             <Link href="/settings" onClick={closeMobile} aria-label="Settings">
