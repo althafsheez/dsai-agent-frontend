@@ -71,7 +71,8 @@ describe("dashboard page", () => {
     const user = userEvent.setup();
     renderPage("customer-health");
     await user.click(await screen.findByRole("button", { name: "Preview" }));
-    expect(screen.getByText(/Preview: this is how/)).toHaveTextContent("does not refresh");
+    expect(screen.getByText(/Snapshot of the data at/)).toBeVisible();
+    expect(screen.queryByRole("status", { name: "Dashboard status" })).not.toBeInTheDocument();
     expect(screen.queryByRole("complementary", { name: "Dashboard tools" })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Ask AI to change this dashboard" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Refresh data/ })).not.toBeInTheDocument();

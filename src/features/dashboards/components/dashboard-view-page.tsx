@@ -56,6 +56,8 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   const [syncedKey, setSyncedKey] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [unlocked, setUnlocked] = useState(false);
+  /** Preview reloads the data once when opened and then holds that moment; only a published dashboard keeps updating. */
+  const [previewAt, setPreviewAt] = useState<Date | null>(null);
   /** An AI answer waiting for the user: previewed on the canvas, applied only on Accept. */
   const [pending, setPending] = useState<{ widgets: DashboardWidget[]; slicers?: string[]; name?: string; notes: string[] } | null>(null);
   /** The user's edits to the code of tiles the AI added or changed, by widget id. */
@@ -275,17 +277,20 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
         <div className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur sm:px-6">
           <Link href="/dashboards" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="size-3.5" />Dashboards</Link>
           <div className="ml-auto flex items-center gap-2">
-            {editing ? <Button type="button" variant="outline" onClick={() => { setOpenId(null); setMode("preview"); }} disabled={!draft.length}><Eye />Preview</Button> : null}
+            {mode === "preview" && previewAt ? <span className="text-[11px] text-muted-foreground">Snapshot of the data at {previewAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span> : null}
+            {editing ? <Button type="button" variant="outline" onClick={() => { setOpenId(null); setPreviewAt(new Date()); void hydrated.refetch(); setMode("preview"); }} disabled={!draft.length}><Eye />Preview</Button> : null}
             {mode === "preview" ? <Button type="button" variant="outline" onClick={() => setMode("edit")}><Pencil />Back to editing</Button> : null}
             {mode !== "view" && isOwner && !published ? <Button type="button" onClick={() => setPublishOpen(true)} disabled={!draft.length || !name.trim()}><Radio />Publish</Button> : null}
           </div>
         </div>
         <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
-      <div role="status" aria-label="Dashboard status" className={cn("mb-3 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-xs", published ? "border-emerald-400/30 bg-emerald-400/5 text-emerald-200" : "bg-surface/50 text-muted-foreground")}>
-        {published ? <Radio className="size-3.5" /> : <Pencil className="size-3.5" />}
-        <span className="font-medium">{published ? "Published" : "Draft"}</span>
-        <DataStatus live={live} checkedAt={hydrated.checkedAt} dataChangedAt={hydrated.dataChangedAt} syncIssue={hydrated.syncIssue} />
-      </div>
+      {live ? (
+        <div role="status" aria-label="Dashboard status" className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-400/30 bg-emerald-400/5 px-3 py-2 text-xs text-emerald-200">
+          <Radio className="size-3.5" />
+          <span className="font-medium">Published</span>
+          <DataStatus live checkedAt={hydrated.checkedAt} dataChangedAt={hydrated.dataChangedAt} syncIssue={hydrated.syncIssue} />
+        </div>
+      ) : null}
       <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           {editing ? <input aria-label="Dashboard name" value={name} onChange={(event) => setName(event.target.value)} style={{ width: `${Math.min(Math.max(name.length, 10) + 3, 60)}ch` }} className="h-9 max-w-full rounded-md border bg-surface px-2.5 text-lg font-semibold outline-none focus:border-border-strong" /> : <h1 className="truncate text-xl font-semibold tracking-tight">{mode === "preview" ? name : dashboard.name}</h1>}
@@ -314,11 +319,6 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
           )}
         </div>
       </header>
-
-      {mode === "preview" ? (
-        <p role="status" className="mb-4 rounded-lg border border-sky-400/30 bg-sky-400/5 px-3 py-2 text-xs text-sky-200">Preview: this is how the dashboard will look. It shows the data as last saved and does not refresh. {published ? "" : "Publish it to make it live."}</p>
-      ) : null}
-      {mode === "view" && !published && canEdit ? <p role="status" className="mb-4 rounded-lg border px-3 py-2 text-xs text-muted-foreground">This is a draft. It does not refresh until you publish it.</p> : null}
 
       {isOwner ? (
         <ShareDialog
