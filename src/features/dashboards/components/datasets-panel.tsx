@@ -32,6 +32,8 @@ interface DatasetsPanelProps {
   view: "datasets" | "library";
   /** Switches the side panel to the Library list (from the Add dataset menu or the empty state). */
   onShowLibrary: () => void;
+  /** Back from the Library list to the datasets used. */
+  onHideLibrary?: () => void;
 }
 
 type Tab = "datasets" | "library";
@@ -47,7 +49,7 @@ function DatasetIcon() {
 const size = (dataset: DatasetLite) => `${(dataset.row_count ?? dataset.rows.length).toLocaleString()} rows · ${dataset.columns.length} columns`;
 
 /** The data this dashboard uses, and the Library to load more from, as two tabs. */
-export function DatasetsPanel({ attached, library, usage, onAttach, onDetach, onUploaded, onDrive, readOnly = false, canAdd = !readOnly, widgets = [], onEditWidget, view, onShowLibrary }: DatasetsPanelProps) {
+export function DatasetsPanel({ attached, library, usage, onAttach, onDetach, onUploaded, onDrive, readOnly = false, canAdd = !readOnly, widgets = [], onEditWidget, view, onShowLibrary, onHideLibrary }: DatasetsPanelProps) {
   const tab = view;
   const setTab = (next: Tab) => { if (next === "library") onShowLibrary(); };
   const [previewId, setPreviewId] = useState<string | null>(null);
@@ -106,7 +108,12 @@ export function DatasetsPanel({ attached, library, usage, onAttach, onDetach, on
         )
       ) : (
         <div className="pb-2">
-          {tab === "library" ? <p className="px-4 pt-2.5 pb-1.5 text-xs font-medium">Load from your Library <span className="font-normal tabular-nums text-muted-foreground">{available.length}</span></p> : null}
+          {tab === "library" ? (
+            <div className="flex items-center gap-2 px-4 pt-2.5 pb-1.5">
+              {onHideLibrary ? <button type="button" aria-label="Back to datasets" onClick={onHideLibrary} className="grid size-6 place-items-center rounded text-muted-foreground hover:bg-raised hover:text-foreground"><ChevronDown className="size-3.5 rotate-90" /></button> : null}
+              <p className="text-xs font-medium">Add from your Library <span className="font-normal tabular-nums text-muted-foreground">{available.length}</span></p>
+            </div>
+          ) : null}
           {available.length > 4 ? (
             <label className="relative mx-3 mb-1.5 block">
               <span className="sr-only">Search the Library</span>
@@ -123,7 +130,7 @@ export function DatasetsPanel({ attached, library, usage, onAttach, onDetach, on
                     <span className="block truncate text-xs text-foreground" title={dataset.name}>{dataset.name}</span>
                     <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{size(dataset)}</span>
                   </span>
-                  <button type="button" aria-label={`Load ${dataset.name}`} onClick={() => onAttach(dataset.id)} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-surface px-2 text-[11px] font-medium hover:border-border-strong">
+                  <button type="button" aria-label={`Load ${dataset.name}`} onClick={() => { onAttach(dataset.id); onHideLibrary?.(); }} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-surface px-2 text-[11px] font-medium hover:border-border-strong">
                     <Plus className="size-3" />Load
                   </button>
                 </li>
@@ -248,7 +255,8 @@ function DatasetPreview({ dataset, widgets, onBack, onEditWidget, onLoad }: { da
 }
 
 /** Read-only "about this tile": the datasets and tables it reads, the columns it uses, and its query or script. */
-export function WidgetInfo({ widget, datasets, onClose, onEdit }: { widget: DashboardWidget; datasets: DatasetLite[]; onClose: () => void; onEdit?: () => void }) {
+export function WidgetInfo({ widget, datasets, onClose, onSaveCode }: { widget: DashboardWidget; datasets: DatasetLite[]; onClose: () => void; onSaveCode?: (code: string) => void }) {
+  const [draftCode, setDraftCode] = useState<string | null>(null);
   const ids = usedDatasetIds([widget]);
   const tables = useQuery({ queryKey: ["sql-tables", ids], queryFn: () => getSqlTables(ids), enabled: ids.length > 0, staleTime: 60_000, retry: false });
   const first = tables.data?.find((entry) => entry.dataset_id === widget.dataset_id)?.table;
@@ -283,9 +291,16 @@ export function WidgetInfo({ widget, datasets, onClose, onEdit }: { widget: Dash
         <div>
           <p className={label}>{language === "Python" ? "Python script" : language === "DAX" ? "DAX measure" : widget.sql ? "SQL query" : "Query (SQL equivalent)"}</p>
           {widget.request ? <p className="mb-1 text-[11px] text-muted-foreground">Asked for: {widget.request}</p> : null}
-          <pre aria-label="Tile code" className="max-h-80 overflow-auto rounded-md border bg-background/60 p-2 font-mono text-[10px] leading-relaxed text-foreground/90">{code || "No query."}</pre>
+          {draftCode !== null ? (
+            <textarea aria-label="Edit tile code" value={draftCode} onChange={(event) => setDraftCode(event.target.value)} spellCheck={false} rows={Math.min(16, Math.max(4, draftCode.split("\n").length + 1))} className="w-full resize-y rounded-md border bg-background/60 p-2 font-mono text-[11px] leading-relaxed outline-none focus:border-border-strong" />
+          ) : <pre aria-label="Tile code" className="max-h-80 overflow-auto rounded-md border bg-background/60 p-2 font-mono text-[10px] leading-relaxed text-foreground/90">{code || "No query."}</pre>}
         </div>
-        {onEdit ? <button type="button" onClick={onEdit} className="inline-flex items-center gap-1.5 rounded-md border bg-surface px-2.5 py-1.5 text-xs hover:border-border-strong"><Pencil className="size-3.5" />Change the query</button> : null}
+        {onSaveCode && draftCode !== null ? (
+          <div className="flex gap-2">
+            <button type="button" onClick={() => { onSaveCode(draftCode); setDraftCode(null); }} className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 text-xs font-medium text-background">Apply</button>
+            <button type="button" onClick={() => setDraftCode(null)} className="rounded-md border bg-surface px-2.5 py-1.5 text-xs hover:border-border-strong">Cancel</button>
+          </div>
+        ) : onSaveCode ? <button type="button" onClick={() => setDraftCode(code)} className="inline-flex items-center gap-1.5 rounded-md border bg-surface px-2.5 py-1.5 text-xs hover:border-border-strong"><Pencil className="size-3.5" />Change the {language === "Python" ? "script" : language === "DAX" ? "formula" : "query"}</button> : null}
       </div>
     </section>
   );

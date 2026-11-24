@@ -67,7 +67,7 @@ export function QuickEdit({ widget, dataset, layout, onLayout, onChange, onMore,
           </select>
         </label>
       ) : null}
-      <button type="button" onClick={onMore} className="flex w-full items-center justify-center gap-1.5 rounded-md border bg-surface py-1.5 text-[11px] text-muted-foreground hover:border-border-strong hover:text-foreground"><PanelRight className="size-3.5" />Query, data and more</button>
+      <button type="button" onClick={onMore} className="flex w-full items-center justify-center gap-1.5 rounded-md border bg-surface py-1.5 text-[11px] text-muted-foreground hover:border-border-strong hover:text-foreground"><PanelRight className="size-3.5" />Query and data (Info)</button>
     </div>
   );
 }

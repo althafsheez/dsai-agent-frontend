@@ -210,6 +210,26 @@ class PostgresConnector:
         quote = self.engine.dialect.identifier_preparer.quote_identifier
         return self.execute_readonly_query(f"SELECT * FROM {quote(schema)}.{quote(table)}", limit)
 
+    def export_table(self, schema: str, table: str, max_rows: int, max_bytes: int = 20_000_000) -> QueryResult:
+        """A whole table over one read-only connection, for importing it as a dataset (row and size capped)."""
+        quote = self.engine.dialect.identifier_preparer.quote_identifier
+        with self._reader() as connection:
+            self._table_oid(connection, schema, table)
+            raw = connection.execution_options(no_parameters=True)
+            source = f"SELECT * FROM {quote(schema)}.{quote(table)}"
+            with raw.exec_driver_sql(f"{source} LIMIT 0") as result:
+                columns = list(result.keys())
+            rows: list[list[object]] = []
+            size = 0
+            query = f"SELECT pg_catalog.row_to_json(t)::pg_catalog.text FROM ({source} LIMIT {int(max_rows) + 1}) AS t"
+            with raw.execution_options(stream_results=True, max_row_buffer=500).exec_driver_sql(query) as result:
+                for encoded in result.scalars():
+                    size += len(encoded)
+                    if len(rows) == max_rows or size > max_bytes:
+                        return QueryResult(columns=columns, rows=rows, truncated=True)
+                    rows.append(list(json.loads(encoded, parse_float=str, parse_int=_exact_integer).values()))
+            return QueryResult(columns=columns, rows=rows, truncated=False)
+
     def execute_readonly_query(self, sql: str, limit: int) -> QueryResult:
         normalized, tables = validate_sql(sql, self.schemas)
         with self._reader() as connection:

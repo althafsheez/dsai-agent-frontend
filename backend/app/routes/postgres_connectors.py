@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import csv
+import io
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request, Response
+from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -14,8 +18,10 @@ from ..connectors.service import ConnectionService, owned_connections, require_c
 from ..connectors.security import require_local_postgres
 from ..dependencies import get_current_user, get_db
 from ..errors import APIError
-from ..models import DataConnection, User, utc_now
+from ..models import DataConnection, LibraryEntry, User, utc_now
+from ..services.resource_uploads import register_upload
 from ..services.records import require_chat
+from .resources import _summary
 
 router = APIRouter(tags=["connectors"])
 
@@ -161,3 +167,34 @@ async def refresh_schema(connection_id: ConnectionID, user: Actor, db: DB, conne
 async def run_query(connection_id: ConnectionID, data: QueryRequest, user: Actor, db: DB, connections: Connections) -> QueryResult:
     config = connections.credentials(require_connection(db, user, connection_id))
     return await connections.perform(config, lambda adapter: adapter.execute_readonly_query(data.sql, data.limit))
+
+
+class TableImport(BaseModel):
+    schema_name: Identifier
+    table: Identifier
+
+
+MAX_IMPORT_ROWS = 20_000
+
+
+@router.post("/api/connectors/postgresql/{connection_id}/import")
+async def import_table(connection_id: ConnectionID, data: TableImport, request: Request, user: Actor, db: DB, connections: Connections) -> dict:
+    """Copies a table into the Library as a CSV dataset so dashboards can use it (read-only, up to 20,000 rows)."""
+    config = connections.credentials(require_connection(db, user, connection_id))
+    result = await connections.perform(config, lambda adapter: adapter.export_table(data.schema_name, data.table, MAX_IMPORT_ROWS))
+    columns, rows = result.columns, result.rows
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(columns)
+    writer.writerows([["" if cell is None else cell for cell in row] for row in rows])
+    filename = f"{data.table}.csv" if data.schema_name == "public" else f"{data.schema_name}.{data.table}.csv"
+    resource, _ = register_upload(
+        db, request.app.state.storage, (filename, "text/csv", buffer.getvalue().encode()),
+        user_id=user.id, scope_type="library", scope_id=user.id, message_id=None,
+        client_upload_id=f"pg:{connection_id}:{data.schema_name}.{data.table}:{uuid.uuid4().hex[:8]}",
+    )
+    resource.metadata_json = {**resource.metadata_json, "source_connector": "postgresql", "postgres_table": f"{data.schema_name}.{data.table}"}
+    db.add(LibraryEntry(user_id=user.id, resource_id=resource.id))
+    db.commit()
+    db.refresh(resource)
+    return {"resource": _summary(resource), "rows": len(rows), "truncated": result.truncated}

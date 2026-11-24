@@ -229,6 +229,11 @@ async def _stream_reply(provider: LLMProvider, prompt: str, model_id: str, effor
     return reply
 
 
+def _busy(exc: ProviderError) -> bool:
+    """The provider was overloaded or slow (503, 429, 5xx, timeout): worth waiting and asking again."""
+    return getattr(exc, "code", "") in ("unavailable", "rate_limit", "service_error", "timeout")
+
+
 async def _ask(provider: LLMProvider, prompt: str, model_id: str, effort: str | None) -> Any:
     """Up to 3 attempts: Gemini intermittently fails calls (or stalls without answering) that succeed when repeated."""
     last: Exception | None = None
@@ -242,8 +247,8 @@ async def _ask(provider: LLMProvider, prompt: str, model_id: str, effort: str | 
         except (ProviderError, ValueError) as exc:
             last = exc
             logger.warning("Dashboard AI attempt failed: %s (%s)", exc, repr(exc.__cause__)[:300] if exc.__cause__ else "no cause")
-            if exc.__cause__ is not None and attempt < 2:
-                await asyncio.sleep(2 * (attempt + 1))  # Gemini "high demand" spikes are short; waiting beats three instant retries.
+            if (exc.__cause__ is not None or _busy(exc)) and attempt < 2:
+                await asyncio.sleep(4 * (attempt + 1))  # Gemini "high demand" (503) spikes are short; waiting beats instant retries.
     assert last is not None
     raise last
 
@@ -354,8 +359,8 @@ async def write_script(provider: LLMProvider, request_text: str, title: str, loa
         except ProviderError as exc:
             last = f"The AI was unavailable: {exc}"
             logger.warning("Dashboard script attempt failed: %s (%s)", exc, repr(exc.__cause__)[:300] if exc.__cause__ else "no cause")
-            if exc.__cause__ is not None and attempt < 2:
-                await asyncio.sleep(2 * (attempt + 1))
+            if (exc.__cause__ is not None or _busy(exc)) and attempt < 2:
+                await asyncio.sleep(4 * (attempt + 1))
             continue
         script = _script_from(reply)[:MAX_SCRIPT + 1]
         try:

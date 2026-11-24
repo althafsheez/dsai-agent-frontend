@@ -59,9 +59,9 @@ describe("dashboard page", () => {
     expect(await screen.findByRole("textbox", { name: "Dashboard name" })).toHaveValue("Customer Health");
     const tools = screen.getByRole("complementary", { name: "Dashboard tools" });
     expect(within(tools).getByRole("tab", { name: /Datasets/ })).toHaveAttribute("aria-selected", "true");
-    expect(within(tools).getByRole("tab", { name: /Library/ })).toBeVisible();
+    expect(within(tools).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Datasets", "Info"]);
     expect(await within(tools).findByText("orders.csv")).toBeVisible();
-    expect(screen.queryByRole("textbox", { name: "Ask AI to change this dashboard" })).not.toBeInTheDocument();
+    expect(within(within(tools).getByLabelText("Edit with AI")).getByRole("textbox", { name: "Ask AI to change this dashboard" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Preview" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
     expect(screen.getByRole("button", { name: /Save draft/ })).toBeDisabled();
@@ -94,7 +94,7 @@ describe("dashboard page", () => {
     expect(await within(tools).findByText("orders.csv")).toBeVisible();
     expect(within(tools).queryByRole("button", { name: "Edit dashboard" })).not.toBeInTheDocument();
     expect(within(tools).getByRole("button", { name: /Add dataset/ })).toBeVisible();
-    expect(screen.queryByRole("textbox", { name: "Ask AI to change this dashboard" })).not.toBeInTheDocument();
+    expect(within(tools).getByRole("textbox", { name: "Ask AI to change this dashboard" })).toBeVisible();
     expect(screen.getByRole("status", { name: "Dashboard status" })).toHaveTextContent("Published");
   });
 
@@ -103,7 +103,6 @@ describe("dashboard page", () => {
     renderPage("live-one");
     expect(await screen.findByRole("heading", { name: "Live One" })).toBeVisible();
     expect(screen.getByRole("status", { name: "Dashboard status" })).toHaveTextContent(/· live/);
-    expect(screen.queryByRole("textbox", { name: "Ask AI to change this dashboard" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Edit" }));
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Done" }));
@@ -111,10 +110,11 @@ describe("dashboard page", () => {
     expect(screen.queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
   });
 
-  it("opens the Edit panel without changing the dashboard; only an AI prompt does", async () => {
-    const user = userEvent.setup();
+  it("has the AI chat box under the side panel tabs; it does not change the dashboard on its own", async () => {
     renderPage("live-one");
-    await user.click(await screen.findByRole("tab", { name: /Edit/ }));
+    expect(await screen.findByRole("heading", { name: "Live One" })).toBeVisible();
+    expect(screen.queryByRole("tab", { name: /Edit/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("separator", { name: "Resize the AI chat box" })).toBeInTheDocument();
     const tools = screen.getByRole("complementary", { name: "Dashboard tools" });
     expect(await within(tools).findByRole("textbox", { name: "Ask AI to change this dashboard" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Edit" })).toBeVisible();
@@ -133,11 +133,10 @@ describe("dashboard page", () => {
     expect(within(about).getByRole("button", { name: /Change the query/ })).toBeVisible();
   });
 
-  it("keeps tiles locked on the Edit tab; the header Edit unlocks them and turns into Done", async () => {
+  it("keeps tiles locked until the header Edit unlocks them; Edit turns into Done", async () => {
     const user = userEvent.setup();
     renderPage("customer-health");
-    await user.click(await screen.findByRole("tab", { name: /Edit/ }));
-    const tools = screen.getByRole("complementary", { name: "Dashboard tools" });
+    const tools = await screen.findByRole("complementary", { name: "Dashboard tools" });
     expect(await within(tools).findByRole("list", { name: "Starting prompts" })).toBeVisible();
     expect(within(tools).getByRole("textbox", { name: "Ask AI to change this dashboard" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Move Revenue by region" })).not.toBeInTheDocument();
@@ -149,20 +148,19 @@ describe("dashboard page", () => {
     expect(screen.getByRole("button", { name: "Edit" })).toBeVisible();
   });
 
-  it("opens a widget to show its tables and query, and edits it as SQL", async () => {
+  it("edits a tile's query by hand from its Info: it becomes a SQL tile", async () => {
     const user = userEvent.setup();
     renderPage("customer-health");
     await user.click(await screen.findByRole("button", { name: "Edit" }));
     await user.click(await screen.findByRole("button", { name: "Edit Revenue by region" }));
-    const editor = await screen.findByRole("region", { name: "Edit widget" });
-    expect(await within(editor).findByText("orders")).toBeVisible();
-    expect(within(editor).getByRole("combobox", { name: "Category column" })).toHaveValue("region");
-    await user.click(within(editor).getByRole("button", { name: "Edit as SQL" }));
-    const sql = within(editor).getByRole("textbox", { name: "SQL query" });
+    await user.click(await screen.findByRole("button", { name: /Query and data/ }));
+    const about = await screen.findByRole("region", { name: "About Revenue by region" });
+    await user.click(within(about).getByRole("button", { name: /Change the query/ }));
+    const sql = within(about).getByRole("textbox", { name: "Edit tile code" });
     expect((sql as HTMLTextAreaElement).value).toContain('FROM "orders"');
     await user.clear(sql);
     await user.type(sql, "SELECT region AS name, SUM(revenue) AS value FROM orders GROUP BY region");
-    await user.click(within(editor).getByRole("button", { name: "Run & apply" }));
+    await user.click(within(about).getByRole("button", { name: "Apply" }));
     expect(screen.getByRole("button", { name: /Save draft/ })).toBeEnabled();
   });
 
@@ -179,7 +177,7 @@ describe("dashboard page", () => {
   it("lets the owner open the share dialog from the published view", async () => {
     const user = userEvent.setup();
     renderPage("live-one");
-    await user.click(await screen.findByRole("button", { name: /Share/ }));
+    await user.click(await screen.findByRole("button", { name: "Share" }));
     expect(await screen.findByRole("combobox", { name: "General access" })).toHaveValue("published");
     expect(screen.getByRole("combobox", { name: "Add person" })).toBeVisible();
   });

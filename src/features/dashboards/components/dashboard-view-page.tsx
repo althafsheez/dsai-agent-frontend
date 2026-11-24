@@ -8,7 +8,7 @@ import type { CSSProperties } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSqlTables } from "@/lib/api";
 import { generatedSql } from "../logic/sql";
-import { ArrowLeft, BookOpen, Check, Database, Download, Info, Eye, LayoutDashboard, LoaderCircle, Merge, Pencil, Radio, Save, Share2, Trash2, Undo2, Wand2 } from "lucide-react";
+import { ArrowLeft, Check, Database, Download, Info, Eye, LayoutDashboard, LoaderCircle, Merge, Pencil, Radio, Save, Share2, Trash2, Undo2, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { DriveBrowserDialog } from "@/features/connectors/components/drive-browser-dialog";
@@ -31,7 +31,6 @@ import { DatasetsPanel, WidgetInfo } from "./datasets-panel";
 import { GridCanvas } from "./grid-canvas";
 import { HandEdits } from "./hand-edits";
 import { Section } from "./section";
-import { WidgetEditor } from "./widget-editor";
 import { downloadJson, fileSafe } from "@/lib/download";
 import { ShareDialog } from "./share-dialog";
 
@@ -68,7 +67,9 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   /** The tile whose details (data, tables, query) are shown while not editing. */
   const [infoId, setInfoId] = useState<string | null>(null);
   /** Which view the right panel shows. */
-  const [side, setSide] = useState<"datasets" | "library" | "info" | "edit">("datasets");
+  const [side, setSide] = useState<"datasets" | "info">("datasets");
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [chatHeight, setChatHeight] = useState(280);
   const [fill, setFill] = useState<{ text: string; n: number }>();
   const [panelWidth, setPanelWidth] = usePanelWidth();
   const [name, setName] = useState("");
@@ -127,7 +128,6 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   const tools = editing && unlocked;
   const changes = editing ? describeChanges(baseline, draft) : [];
   const usage = Object.fromEntries(attached.map((id) => [id, draft.filter((widget) => usedDatasetIds([widget]).includes(id)).length]));
-  const openWidget = editing ? draft.find((widget) => widget.id === openId) : undefined;
   const infoWidget = widgets.find((widget) => widget.id === infoId);
   const datasetFor = (widget: DashboardWidget) => datasets.find((dataset) => dataset.id === widget.dataset_id);
   const writeFields = (overrides: Partial<Pick<Dashboard, "status" | "pinned" | "refresh_minutes">> & { widgets?: DashboardWidget[]; name?: string; slicers?: string[]; datasetIds?: string[]; shares?: Array<{ user_id: string; role: "viewer" | "editor" }> }) => ({
@@ -193,6 +193,9 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
     const table = sqlTables.data?.find((entry) => entry.dataset_id === widget.dataset_id)?.table;
     return { language: "SQL" as const, code: table ? generatedSql(widget, table) : "" };
   };
+  /** A tile with hand-edited code: DAX stays DAX, a script stays Python, anything else becomes a SQL tile. */
+  const withCodeOf = (widget: DashboardWidget, code: string): DashboardWidget =>
+    widget.dax !== undefined ? { ...widget, dax: code.split("\n\n-- by ")[0] } : widget.script !== undefined ? { ...widget, script: code } : { ...widget, sql: code };
   /** The suggestion with the user's code edits folded in: an edited visual query becomes a SQL tile. */
   const withCode = (widget: DashboardWidget): DashboardWidget => {
     const edited = pendingCode[widget.id];
@@ -219,7 +222,8 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
   }
 
   /** Opens a widget's editor (code included) from anywhere, e.g. the dataset panel. */
-  const editWidget = (id: string) => { if (mode !== "edit") setMode("edit"); setUnlocked(true); setSide("edit"); setOpenId(id); };
+  /** Opens a tile's details (data, tables and its query, editable when editing) in the Info tab. */
+  const editWidget = (id: string) => { if (mode !== "edit") setMode("edit"); setUnlocked(true); setInfoId(id); setSide("info"); };
   /** The header Edit/Done toggle: Edit unlocks the tiles; Done locks them again (and, when published, saves and goes back to the live view). */
   const startEditing = () => { if (mode !== "edit") setMode("edit"); setUnlocked(true); };
   const finishEditing = () => {
@@ -256,13 +260,13 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
             widgets={suggested ?? widgets} layouts={suggested ? resolveLayouts(suggested) : layouts} unlocked={tools && !suggested} onLayouts={setLayouts}
             render={(widget, handle) => (
               <div className="relative h-full">
-                <WidgetCard widget={widget} filters={filters} onSelect={() => undefined} dataset={datasetFor(widget)} editable={tools} handle={handle} onChange={change} onRemove={() => { setDraft(draft.filter((item) => item.id !== widget.id)); if (openId === widget.id) setOpenId(null); }} onOpen={tools ? () => { setOpenId(widget.id); setSide("edit"); } : panel ? () => { setInfoId(widget.id); setSide("info"); } : undefined} onQuickEdit={tools ? () => setQuickId(widget.id) : undefined} active={tools && openId === widget.id} />
+                <WidgetCard widget={widget} filters={filters} onSelect={() => undefined} dataset={datasetFor(widget)} editable={tools} handle={handle} onChange={change} onRemove={() => { setDraft(draft.filter((item) => item.id !== widget.id)); if (openId === widget.id) setOpenId(null); }} onOpen={tools ? () => setQuickId(widget.id) : panel ? () => { setInfoId(widget.id); setSide("info"); } : undefined} onQuickEdit={tools ? () => setQuickId(widget.id) : undefined} active={tools && openId === widget.id} />
                 {tools && quickId === widget.id && layouts[widget.id] ? (
                   <QuickEdit
                     widget={widget} dataset={datasetFor(widget)} layout={layouts[widget.id]}
                     onLayout={(next) => setLayouts(settle({ ...layouts, [widget.id]: next }, widget.id))}
                     onChange={change}
-                    onMore={() => { setQuickId(null); setOpenId(widget.id); }}
+                    onMore={() => { setQuickId(null); editWidget(widget.id); }}
                     onClose={() => setQuickId(null)}
                   />
                 ) : null}
@@ -370,50 +374,72 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
         <aside aria-label="Dashboard tools" style={{ "--panel-w": `${panelWidth}px` } as CSSProperties} className="relative flex w-full shrink-0 flex-col border-t bg-sidebar text-sidebar-foreground xl:h-full xl:w-[var(--panel-w)] xl:border-l xl:border-t-0">
           <PanelResizer width={panelWidth} onWidth={setPanelWidth} />
           <div role="tablist" aria-label="Side panel" className="flex shrink-0 gap-0.5 border-b p-2">
-            {([["datasets", "Datasets", Database], ...(canEdit ? [["library", "Library", BookOpen]] : []), ["info", "Info", Info], ...(canEdit ? [["edit", "Edit", Pencil]] : [])] as Array<["datasets" | "library" | "info" | "edit", string, typeof Pencil]>).map(([value, label, Icon]) => (
-              <button key={value} type="button" role="tab" aria-selected={side === value} onClick={() => setSide(value)}
+            {([["datasets", "Datasets", Database], ["info", "Info", Info]] as Array<["datasets" | "info", string, typeof Info]>).map(([value, label, Icon]) => (
+              <button key={value} type="button" role="tab" aria-selected={side === value} onClick={() => { setSide(value); setLibraryOpen(false); }}
                 className={cn("flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-xs transition-colors", side === value ? "bg-raised font-medium text-foreground" : "text-muted-foreground hover:bg-raised/50 hover:text-foreground")}>
                 <Icon className="size-3.5" />{label}
               </button>
             ))}
           </div>
-          {canEdit && side === "edit" ? (
-            <>
-              <div className="flex min-h-0 flex-1 flex-col xl:overflow-y-auto">
-                {openWidget ? (
-                  <WidgetEditor widget={openWidget} layout={layouts[openWidget.id]} onLayout={(next) => setLayouts(settle({ ...layouts, [openWidget.id]: next }, openWidget.id))} datasets={attachedDatasets.length ? attachedDatasets : datasets} onChange={change} onRemove={() => { setDraft(draft.filter((item) => item.id !== openWidget.id)); setOpenId(null); }} onClose={() => setOpenId(null)} />
-                ) : (
-                  <>
-                    {pending ? (
-                      <div aria-label="AI suggestion" className="space-y-3 p-3">
-                        <p className="text-xs font-medium">The AI suggests · it is shown on the dashboard. Edit the code if needed, then accept.</p>
-                        {pending.notes.length ? <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-muted-foreground">{pending.notes.map((note, index) => <li key={index}>{note}</li>)}</ul> : null}
-                        {removedCount ? <p className="text-[11px] text-amber-300">Removes {removedCount} tile{removedCount === 1 ? "" : "s"}.</p> : null}
-                        {touched.map((widget) => {
-                          const { language, code } = codeOf(widget);
-                          return (
-                            <div key={widget.id} className="space-y-1">
-                              <p className="flex items-center gap-2 text-[11px]"><span className="min-w-0 flex-1 truncate font-medium">{widget.title}</span><span className="rounded border px-1 text-[9px] uppercase text-muted-foreground">{language}</span></p>
-                              <textarea aria-label={`Code for ${widget.title}`} value={pendingCode[widget.id] ?? code} onChange={(event) => setPendingCode({ ...pendingCode, [widget.id]: event.target.value })} spellCheck={false} rows={Math.min(10, Math.max(3, (pendingCode[widget.id] ?? code).split("\n").length + 1))} className="w-full resize-y rounded-md border bg-background/60 p-2 font-mono text-[11px] leading-relaxed outline-none focus:border-border-strong" />
-                            </div>
-                          );
-                        })}
-                        <div className="flex gap-2">
-                          <Button type="button" size="sm" onClick={acceptSuggestion}>Accept</Button>
-                          <Button type="button" size="sm" variant="outline" onClick={() => setPending(null)}>Discard</Button>
+          {(
+            <div className="min-h-0 flex-1 xl:overflow-y-auto">
+              {side === "info" ? (
+                <>
+                  {infoWidget
+                    ? <WidgetInfo key={infoWidget.id} widget={infoWidget} datasets={datasets} onClose={() => setInfoId(null)} onSaveCode={canEdit ? (code) => { if (mode !== "edit") setMode("edit"); change(withCodeOf(infoWidget, code)); } : undefined} />
+                    : <p className="border-b px-4 py-6 text-center text-xs text-muted-foreground">Click a tile to see the data, tables and query behind it.</p>}
+                  <MeasuresPanel
+                    measures={measures} datasets={attachedDatasets.length ? attachedDatasets : datasets.slice(0, 1)} filters={filters}
+                    onChange={canEdit ? (next) => { if (mode !== "edit") setMode("edit"); setMeasures(next); } : undefined}
+                    onAddTile={canEdit ? addMeasureTile : undefined}
+                    ai={{ ready: ai.ready, busy: ai.measure.isPending, error: messageOf(ai.measure.error) ?? undefined, write: (request) => ai.measure.mutateAsync({ request, datasetIds: attachedIds.length ? attachedIds : datasets.slice(0, 1).map((dataset) => dataset.id), measures }) }}
+                  />
+                </>
+              ) : mode === "view" ? (
+                <DatasetsPanel view={libraryOpen ? "library" : "datasets"} onShowLibrary={() => setLibraryOpen(true)} onHideLibrary={() => setLibraryOpen(false)} readOnly canAdd={canEdit} widgets={draft} onEditWidget={canEdit ? editWidget : undefined} attached={attachedDatasets} library={datasets} usage={usage} onAttach={(id) => addDatasets([id])} onDetach={() => undefined} onUploaded={() => void attachNew()} onDrive={() => setDriveOpen(true)} />
+              ) : (
+                <DatasetsPanel
+                  view={libraryOpen ? "library" : "datasets"} onShowLibrary={() => setLibraryOpen(true)} onHideLibrary={() => setLibraryOpen(false)}
+                  widgets={draft} onEditWidget={editWidget}
+                  attached={attachedDatasets} library={datasets} usage={usage}
+                  onAttach={(id) => attach([id])} onDetach={(id) => setAttachedIds((items) => items.filter((item) => item !== id))}
+                  onUploaded={() => void attachNew()} onDrive={() => setDriveOpen(true)}
+                />
+              )}
+            </div>
+          )}
+          {canEdit ? (
+            <div aria-label="Edit with AI" style={{ height: chatHeight }} className="relative flex shrink-0 flex-col border-t">
+              <HeightResizer height={chatHeight} onHeight={setChatHeight} />
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                {pending ? (
+                  <div aria-label="AI suggestion" className="space-y-3 p-3">
+                    <p className="text-xs font-medium">The AI suggests · it is shown on the dashboard. Edit the code if needed, then accept.</p>
+                    {pending.notes.length ? <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-muted-foreground">{pending.notes.map((note, index) => <li key={index}>{note}</li>)}</ul> : null}
+                    {removedCount ? <p className="text-[11px] text-amber-300">Removes {removedCount} tile{removedCount === 1 ? "" : "s"}.</p> : null}
+                    {touched.map((widget) => {
+                      const { language, code } = codeOf(widget);
+                      return (
+                        <div key={widget.id} className="space-y-1">
+                          <p className="flex items-center gap-2 text-[11px]"><span className="min-w-0 flex-1 truncate font-medium">{widget.title}</span><span className="rounded border px-1 text-[9px] uppercase text-muted-foreground">{language}</span></p>
+                          <textarea aria-label={`Code for ${widget.title}`} value={pendingCode[widget.id] ?? code} onChange={(event) => setPendingCode({ ...pendingCode, [widget.id]: event.target.value })} spellCheck={false} rows={Math.min(10, Math.max(3, (pendingCode[widget.id] ?? code).split("\n").length + 1))} className="w-full resize-y rounded-md border bg-background/60 p-2 font-mono text-[11px] leading-relaxed outline-none focus:border-border-strong" />
                         </div>
-                      </div>
-                    ) : (
-                      <ul aria-label="Starting prompts" className="flex flex-1 flex-col justify-center gap-1.5 p-3">
-                        {tilePrompts(attachedDatasets[0] ?? datasets[0]).slice(0, 3).map((prompt) => (
-                          <li key={prompt}><button type="button" onClick={() => setFill({ text: prompt, n: Date.now() })} className="w-full rounded-lg border bg-surface/60 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground">{prompt}</button></li>
-                        ))}
-                      </ul>
-                    )}
-                  </>
+                      );
+                    })}
+                    <div className="flex gap-2">
+                      <Button type="button" size="sm" onClick={acceptSuggestion}>Accept</Button>
+                      <Button type="button" size="sm" variant="outline" onClick={() => setPending(null)}>Discard</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <ul aria-label="Starting prompts" className="flex flex-1 flex-col justify-center gap-1.5 p-3">
+                    {tilePrompts(attachedDatasets[0] ?? datasets[0]).slice(0, 3).map((prompt) => (
+                      <li key={prompt}><button type="button" onClick={() => setFill({ text: prompt, n: Date.now() })} className="w-full rounded-lg border bg-surface/60 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground">{prompt}</button></li>
+                    ))}
+                  </ul>
                 )}
               </div>
-              <div className="shrink-0 border-t p-3">
+              <div className="shrink-0 p-3 pt-2">
                 {notes.length ? <div className="mb-2 max-h-48 overflow-y-auto"><AiNotes notes={notes} title="What the AI did" /></div> : null}
                 <AskAiBar
                   compact
@@ -429,34 +455,8 @@ export function DashboardViewPage({ dashboardId }: { dashboardId: string }) {
                 />
                 {ai.review.isError ? <p role="alert" className="mt-2 text-xs text-red-300">The AI check failed. Try again.</p> : null}
               </div>
-            </>
-          ) : (
-            <div className="min-h-0 flex-1 xl:overflow-y-auto">
-              {side === "info" ? (
-                <>
-                  {infoWidget
-                    ? <WidgetInfo widget={infoWidget} datasets={datasets} onClose={() => setInfoId(null)} onEdit={canEdit ? () => editWidget(infoWidget.id) : undefined} />
-                    : <p className="border-b px-4 py-6 text-center text-xs text-muted-foreground">Click a tile to see the data, tables and query behind it.</p>}
-                  <MeasuresPanel
-                    measures={measures} datasets={attachedDatasets.length ? attachedDatasets : datasets.slice(0, 1)} filters={filters}
-                    onChange={canEdit ? (next) => { if (mode !== "edit") setMode("edit"); setMeasures(next); } : undefined}
-                    onAddTile={canEdit ? addMeasureTile : undefined}
-                    ai={{ ready: ai.ready, busy: ai.measure.isPending, error: messageOf(ai.measure.error) ?? undefined, write: (request) => ai.measure.mutateAsync({ request, datasetIds: attachedIds.length ? attachedIds : datasets.slice(0, 1).map((dataset) => dataset.id), measures }) }}
-                  />
-                </>
-              ) : mode === "view" ? (
-                <DatasetsPanel view={side === "library" ? "library" : "datasets"} onShowLibrary={() => setSide("library")} readOnly canAdd={canEdit} widgets={draft} onEditWidget={canEdit ? editWidget : undefined} attached={attachedDatasets} library={datasets} usage={usage} onAttach={(id) => addDatasets([id])} onDetach={() => undefined} onUploaded={() => void attachNew()} onDrive={() => setDriveOpen(true)} />
-              ) : (
-                <DatasetsPanel
-                  view={side === "library" ? "library" : "datasets"} onShowLibrary={() => setSide("library")}
-                  widgets={draft} onEditWidget={editWidget}
-                  attached={attachedDatasets} library={datasets} usage={usage}
-                  onAttach={(id) => attach([id])} onDetach={(id) => setAttachedIds((items) => items.filter((item) => item !== id))}
-                  onUploaded={() => void attachNew()} onDrive={() => setDriveOpen(true)}
-                />
-              )}
             </div>
-          )}
+          ) : null}
         </aside>
       ) : null}
       <DriveBrowserDialog open={driveOpen} onOpenChange={setDriveOpen} target={{ scopeType: "library", scopeId: "library", label: "your Library" }} onReauth={() => router.push("/extensions")} onImported={() => void attachNew()} />
@@ -483,6 +483,22 @@ function usePanelWidth(): [number, (width: number) => void] {
 }
 
 /** Drag the panel's left edge to make it wider or narrower; arrow keys work too. Wide screens only. */
+/** Drag the top edge of the AI chat box to make it taller or shorter. */
+function HeightResizer({ height, onHeight }: { height: number; onHeight: (height: number) => void }) {
+  const start = useRef<{ y: number; height: number } | null>(null);
+  const clamp = (value: number) => onHeight(Math.round(Math.min(Math.max(value, 140), window.innerHeight * 0.75)));
+  return (
+    <div
+      role="separator" aria-orientation="horizontal" aria-label="Resize the AI chat box" aria-valuenow={height} tabIndex={0}
+      onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); start.current = { y: event.clientY, height }; }}
+      onPointerMove={(event) => { if (start.current) clamp(start.current.height + start.current.y - event.clientY); }}
+      onPointerUp={() => { start.current = null; }} onPointerCancel={() => { start.current = null; }}
+      onKeyDown={(event) => { if (event.key === "ArrowUp") clamp(height + 20); if (event.key === "ArrowDown") clamp(height - 20); }}
+      className="absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize touch-none after:absolute after:inset-x-0 after:top-1/2 after:h-px after:-translate-y-1/2 after:bg-transparent hover:after:bg-sage/60 focus-visible:outline-none focus-visible:after:bg-sage"
+    />
+  );
+}
+
 function PanelResizer({ width, onWidth }: { width: number; onWidth: (width: number) => void }) {
   const start = useRef<{ x: number; width: number } | null>(null);
   return (

@@ -132,6 +132,11 @@ export function getPostgresTables(id: string, schema: string, search: string): P
   return requestJson(`${connectionPath(id)}/tables?${params}`);
 }
 
+/** Copies a PostgreSQL table into the Library as a CSV dataset (read-only; dashboards then use it like any file). */
+export function importPostgresTable(id: string, schema: string, table: string): Promise<{ resource: { id: string; name?: string }; rows: number }> {
+  return requestJson(`${connectionPath(id)}/import`, { method: "POST", body: JSON.stringify({ schema_name: schema, table }) });
+}
+
 export function getPostgresTable(id: string, schema: string, table: string, preview: boolean): Promise<PostgresTableDetails> {
   return requestJson(`${connectionPath(id)}/tables/${encodeURIComponent(schema)}/${encodeURIComponent(table)}?preview=${preview}`);
 }
