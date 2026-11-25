@@ -12,6 +12,7 @@ are stored on the run as it goes, so a person can watch a run happen. Step kinds
 from __future__ import annotations
 
 import asyncio
+import calendar
 import csv
 import io
 import json
@@ -53,7 +54,87 @@ def now_utc() -> datetime:
 
 # ---------------------------------------------------------------- schedule
 
+def validate_schedule(config: dict[str, Any]) -> None:
+    if "rules" not in config:
+        return
+    rules = config["rules"]
+    if not isinstance(rules, list) or not 1 <= len(rules) <= 20:
+        raise ValueError("A schedule needs between 1 and 20 rules.")
+    for rule in rules:
+        if not isinstance(rule, dict) or rule.get("unit") not in ("seconds", "minutes", "hours", "days", "weeks", "months"):
+            raise ValueError("Invalid schedule interval.")
+        unit = rule["unit"]
+        def number(key: str, low: int, high: int) -> int:
+            value = rule.get(key)
+            if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+                raise ValueError(f"Invalid schedule {key}.")
+            return value
+        number("interval", 1, {"seconds": 59, "minutes": 59, "hours": 23, "days": 31, "weeks": 52, "months": 12}[unit])
+        if unit in ("hours", "days", "weeks", "months"):
+            number("minute", 0, 59)
+        if unit in ("days", "weeks", "months"):
+            number("hour", 0, 23)
+        if unit == "months":
+            day = number("day_of_month", 1, 31)
+            if day > 28 and not any(day <= calendar.monthrange(year, month)[1] for year in range(2000, 2400) for month in range(1, 13) if (year * 12 + month - 1) % rule["interval"] == 0):
+                raise ValueError("This interval never reaches the selected day of month.")
+        if unit == "weeks":
+            days = rule.get("weekdays")
+            if not isinstance(days, list) or not days or any(day not in WEEKDAYS for day in days):
+                raise ValueError("Choose at least one weekday.")
+
+
+def _next_rule(rule: dict[str, Any], after: datetime) -> datetime:
+    """Intervals align to calendar boundaries, with weeks starting Monday."""
+    local = _utc(after).astimezone()
+    unit, interval = rule["unit"], rule["interval"]
+    if unit in ("seconds", "minutes"):
+        seconds = interval * (60 if unit == "minutes" else 1)
+        timestamp = local.timestamp()
+        return datetime.fromtimestamp((int(timestamp // seconds) + 1) * seconds, timezone.utc)
+    minute, hour = rule.get("minute", 0), rule.get("hour", 0)
+    if unit == "hours":
+        candidate = local.replace(minute=minute, second=0, microsecond=0)
+        epoch_hours = candidate.toordinal() * 24 + candidate.hour
+        candidate += timedelta(hours=(-epoch_hours) % interval)
+        if candidate <= local:
+            candidate += timedelta(hours=interval)
+        return candidate.astimezone(timezone.utc)
+    candidate = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if unit == "days":
+        candidate += timedelta(days=(-candidate.toordinal()) % interval)
+        if candidate <= local:
+            candidate += timedelta(days=interval)
+    elif unit == "weeks":
+        monday = candidate - timedelta(days=candidate.weekday())
+        week_index = (monday.toordinal() - 1) // 7
+        monday += timedelta(weeks=(-week_index) % interval)
+        for week in (monday, monday + timedelta(weeks=interval)):
+            for day in range(7):
+                value = week + timedelta(days=day)
+                if WEEKDAYS[day] in rule["weekdays"] and value > local:
+                    return value.astimezone(timezone.utc)
+        raise ValueError("No weekdays selected")
+    else:
+        month_index = candidate.year * 12 + candidate.month - 1
+        month_index += (-month_index) % interval
+        # Gregorian dates repeat every 400 years; some intervals can never hit the requested day.
+        for _ in range(4800):
+            year, month0 = divmod(month_index, 12)
+            month = month0 + 1
+            day = rule["day_of_month"]
+            if day <= calendar.monthrange(year, month)[1]:
+                value = candidate.replace(year=year, month=month, day=day)
+                if value > local:
+                    return value.astimezone(timezone.utc)
+            month_index += interval
+        raise ValueError("This interval never reaches the selected day of month.")
+    return candidate.astimezone(timezone.utc)
+
+
 def schedule_label(config: dict[str, Any]) -> str:
+    if "rules" in config:
+        return ", ".join(f"Every {r['interval']} {r['unit']}" for r in config["rules"])
     frequency = config.get("frequency", "daily")
     hours, _, minutes = str(config.get("time", "09:00")).partition(":")
     try:
@@ -71,6 +152,9 @@ def schedule_label(config: dict[str, Any]) -> str:
 
 def next_run_after(config: dict[str, Any], after: datetime) -> datetime:
     """The next time a schedule fires after `after`. Clock times are in the server's local time zone."""
+    if "rules" in config:
+        validate_schedule(config)
+        return min(_next_rule(rule, after) for rule in config["rules"])
     local = _utc(after).astimezone()
     frequency = config.get("frequency", "daily")
     if frequency == "hourly":

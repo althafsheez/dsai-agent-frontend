@@ -58,6 +58,7 @@ export function makeTrigger(frequency: string, previous?: WorkflowTriggerDto): W
 
 export function describeSchedule(trigger: WorkflowTriggerDto): string {
   if (trigger.kind !== "schedule") return "Runs when you start it";
+  if (trigger.config?.rules) return trigger.config.rules.map((rule) => `Every ${rule.interval} ${rule.unit}`).join(", ");
   const { frequency = "daily", time = "09:00", day = "Monday", day_of_month: dom = "1" } = trigger.config ?? {};
   const [hours, minutes] = time.split(":").map((part) => Number(part));
   const clock = `${(hours % 12) || 12}:${String(minutes || 0).padStart(2, "0")} ${hours >= 12 ? "PM" : "AM"}`;

@@ -11,11 +11,12 @@ test("welcome draft and sidebar navigation", async ({ page, isMobile }) => {
     await page.getByRole("button", { name: "Expand sidebar" }).click();
   }
   const usage = page.getByRole("button", { name: /usage statistics/i });
-  await expect(usage).toHaveAttribute("aria-expanded", "true");
-  await usage.press("Enter");
+  await expect(usage).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByRole("heading", { name: "Usage Stats" })).toBeHidden();
   await usage.press("Enter");
   await expect(page.getByRole("heading", { name: "Usage Stats" })).toBeVisible();
+  await usage.press("Enter");
+  await expect(page.getByRole("heading", { name: "Usage Stats" })).toBeHidden();
   await page.getByRole("link", { name: "Workspaces", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Workspaces", exact: true })).toBeVisible();
   if (isMobile) await expect(page.getByRole("dialog")).toHaveCount(0);

@@ -12,10 +12,13 @@ vi.mock("@/lib/api", () => ({
   ApiError: class extends Error {},
   listWorkflowRecords: async () => api.workflows,
   listWorkflowRunRecords: async () => api.runs,
+  getWorkflowRunsPage: async (_id: string | undefined, offset: number, limit: number) => ({ items: [...api.runs].sort((a, b) => Date.parse((b as { started_at: string }).started_at) - Date.parse((a as { started_at: string }).started_at)).slice(offset, offset + limit), total: api.runs.length }),
   getWorkflowRunRecord: async () => api.run,
   runWorkflowNow: (id: string) => api.runNow(id),
   setWorkflowRecordState: (id: string, state: string) => api.setState(id, state),
   cancelWorkflowRunRecord: vi.fn(),
+  getPostgresConnections: async () => ({ items: [{ id: "pg1", name: "Northwind Test" }] }),
+  getLibrary: async () => ({ items: [{ id: "d", name: "sales.csv", resource_type: "dataset" }] }),
   getModels: async () => ({ models: [], default_model_id: "m" }),
 }));
 
@@ -81,7 +84,7 @@ describe("workflows page", () => {
     ];
     const user = userEvent.setup();
     wrap(<WorkflowsPage />);
-    await screen.findByRole("tab", { name: "Saved workflows (3)" });
+    await screen.findByRole("tab", { name: "Workflows (3)" });
     await user.click(screen.getByRole("tab", { name: "Runs" }));
     const table = await screen.findByRole("table", { name: "Runs" });
     expect(screen.getAllByRole("table")).toHaveLength(1);
@@ -97,24 +100,58 @@ describe("workflows page", () => {
     expect(within(table).getByRole("link", { name: /Weekly inventory/ })).toBeVisible();
     expect(within(table).queryByText("Unused workflow")).not.toBeInTheDocument();
   });
+  it("paginates the combined runs list", async () => {
+    api.runs = Array.from({ length: 14 }, (_, index) => run({ id: `r${index}`, started_at: new Date(Date.UTC(2026, 10, 24, 3, index)).toISOString() }));
+    const user = userEvent.setup();
+    wrap(<WorkflowsPage />);
+    await user.click(await screen.findByRole("tab", { name: "Runs" }));
+    expect(await screen.findByText("Page 1 of 2 · 14 runs")).toBeVisible();
+    expect(within(screen.getByRole("table", { name: "Runs" })).getAllByRole("row")).toHaveLength(13);
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("Page 2 of 2 · 14 runs")).toBeVisible();
+    expect(within(screen.getByRole("table", { name: "Runs" })).getAllByRole("row")).toHaveLength(3);
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+  });
+
 });
 
 describe("workflow run page", () => {
   it("shows each step's input and output side by side with its log", async () => {
     api.run = run({ results: [
-      { step_id: "a", title: "Get data", kind: "data", status: "success", input: { dataset_ids: ["d"] }, output: { rows: 3 }, logs: ["Read 3 rows"], error: "", started_at: null, finished_at: null },
+      { step_id: "a", title: "Get data", kind: "data", status: "success", input: { connection_id: "pg1", sql: "SELECT * FROM products" }, output: { rows: 3 }, logs: ["Read 3 rows"], error: "", started_at: null, finished_at: null },
       { step_id: "b", title: "Summarise", kind: "ai", status: "running", input: null, output: null, logs: [], error: "", started_at: null, finished_at: null },
       { step_id: "c", title: "Send", kind: "notify", status: "pending", input: null, output: null, logs: [], error: "", started_at: null, finished_at: null },
     ], status: "running", finished_at: null });
     wrap(<WorkflowRunPage workflowId="w1" runId="r1" />);
     const first = await screen.findByRole("region", { name: "Step 1: Get data" });
-    expect(within(first).getByText("Input")).toBeVisible();
-    expect(within(first).getByText("Output")).toBeVisible();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Expand all" }));
+    expect(within(first).getByText("SQL query")).toBeVisible();
+    expect(within(first).getByText("SELECT * FROM products")).toBeVisible();
+    expect(within(first).queryByText("Input")).not.toBeInTheDocument();
+    expect(within(first).queryByText("Output")).not.toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Northwind Test" })).toBeVisible();
     expect(within(first).getByText("Read 3 rows")).toBeVisible();
     const second = screen.getByRole("region", { name: "Step 2: Summarise" });
-    expect(within(second).getByText("Working…")).toBeVisible();
+    expect(within(second).queryByText("Input")).not.toBeInTheDocument();
     expect(within(second).getByText("Running")).toBeVisible();
     expect(within(screen.getByRole("region", { name: "Step 3: Send" })).queryByText("Input")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop" })).toBeVisible();
   });
+  it("collapses step details and shows recorded files and run information", async () => {
+    const user = userEvent.setup();
+    api.run = run({ results: [{ step_id: "a", title: "Analyze", kind: "ai", status: "success", input: { model: "gemini-test" }, output: { text: "Result", resources: [{ id: "file-1", name: "report.pdf" }] }, logs: ["Finished"], error: "", started_at: null, finished_at: null }] });
+    wrap(<WorkflowRunPage workflowId="w1" runId="r1" />);
+    const step = await screen.findByRole("region", { name: "Step 1: Analyze" });
+    expect(within(step).queryByText("Finished")).not.toBeInTheDocument();
+    await user.click(within(step).getByRole("button"));
+    expect(within(step).getByText("Finished")).toBeVisible();
+    const info = screen.getByRole("complementary", { name: "Run information" });
+    expect(within(info).getByText("Model: gemini-test")).toBeVisible();
+    expect(within(info).getByRole("button", { name: "Download report.pdf" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Collapse all" }));
+    expect(within(step).queryByText("Finished")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Hide run details" }));
+    expect(screen.queryByRole("complementary", { name: "Run information" })).not.toBeInTheDocument();
+  });
+
 });

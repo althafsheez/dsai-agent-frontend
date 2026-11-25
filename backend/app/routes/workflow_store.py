@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from agentic.runtime.contracts import ProviderError
@@ -96,11 +96,17 @@ def list_workflows(user: User = Depends(get_current_user), db: Session = Depends
 
 @router.put("")
 def save_workflow(data: WorkflowInput, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    if data.trigger.get("kind") == "schedule":
+        try:
+            workflow_engine.validate_schedule(data.trigger.get("config") or {})
+        except ValueError as exc:
+            raise APIError(422, "invalid_schedule", str(exc)) from exc
     item = db.get(WorkflowDefinition, data.id) if data.id else None
     if item is not None and item.owner_id != user.id:
         raise APIError(404, "workflow_not_found", "Workflow not found.")
-    if item is not None and item.state == "active":
-        raise APIError(409, "workflow_active", "Pause the published workflow before saving changes.")
+    if item is not None and item.state == "active" and data.state != "active":
+        raise APIError(409, "workflow_active", "The workflow is active. Refresh before changing its state.")
+    schedule_changed = item is None or item.state != data.state or item.trigger != data.trigger
     if data.state == "active":
         _require_runnable_steps(data.steps)
     connections = request.app.state.connections
@@ -124,18 +130,22 @@ def save_workflow(data: WorkflowInput, request: Request, user: User = Depends(ge
     item.state = data.state
     item.trigger = data.trigger
     item.steps = steps
-    workflow_engine.refresh_schedule(item)
+    if schedule_changed:
+        workflow_engine.refresh_schedule(item)
     db.commit()
     return _workflow(item)
 
 
 @router.get("/runs")
-def list_runs(workflow_id: str | None = None, limit: int = 100, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
-    mine = set(db.scalars(select(WorkflowDefinition.id).where(WorkflowDefinition.owner_id == user.id)))
-    query = select(WorkflowRunRecord).order_by(WorkflowRunRecord.started_at.desc()).limit(min(max(limit, 1), 300))
+def list_runs(workflow_id: str | None = None, limit: int = 100, status: str | None = None, offset: int = 0, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    query = (select(WorkflowRunRecord).join(WorkflowDefinition, WorkflowDefinition.id == WorkflowRunRecord.workflow_id)
+             .where(WorkflowDefinition.owner_id == user.id).order_by(WorkflowRunRecord.started_at.desc()))
     if workflow_id:
         query = query.where(WorkflowRunRecord.workflow_id == workflow_id)
-    return {"items": [_run(item) for item in db.scalars(query) if item.workflow_id in mine]}
+    if status:
+        query = query.where(WorkflowRunRecord.status == status)
+    total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
+    return {"items": [_run(item) for item in db.scalars(query.offset(max(offset, 0)).limit(min(max(limit, 1), 300)))], "total": total}
 
 
 @router.get("/runs/{run_id}")

@@ -361,3 +361,79 @@ async def test_ai_timeout_keeps_progress_input_and_generated_files(client: Async
     assert "reached its" in step["error"]
     assert "Running execute python" in step["logs"]
     assert step["output"]["resources"] == [file]
+
+
+def test_interval_rules_choose_earliest_and_skip_missing_month_days() -> None:
+    after = datetime(2026, 1, 31, 12, 0, tzinfo=timezone.utc)
+    def rule(unit, **values):
+        return {"unit": unit, "interval": 1, "minute": 0, "hour": 0, "weekdays": ["Monday"], "day_of_month": 31, **values}
+    # Force UTC so the expected calendar boundaries are independent of the host.
+    import os
+    import time
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = "UTC"
+    time.tzset()
+    try:
+        assert workflow_engine.next_run_after({"rules": [rule("seconds", interval=30)]}, after) == after + timedelta(seconds=30)
+        assert workflow_engine.next_run_after({"rules": [rule("months")]}, after) == datetime(2026, 3, 31, tzinfo=timezone.utc)
+        assert workflow_engine.next_run_after({"rules": [rule("weeks"), rule("minutes", interval=5)]}, after) == after + timedelta(minutes=5)
+    finally:
+        if old is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old
+        time.tzset()
+
+
+def test_invalid_interval_rules_are_rejected() -> None:
+    import pytest
+    with pytest.raises(ValueError):
+        workflow_engine.validate_schedule({"rules": [{"unit": "seconds", "interval": 0}]})
+    with pytest.raises(ValueError):
+        workflow_engine.validate_schedule({"rules": [{"unit": "weeks", "interval": 1, "minute": 0, "hour": 0, "weekdays": []}]})
+
+
+def test_saving_active_workflow_preserves_next_run_when_schedule_is_unchanged() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from app.routes.workflow_store import WorkflowInput, save_workflow
+
+    next_run = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    trigger = {"kind": "schedule", "config": {"frequency": "daily"}}
+    item = WorkflowDefinition(id="w", owner_id="u", name="Old", description="", prompt="", state="active", trigger=trigger, steps=[], next_run_at=next_run, created_at=next_run, updated_at=next_run)
+    db = Mock()
+    db.get.return_value = item
+    user = SimpleNamespace(id="u")
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(connections=None)))
+    data = WorkflowInput(id="w", name="Updated", state="active", trigger=trigger, steps=[{"id": "s", "kind": "notify", "title": "Output", "detail": "", "config": {}}])
+    result = save_workflow(data, request, user, db)
+    assert result["name"] == "Updated"
+    assert item.next_run_at == next_run
+    assert item.state == "active"
+
+
+def test_running_workflow_feed_filters_status_and_owner_before_limit() -> None:
+    from types import SimpleNamespace
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from app.db import Base
+    from app.models import User
+    from app.routes.workflow_store import list_runs
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    now = datetime.now(timezone.utc)
+    with Session(engine) as db:
+        db.add_all([User(id="u1", name="One", initials="O"), User(id="u2", name="Two", initials="T")])
+        db.add_all([WorkflowDefinition(id="w1", owner_id="u1", name="Mine"), WorkflowDefinition(id="w2", owner_id="u2", name="Other")])
+        db.add_all([
+            WorkflowRunRecord(id="mine", workflow_id="w1", workflow_name="Mine", trigger="schedule", status="running", started_at=now),
+            WorkflowRunRecord(id="other", workflow_id="w2", workflow_name="Other", trigger="schedule", status="running", started_at=now + timedelta(seconds=2)),
+            WorkflowRunRecord(id="finished", workflow_id="w1", workflow_name="Mine", trigger="schedule", status="success", started_at=now + timedelta(seconds=1)),
+        ])
+        db.commit()
+        items = list_runs(workflow_id=None, limit=1, status="running", offset=0, user=SimpleNamespace(id="u1"), db=db)["items"]
+        assert [item["id"] for item in items] == ["mine"]
+        page = list_runs(workflow_id="w1", limit=1, status=None, offset=1, user=SimpleNamespace(id="u1"), db=db)
+        assert page["total"] == 2
+        assert [item["id"] for item in page["items"]] == ["mine"]

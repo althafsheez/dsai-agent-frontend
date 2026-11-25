@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { LoaderCircle, PanelLeftClose, PanelLeftOpen, Plus, Settings, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { getActivity } from "@/lib/api";
+import { getActivity, listRunningWorkflowRuns } from "@/lib/api";
 import { useUiStore } from "@/stores/ui-store";
 import { Button } from "@/components/ui/button";
 import { Brand } from "./brand";
@@ -18,7 +18,7 @@ import { useAuth } from "@/features/auth";
 
 export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
   const { user } = useAuth();
-  const [usageOpen, setUsageOpen] = useState(true);
+  const [usageOpen, setUsageOpen] = useState(false);
   const collapsed = useUiStore((state) => state.sidebarCollapsed);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
   const setMobileOpen = useUiStore((state) => state.setMobileSidebarOpen);
@@ -32,6 +32,12 @@ export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
     refetchInterval: 2000,
   });
   const activity = activityQuery.data?.items ?? [];
+  const workflowRuns = useQuery({
+    queryKey: ["workflow-runs", "running"],
+    queryFn: listRunningWorkflowRuns,
+    refetchInterval: 2000,
+  });
+  const runningWorkflows = workflowRuns.data ?? [];
 
   return (
     <div className="flex h-full flex-col bg-sidebar select-none">
@@ -53,7 +59,7 @@ export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
         </Button>
       </div>
 
-      <div className={compact ? "p-2" : "p-3"}>
+      <div className={compact ? "p-2 pb-1" : "p-3 pb-1"}>
         <Button
           asChild
           size="sm"
@@ -71,12 +77,7 @@ export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-2 scrollbar-none">
-        {!compact && (
-          <p className="mb-2 px-2.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/80">
-            Workspace
-          </p>
-        )}
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-1 scrollbar-none">
         <nav aria-label="Main navigation" className="space-y-0.5">
           {navigation.map((item) => (
             <SidebarNavItem key={item.href} {...item} compact={compact} onNavigate={closeMobile} />
@@ -84,13 +85,21 @@ export function SidebarContent({ mobile = false }: { mobile?: boolean }) {
         </nav>
 
         {!compact && (
-          <div className="px-0.5 mt-2">
+          <div className="px-0.5 mt-1">
             <SidebarSection title="Pinned">
               <SidebarPinnedList onNavigate={closeMobile} />
             </SidebarSection>
             <SidebarSection title="Activity">
-              {activity.length ? (
+              {activity.length || runningWorkflows.length ? (
                 <div className="space-y-1">
+                  {runningWorkflows.map((run) => (
+                    <Link key={`workflow-${run.id}`} href={`/workflows/${run.workflow_id}/runs/${run.id}`} onClick={closeMobile}
+                      className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground">
+                      <LoaderCircle className="size-3 shrink-0 animate-spin text-sage" />
+                      <span className="min-w-0 flex-1 truncate">{run.workflow_name}</span>
+                      <span className="shrink-0 text-[9px]">Workflow · Running</span>
+                    </Link>
+                  ))}
                   {activity.map((chat) => {
                     const running = chat.active_run_status === "running" || chat.active_run_status === "queued";
                     return (

@@ -9,6 +9,8 @@ Updated 2026-11-09 from final user decisions. Implement and verify sequentially.
 - Required stack: Next 15 / React 19 / Tailwind 3; do not inherit reference tooling blindly.
 
 ## Phase 1 — Frontend foundation — IN PROGRESS
+
+- Workflow schedule rules added by explicit user request ahead of the remaining phases. Calendar calculations and editor unit tests pass; full scheduler execution and browser verification remain unverified until the integration checks complete.
 - Scaffold strict TS, Next 15 App Router, Tailwind 3, shadcn/Radix primitives, loaded Inter, shared tokens.
 - Shared responsive shell, sidebar collapse/mobile drawer, search, nav/flyouts, Pinned/Activity, footer.
 - Welcome composer presentation with local draft text and suggestions; other pages remain honest placeholders.

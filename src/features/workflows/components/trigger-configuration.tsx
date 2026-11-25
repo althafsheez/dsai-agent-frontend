@@ -67,8 +67,8 @@ export function TriggerConfiguration({ trigger, webhook, onChange, onBack, disab
   const Icon = type.icon;
 
   return (
-    <div className="space-y-4">
-      <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2"><ArrowLeft /> Trigger types</Button>
+    <div className="flex flex-1 flex-col gap-4">
+      <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 self-start"><ArrowLeft /> Trigger types</Button>
       <header className="flex items-center gap-3">
         <span className="grid size-9 shrink-0 place-items-center rounded-md border bg-raised text-slate"><Icon className="size-4" /></span>
         <div>
@@ -80,9 +80,9 @@ export function TriggerConfiguration({ trigger, webhook, onChange, onBack, disab
       {kind === "schedule" && (
         <fieldset disabled={disabled} className="space-y-2">
           <SchedulePicker trigger={trigger} onChange={onChange} />
-          <p className="text-xs text-muted-foreground">Schedule times use the server time zone.</p>
         </fieldset>
       )}
+      {kind === "schedule" && <p className="mt-auto pt-4 text-xs text-muted-foreground">Schedule times use the server time zone. Intervals align to calendar boundaries; missed runs are not replayed.</p>}
       {kind === "webhook" && (
         <div className="space-y-3 rounded-md border bg-background p-3 text-xs">
           <p className="text-muted-foreground">Webhook execution is coming soon. URL, HTTP method and authentication settings will appear here once it’s supported.</p>

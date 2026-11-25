@@ -1,17 +1,20 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
-import { Plus, Workflow as WorkflowIcon } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { getWorkflowRunsPage } from "@/lib/api";
+import { Workflow as WorkflowIcon } from "lucide-react";
 import type { WorkflowRecordDto, WorkflowRunRecordDto } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useSetWorkflowState, useWorkflowRuns, useWorkflows } from "../use-workflows";
 import { RunsTable } from "./runs-table";
 import { TemplateGallery } from "./template-gallery";
 import { WorkflowCard } from "./workflow-card";
+import { CreateWorkflowDialog } from "./create-workflow-dialog";
 
 type Tab = "workflows" | "runs" | "templates";
+const RUNS_PER_PAGE = 12;
 const statusFilters = {
   all: "All",
   active: "Active",
@@ -26,6 +29,8 @@ export function WorkflowsPage() {
   const setState = useSetWorkflowState();
   const [tab, setTab] = useState<Tab>("workflows");
   const [status, setStatus] = useState<StatusFilter>("all");
+  const [page, setPage] = useState(0);
+  const pageQuery = useQuery({ queryKey: ["workflow-runs-page", "all", page], queryFn: () => getWorkflowRunsPage(undefined, page * RUNS_PER_PAGE, RUNS_PER_PAGE), enabled: tab === "runs", refetchInterval: 5000 });
   const items = workflows.data ?? [];
   const visibleItems = status === "all" ? items : items.filter((workflow) => workflow.state === status);
   const runs = [...(runsQuery.data ?? [])].sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at));
@@ -42,25 +47,27 @@ export function WorkflowsPage() {
           <div className="grid size-11 shrink-0 place-items-center rounded-xl border bg-raised text-slate"><WorkflowIcon className="size-5" strokeWidth={1.5} /></div>
           <h1 className="self-center text-xl font-semibold tracking-tight">Workflows</h1>
         </div>
-        <Button asChild><Link href="/workflows/new"><Plus />New workflow</Link></Button>
+        <CreateWorkflowDialog />
       </header>
 
       <div role="tablist" aria-label="Workflows view" className="flex w-fit rounded-lg border bg-surface p-1">
-        {([["workflows", `Saved workflows (${items.length})`], ["runs", `Runs${running ? ` · ${running} running` : ""}`], ["templates", "Templates"]] as const).map(([value, label]) => (
+        {([["workflows", `Workflows (${items.length})`], ["runs", `Runs${running ? ` · ${running} running` : ""}`], ["templates", "Templates"]] as const).map(([value, label]) => (
           <button key={value} id={`workflow-tab-${value}`} type="button" role="tab" aria-selected={tab === value} onClick={() => setTab(value)} className={cn("h-8 rounded-md px-3 text-xs font-medium text-muted-foreground hover:text-foreground", tab === value && "bg-raised text-foreground shadow-sm")}>{label}</button>
         ))}
       </div>
 
       {tab === "runs" ? (
-        <div className="mt-4 grid gap-5">
-          {runs.length > 0 && (
-            <RunsTable runs={runs} labelledBy="workflow-tab-runs" workflowNames={new Map(items.map((workflow) => [workflow.id, workflow.name]))} />
-          )}
-          {runsQuery.isError ? <p role="alert" className="text-xs text-rose-300">Could not load runs.</p> : null}
-          {runsQuery.isLoading ? <p className="text-xs text-muted-foreground">Loading runs…</p> : null}
-          {runsQuery.isSuccess && !runs.length ? (
-            <p className="rounded-lg border border-dashed px-4 py-10 text-center text-xs text-muted-foreground">No runs yet. Runs from schedules and from “Run now” appear here.</p>
-          ) : null}
+        <div className="mt-4 flex min-h-[520px] flex-col rounded-lg border bg-surface/40 p-4 lg:min-h-[max(520px,calc(100dvh-290px))]">
+          {pageQuery.data && pageQuery.data.items.length > 0 && <>
+            <RunsTable runs={pageQuery.data.items} labelledBy="workflow-tab-runs" workflowNames={new Map(items.map((workflow) => [workflow.id, workflow.name]))} />
+            <div className="mt-auto flex items-center justify-between gap-2 pt-4 text-xs text-muted-foreground">
+              <span>Page {page + 1} of {Math.max(1, Math.ceil(pageQuery.data.total / RUNS_PER_PAGE))} · {pageQuery.data.total} runs</span>
+              <div className="flex gap-2"><Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>Previous</Button><Button variant="outline" size="sm" disabled={(page + 1) * RUNS_PER_PAGE >= pageQuery.data.total} onClick={() => setPage((value) => value + 1)}>Next</Button></div>
+            </div>
+          </>}
+          {pageQuery.isError && <p role="alert" className="text-xs text-rose-300">Could not load runs.</p>}
+          {pageQuery.isLoading && <p className="text-xs text-muted-foreground">Loading runs…</p>}
+          {pageQuery.isSuccess && !pageQuery.data.items.length && <p className="rounded-lg border border-dashed px-4 py-10 text-center text-xs text-muted-foreground">{page ? "No runs on this page." : "No runs yet. Runs from schedules and from “Run now” appear here."}{page > 0 && <Button variant="ghost" size="sm" onClick={() => setPage((value) => value - 1)}>Previous</Button>}</p>}
         </div>
       ) : tab === "templates" ? (
         <div className="mt-4"><TemplateGallery /></div>

@@ -851,7 +851,8 @@ export function applyWorkflowAction(action: WorkflowAction, receipt?: string): P
   return requestJson("/workflow-store/actions/apply", { method: "POST", body: JSON.stringify({ action, test_receipt: receipt }) });
 }
 export interface WorkflowStepDto { id: string; kind: WorkflowStepKind | string; title: string; detail: string; config?: Record<string, unknown> }
-export interface WorkflowTriggerDto { kind: "manual" | "schedule"; config?: { frequency?: string; time?: string; day?: string; day_of_month?: string | number; show_on_canvas?: false } }
+export interface ScheduleRule { unit: "seconds" | "minutes" | "hours" | "days" | "weeks" | "months"; interval: number; minute: number; hour: number; weekdays: string[]; day_of_month: number }
+export interface WorkflowTriggerDto { kind: "manual" | "schedule"; config?: { rules?: ScheduleRule[]; frequency?: string; time?: string; day?: string; day_of_month?: string | number; show_on_canvas?: false } }
 export interface WorkflowRecordDto {
   id: string; name: string; description: string; prompt: string; state: "active" | "inactive" | "draft";
   trigger: WorkflowTriggerDto; steps: WorkflowStepDto[]; schedule: string;
@@ -889,6 +890,14 @@ export async function deleteWorkflowRecord(id: string): Promise<void> {
 export async function listWorkflowRunRecords(workflowId?: string): Promise<WorkflowRunRecordDto[]> {
   const query = workflowId ? `?workflow_id=${encodeURIComponent(workflowId)}` : "";
   return (await requestJson<{ items: WorkflowRunRecordDto[] }>(`/workflow-store/runs${query}`)).items;
+}
+export function getWorkflowRunsPage(workflowId: string | undefined, offset: number, limit: number): Promise<{ items: WorkflowRunRecordDto[]; total: number }> {
+  const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+  if (workflowId) params.set("workflow_id", workflowId);
+  return requestJson(`/workflow-store/runs?${params}`);
+}
+export async function listRunningWorkflowRuns(): Promise<WorkflowRunRecordDto[]> {
+  return (await requestJson<{ items: WorkflowRunRecordDto[] }>("/workflow-store/runs?status=running")).items;
 }
 export function getWorkflowRunRecord(id: string): Promise<WorkflowRunRecordDto> {
   return requestJson(`/workflow-store/runs/${encodeURIComponent(id)}`);

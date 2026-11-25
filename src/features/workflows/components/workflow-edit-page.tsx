@@ -157,12 +157,12 @@ function WorkflowEditor({ workflow, publishedState }: { workflow: WorkflowSaveBo
   }
 
   async function persist(nextState: WorkflowRecordDto["state"]) {
-    if (busy || active || !draft.name.trim() || (nextState === "active" && issues.length)) return;
+    if (busy || !draft.name.trim() || (nextState === "active" && issues.length)) return;
     setNotice("");
     try {
       const saved = await save.mutateAsync({ ...draft, name: draft.name.trim(), state: nextState });
       setHistory({ previous: [], draft: saved, next: [] });
-      setNotice(nextState === "active" ? "Workflow activated." : "Draft saved.");
+      setNotice(nextState === "active" ? (active ? "Changes saved to the active workflow." : "Workflow activated.") : "Draft saved.");
       if (!draft.id) router.replace(`/workflows/${saved.id}/edit`);
     } catch {
       // The mutation exposes the error in the editor.
@@ -327,7 +327,7 @@ function WorkflowEditor({ workflow, publishedState }: { workflow: WorkflowSaveBo
             <Button variant="outline" size="sm" disabled={busy}
               title={draft.id ? "Run the current draft without publishing" : "Save as a draft and run a test"}
               onClick={() => void startTest()}><Play /> Test run</Button>
-            <Button variant="outline" size="sm" disabled={busy || active || !draft.name.trim()} onClick={() => void persist(state)}>Save</Button>
+            <Button variant="outline" size="sm" disabled={busy || !draft.name.trim() || (active && !!issues.length)} title={active ? issues[0] : undefined} onClick={() => void persist(state)}>Save</Button>
             <Button size="sm" disabled={busy || (active ? !draft.id : !!issues.length)}
               title={active ? "Pause the published workflow" : issues[0]}
               onClick={() => {
@@ -366,7 +366,7 @@ function WorkflowEditor({ workflow, publishedState }: { workflow: WorkflowSaveBo
       </Dialog>}
       {error && <p role="alert" className="text-xs text-destructive">{error.message}</p>}
       {notice && <p role="status" className="text-xs text-muted-foreground">{notice}</p>}
-      {active && <p className="text-xs text-muted-foreground">Pause the published workflow before saving edits. Tests run the current draft.</p>}
+      {active && <p className="text-xs text-muted-foreground">Saving applies changes to the active workflow. Tests run the current draft.</p>}
 
       <div className={cn("grid min-w-0 gap-3", rightOpen && "lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_350px]")}>
         <div className="relative min-w-0 overflow-hidden rounded-xl border bg-background">
@@ -416,7 +416,7 @@ function WorkflowEditor({ workflow, publishedState }: { workflow: WorkflowSaveBo
           <div id="workflow-inspector-panel" role="tabpanel" aria-labelledby={`workflow-tab-${tabs.indexOf(tab)}`}
             className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
             {tab === "Configuration" && (
-              <div className="space-y-4 p-4">
+              <div className="flex min-h-full flex-col space-y-4 p-4">
                 {triggerView === "choose" ? (
                   <TriggerChooser onSelect={configureTrigger} onBack={() => setTriggerView(null)} disabled={busy} />
                 ) : triggerView === "webhook" || (selected === "trigger" && hasTrigger) ? (
@@ -502,7 +502,7 @@ function WorkflowEditor({ workflow, publishedState }: { workflow: WorkflowSaveBo
         </aside>}
       </div>
       <WorkflowExecutionInspector workflowId={draft.id} open={executionOpen} onToggle={() => setExecutionOpen(!executionOpen)} run={run.data} />
-      {!active && issues.length > 0 && !testIssue && <p className="text-xs text-muted-foreground">{testIssues[0] ?? issues[0]}</p>}
+      {issues.length > 0 && !testIssue && <p className="text-xs text-muted-foreground">{testIssues[0] ?? issues[0]}</p>}
     </section>
   );
 }

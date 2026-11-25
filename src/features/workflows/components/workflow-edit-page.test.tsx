@@ -128,14 +128,14 @@ describe("saved workflow editor", () => {
     expect(screen.queryByRole("button", { name: /^Manual/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^Schedule/ }));
     expect(screen.getByRole("heading", { name: "Schedule trigger" })).toBeVisible();
-    await user.selectOptions(screen.getByRole("combobox", { name: "How often" }), "weekly");
-    expect(screen.getByRole("combobox", { name: "Day of the week" })).toBeVisible();
-    expect(screen.getByRole("button", { name: /^Trigger Every Monday/ })).toBeVisible();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Trigger Interval" }), "weeks");
+    expect(screen.getByText("Trigger on Weekdays")).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Trigger Every 1 weeks/ })).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Trigger types" }));
     await user.click(screen.getByRole("button", { name: /^Manual/ }));
     expect(screen.getByRole("heading", { name: "Manual trigger" })).toBeVisible();
-    expect(screen.queryByRole("combobox", { name: "How often" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Trigger Interval" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Trigger Runs when you start it" })).toBeVisible();
   });
 
@@ -261,11 +261,22 @@ describe("saved workflow editor", () => {
     await user.click(await screen.findByRole("button", { name: "Output Send report" }));
     await user.clear(screen.getByRole("textbox", { name: "Step name" }));
     await user.type(screen.getByRole("textbox", { name: "Step name" }), "Draft output");
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Test run" }));
     await waitFor(() => expect(run).toHaveBeenCalledWith("w1", [expect.objectContaining({ title: "Draft output" })]));
     expect(save).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Logs" })).toBeVisible();
+  });
+
+  it("saves edited steps while keeping the workflow active", async () => {
+    const user = userEvent.setup();
+    get.mockResolvedValue({ ...workflow, state: "active" });
+    renderEditor();
+    await user.click(await screen.findByRole("button", { name: "Output Send report" }));
+    await user.clear(screen.getByRole("textbox", { name: "Step name" }));
+    await user.type(screen.getByRole("textbox", { name: "Step name" }), "Updated report");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ state: "active", steps: [expect.objectContaining({ title: "Updated report" })] })));
   });
 
   it("builds one Custom step using its selected dataset", async () => {
