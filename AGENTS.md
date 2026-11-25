@@ -13,7 +13,7 @@ Read PROJECT_SPEC.md, API_CONTRACT.md and IMPLEMENTATION_PLAN.md before implemen
 - Next.js 15 App Router, React 19, strict TypeScript, Tailwind CSS 3, shadcn/ui + Radix UI, Lucide.
 - TanStack Query owns fetched data. Zustand owns genuinely shared UI state only. Local React state owns local interactions and active streamed text. Never duplicate server records in Zustand.
 - Use Recharts for structured chart data; defer React Flow until workflow implementation.
-- FastAPI, SQLAlchemy, SQLite, one Gemini agent, E2B Code Interpreter, local storage in backend/.
+- FastAPI, SQLAlchemy, SQLite, one Gemini agent, E2B Code Interpreter, local storage in server/backend/.
 - Central typed API and POST fetch SSE parser; no fetch in presentation components or provider credentials in browser code.
 - Prefer server components; scope client providers and interactions. Small feature-based components, modular message renderers, lazy heavy previews/charts, accessible primitives, responsive layouts.
 - Use Vitest/React Testing Library and Playwright for critical flows. Do not add unnecessary frameworks, infrastructure, abstractions or dependencies.

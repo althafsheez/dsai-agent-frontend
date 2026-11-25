@@ -3,7 +3,7 @@
 DSAI is an enterprise-grade agentic data analytics application designed for fast, conversational analysis of structured datasets (CSV, Excel, Parquet), interactive visualizations, and automated workflows.
 
 ## Current scope
-The main chat uses the ReAct agent in `agentic/agent/react_loop.py`. The existing FastAPI endpoint supplies conversation history and authorized tools, persists run events and streams responses to Next.js. Edit the shared loop in `agentic/` to change how chat chooses tools and synthesizes answers. Run the API and frontend together as shown below.
+The main chat uses the ReAct agent in `server/agentic/agent/react_loop.py`. The existing FastAPI endpoint supplies conversation history and authorized tools, persists run events and streams responses to Next.js. Edit the shared loop in `server/agentic/` to change how chat chooses tools and synthesizes answers. Run the API and frontend together as shown below.
 This repository hosts the redesigned Next.js 15 frontend MVP, rebuilt with an understated dark charcoal design system, responsive application navigation, structured chat execution trace, and rich context inspection.
 
 ---
@@ -88,11 +88,17 @@ cd dsai-agent-frontend
 # Install dependencies
 npm install
 
-# Start the development server
+# Set up the API and its environment (then add provider keys to server/backend/.env)
+python3 -m venv server/backend/.venv
+server/backend/.venv/bin/python -m pip install -r server/backend/requirements.txt
+cp -n server/backend/.env.example server/backend/.env
+
+# Start the API in one terminal and the frontend in another
+npm run dev:backend
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Open [http://localhost:3000](http://localhost:3000) in your browser. See [server/backend/README.md](server/backend/README.md) for API configuration and backend tests.
 
 ---
 

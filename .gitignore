@@ -45,17 +45,17 @@ test-results/
 .env*
 !.env.example
 next-env.d.ts
-backend/.venv/
-backend/storage/
-backend/*.db*
-backend/**/__pycache__/
+server/backend/.venv/
+server/backend/storage/
+server/backend/*.db*
+server/backend/**/__pycache__/
 .DS_Store
 
 .worktrees//.next-dev/
 /.worktrees/
 
 # local secrets and tooling
-backend/.env
+server/backend/.env
 .remember/
 .claude/launch.json
 .claude/settings.local.json

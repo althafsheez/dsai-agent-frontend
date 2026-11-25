@@ -15,7 +15,7 @@ def test_initial_migration_creates_expected_tables(tmp_path, monkeypatch) -> Non
     database_url = f"sqlite:///{tmp_path / 'migration.db'}"
     monkeypatch.setenv("DSAI_DATABASE_URL", database_url)
     get_settings.cache_clear()
-    config = Config("backend/alembic.ini")
+    config = Config("server/backend/alembic.ini")
     command.upgrade(config, "head")
 
     tables = set(inspect(create_engine(database_url)).get_table_names())
@@ -37,7 +37,7 @@ async def test_startup_upgrades_existing_database_and_preserves_records(tmp_path
             session.commit()
 
     engine = create_engine(settings.database_url)
-    config = Config("backend/alembic.ini")
+    config = Config("server/backend/alembic.ini")
     with engine.connect() as connection:
         config.attributes["connection"] = connection
         command.downgrade(config, "20261113_0008")

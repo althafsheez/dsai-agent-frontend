@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     auto_create_schema: bool = True
     # A fresh database loads the committed snapshot in shared-data/ so every clone starts with the same history and files.
     import_shared_data: bool = True
-    shared_data_dir: Path = BACKEND_ROOT.parent / "shared-data"
+    shared_data_dir: Path = BACKEND_ROOT.parent.parent / "shared-data"
     # How often the server checks for dashboards whose Google Drive files are due a re-sync (0 turns the background check off).
     dashboard_sync_seconds: int = 60
     workflow_tick_seconds: int = 1

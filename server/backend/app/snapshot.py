@@ -22,7 +22,7 @@ from .config import BACKEND_ROOT, Settings, get_settings
 from .db import Base, make_engine
 from . import models  # noqa: F401  (register tables)
 
-SHARED_DIR = BACKEND_ROOT.parent / "shared-data"
+SHARED_DIR = BACKEND_ROOT.parent.parent / "shared-data"
 EXCLUDED_TABLES = {"connector_connections", "data_connections", "alembic_version"}
 SNAPSHOT_VERSION = 1
 

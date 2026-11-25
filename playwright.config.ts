@@ -4,7 +4,7 @@ export default defineConfig({
   use: { baseURL: "http://127.0.0.1:3100", trace: "retain-on-failure", channel: process.env.PLAYWRIGHT_CHANNEL || undefined },
   webServer: [
     {
-      command: "backend/.venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000",
+      command: "server/backend/.venv/bin/python -m uvicorn app.main:app --app-dir server/backend --host 127.0.0.1 --port 8000",
       url: "http://127.0.0.1:8000/health",
       reuseExistingServer: !process.env.CI,
       env: { ...process.env, DSAI_CORS_ORIGINS: "http://127.0.0.1:3100,http://localhost:3000" },

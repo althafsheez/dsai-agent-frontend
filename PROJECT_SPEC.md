@@ -39,7 +39,7 @@ src/
     utils.ts
   stores/                   # shared client UI only
 tests/e2e/
-backend/
+server/backend/
   app/
     main.py, config.py, db.py, models.py, schemas.py
     routes/
@@ -47,7 +47,7 @@ backend/
   tests/
   storage/                  # ignored, durable local files
   requirements.txt
-agentic/
+server/agentic/
   agent/                    # shared ReAct loop and prompts
   runtime/                  # runner, execution contracts and events
   providers/                # Gemini integration

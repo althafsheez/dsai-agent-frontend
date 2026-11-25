@@ -1,19 +1,19 @@
 # DSAI backend
 
-FastAPI owns authentication, chat and workspace records, Library, Quick Assistant, file storage, run coordination, and persistent SSE events. Main chat uses the in-process `AgentExecution` interface in `agentic/runtime/contracts.py`. The runner in `agentic/` uses the shared ReAct loop, Gemini provider, tool registry, and E2B. It receives conversation history and run controls from FastAPI and yields public execution events. The backend adapter in `app/services/agent_adapter.py` supplies scoped inputs and workspace context, registers generated files, and persists per-user memory through the `ToolHost` interface.
+FastAPI owns authentication, chat and workspace records, Library, Quick Assistant, file storage, run coordination, and persistent SSE events. Main chat uses the in-process `AgentExecution` interface in `server/agentic/runtime/contracts.py`. The runner in `server/agentic/` uses the shared ReAct loop, Gemini provider, tool registry, and E2B. It receives conversation history and run controls from FastAPI and yields public execution events. The backend adapter in `app/services/agent_adapter.py` supplies scoped inputs and workspace context, registers generated files, and persists per-user memory through the `ToolHost` interface.
 
-The default budget is eight tool turns followed by a tool-free synthesis when needed. Set `DSAI_MAX_AGENT_STEPS` to override that budget. Both modules run in the FastAPI process. The existing `agentic/app.py` benchmark entry point is separate from the chat startup path.
+The default budget is eight tool turns followed by a tool-free synthesis when needed. Set `DSAI_MAX_AGENT_STEPS` to override that budget. Both modules run in the FastAPI process. The existing `server/agentic/app.py` benchmark entry point is separate from the chat startup path.
 
 ## Run locally
 
 From the repository root:
 
 ```bash
-python3 -m venv backend/.venv
-backend/.venv/bin/pip install -r backend/requirements.txt
-cp -n backend/.env.example backend/.env
-# Add DSAI_GEMINI_API_KEY to backend/.env for live generation.
-backend/.venv/bin/uvicorn backend.app.main:app --reload --port 8000
+python3 -m venv server/backend/.venv
+server/backend/.venv/bin/pip install -r server/backend/requirements.txt
+cp -n server/backend/.env.example server/backend/.env
+# Add DSAI_GEMINI_API_KEY to server/backend/.env for live generation.
+server/backend/.venv/bin/uvicorn app.main:app --app-dir server/backend --reload --port 8000
 ```
 
 Start the frontend in a second terminal with `npm run dev` and open `http://localhost:3000`. Both processes run from the repository root.
@@ -26,7 +26,7 @@ By default startup applies Alembic upgrades before serving requests. Before upgr
 Run tests:
 
 ```bash
-backend/.venv/bin/pytest -c backend/pytest.ini backend/tests
+server/backend/.venv/bin/pytest -c server/backend/pytest.ini server/backend/tests
 ```
 
 ## Frontend integration
@@ -37,9 +37,9 @@ The main frontend chat is connected through the typed adapter under `src/lib/api
 
 The single Gemini agent now has an allowlisted tool loop with persisted public `tool.started`, `tool.completed`, and `tool.failed` events. Available tools cover Tavily web search, E2B Python execution, bounded sandbox file operations, read-only CSV/Parquet SQL lookup, visualization execution, and user-scoped SQLite memory.
 
-Configure `DSAI_TAVILY_API_KEY` and `DSAI_E2B_API_KEY` in `backend/.env` to enable the external tools. E2B uses one sandbox per active run, restricts writes to `/home/user/outputs/`, rejects hidden/escaping paths, bounds output, closes the sandbox after the run, and registers supported generated files as chat-scoped resources in local storage. Gemini remains the only agent/model coordinator; the tools do not create a second agent framework.
+Configure `DSAI_TAVILY_API_KEY` and `DSAI_E2B_API_KEY` in `server/backend/.env` to enable the external tools. E2B uses one sandbox per active run, restricts writes to `/home/user/outputs/`, rejects hidden/escaping paths, bounds output, closes the sandbox after the run, and registers supported generated files as chat-scoped resources in local storage. Gemini remains the only agent/model coordinator; the tools do not create a second agent framework.
 
-The API stages authorized chat and workspace inputs under `/home/user/inputs/`. To check the main-chat path against real services with a temporary database, run `DSAI_LIVE_E2B=1 backend/.venv/bin/pytest -q backend/tests/test_live_gemini.py -k react_python`. This exercises a Gemini tool call, E2B execution, generated dataset registration, and download.
+The API stages authorized chat and workspace inputs under `/home/user/inputs/`. To check the main-chat path against real services with a temporary database, run `DSAI_LIVE_E2B=1 server/backend/.venv/bin/pytest -q server/backend/tests/test_live_gemini.py -k react_python`. This exercises a Gemini tool call, E2B execution, generated dataset registration, and download.
 
 ## PostgreSQL connections
 
@@ -56,16 +56,16 @@ The connector reads data on demand through a dedicated PostgreSQL login. The loc
 | `DSAI_POSTGRES_STATEMENT_TIMEOUT_MS` | Optional per-statement timeout. Default 5000 ms. |
 | `DSAI_ENVIRONMENT` | Use `development` for local testing. For a PostgreSQL server on the same machine, use `test` and explicitly allowlist a literal loopback address and port. Keep TLS enabled when the fixture supports it. |
 
-Generate the encryption key locally and store it in `backend/.env`.
+Generate the encryption key locally and store it in `server/backend/.env`.
 
 ```bash
-backend/.venv/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+server/backend/.venv/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 ```
 
 Bind the frontend and backend to loopback in separate terminals. Keep this local application database and encryption key on the tester's machine. The connector is disabled in production, and a local backend configured with the key restricts its API to loopback. For a local database previously used with the token flow, re-add the connection under the demo account.
 
 ```bash
-backend/.venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
+server/backend/.venv/bin/uvicorn app.main:app --app-dir server/backend --host 127.0.0.1 --port 8000 --no-proxy-headers
 npm run dev -- --hostname 127.0.0.1
 ```
 
@@ -83,7 +83,7 @@ npm run dev -- --hostname 127.0.0.1
 
    The login must have neither inherited write privileges nor ownership or creation privileges in the database. For older PostgreSQL installations, check grants inherited from `PUBLIC`, especially `CREATE` on the `public` schema.
 
-2. For a public database, use a TLS-enabled endpoint and a certificate that matches its hostname. Enter that endpoint directly in the connector. The backend validates every resolved address and pins the selected IP for the connection. With `DSAI_AUTO_CREATE_SCHEMA=true` the existing startup migration flow applies Alembic revision `20261123_0012`. If a separate step handles migrations, run `backend/.venv/bin/alembic -c backend/alembic.ini upgrade head` from the repository root.
+2. For a public database, use a TLS-enabled endpoint and a certificate that matches its hostname. Enter that endpoint directly in the connector. The backend validates every resolved address and pins the selected IP for the connection. With `DSAI_AUTO_CREATE_SCHEMA=true` the existing startup migration flow applies Alembic revision `20261123_0012`. If a separate step handles migrations, run `server/backend/.venv/bin/alembic -c server/backend/alembic.ini upgrade head` from the repository root.
 3. Open **Connectors** and click **Connect** on the PostgreSQL card. Enter the connection name, DNS name, port, database and reader credentials. Run **Test Connection**, choose the allowed schemas, then save.
 4. Open **Browse tables**. Confirm that the permitted tables appear, the columns and primary key agree with PostgreSQL, and **Preview rows** returns the expected data. Verify that disabling previews in **Edit** removes row-preview access.
 5. Start **New Analysis** or open a chat. Open **+ → Data Sources**, select the saved connection, and send a question such as “Using analytics.orders, calculate monthly revenue for the last six months and create a bar chart.” Inspect the **Query Database** step and compare the totals with a query run independently in PostgreSQL.
@@ -93,12 +93,12 @@ npm run dev -- --hostname 127.0.0.1
 
 The PostgreSQL SQL parser accepts bounded, single-statement SELECT queries against permitted ordinary tables with built-in column types and no row-level security. Views, foreign tables, partitioned parents, tables with custom types, and queries with write operations, row locks, unsafe functions, or recursive CTEs are unavailable. The adapter checks database privileges, disables inherited table scans, and uses read-only transactions. Query results are limited to 200 rows and approximately 96 KB, and oversized individual rows are reported as truncated. Credentials stay in the backend. If AI access is enabled and selected for a question, authorized schema metadata and bounded query results are sent to Gemini. Query results used to generate a chart or report can also be sent to the existing E2B sandbox.
 
-Run the focused security tests with `backend/.venv/bin/python -m pytest backend/tests/test_postgres_connector.py`. To add the real-database suite, set `DSAI_TEST_POSTGRES_ADMIN_DSN` to an administrator DSN for an isolated PostgreSQL test instance listening on loopback, with password authentication for TCP connections. The test creates and removes its own schemas and role. Set `DSAI_TEST_POSTGRES_CA_FILE` to the test CA certificate to exercise verified TLS. The PostgreSQL certificate must include IP SAN `127.0.0.1`.
+Run the focused security tests with `server/backend/.venv/bin/python -m pytest server/backend/tests/test_postgres_connector.py`. To add the real-database suite, set `DSAI_TEST_POSTGRES_ADMIN_DSN` to an administrator DSN for an isolated PostgreSQL test instance listening on loopback, with password authentication for TCP connections. The test creates and removes its own schemas and role. Set `DSAI_TEST_POSTGRES_CA_FILE` to the test CA certificate to exercise verified TLS. The PostgreSQL certificate must include IP SAN `127.0.0.1`.
 
 For the optional live Gemini/E2B check, set `DSAI_TEST_LIVE_POSTGRES_AGENT=1` with the isolated PostgreSQL test settings above and run:
 
 ```bash
-backend/.venv/bin/python -m pytest -m live backend/tests/test_postgres_connector.py
+server/backend/.venv/bin/python -m pytest -m live server/backend/tests/test_postgres_connector.py
 ```
 
 For the optional browser check, seed a permitted `orders` table with an integer primary key and a `total` column containing 61 and 112. Configure the local backend for the test reader and TLS certificate as above. Set `DSAI_TEST_BROWSER_POSTGRES_FORM` to a JSON object containing `host`, `port`, `database`, `username`, `password`, and `schema`. Run `npm run test:e2e -- tests/e2e/postgres.spec.ts`. The browser test uses real services and leaves Playwright tracing off so the test credentials do not enter trace artifacts.
@@ -113,11 +113,11 @@ automatically on first start (disable with `DSAI_IMPORT_SHARED_DATA=false`). Con
 Run from the repo root:
 
 ```bash
-backend/.venv/bin/python -m app.snapshot export   # refresh shared-data/ from your local data, then commit it
-backend/.venv/bin/python -m app.snapshot import   # add missing rows/files from shared-data/ to your local data
+server/backend/.venv/bin/python -m app.snapshot export   # refresh shared-data/ from your local data, then commit it
+server/backend/.venv/bin/python -m app.snapshot import   # add missing rows/files from shared-data/ to your local data
 ```
 
-Run these with `PYTHONPATH=backend` from the repo root so the relative `.env` paths resolve to the same database the server uses.
+Run these with `PYTHONPATH=server/backend:server` from the repo root so the relative `.env` paths resolve to the same database the server uses.
 
 ## Connector routes after the merge
 

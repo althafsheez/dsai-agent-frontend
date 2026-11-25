@@ -213,7 +213,7 @@ class ReActAgent:
         if not self.api_key:
             yield {
                 "type": "status",
-                "content": "No GEMINI_API_KEY detected in agentic/.env or environment. Running Phase 0 fallback...",
+                "content": "No GEMINI_API_KEY detected in server/agentic/.env or environment. Running Phase 0 fallback...",
             }
             if schema_info:
                 preview = self.duckdb_engine.run_query("SELECT * FROM dataset LIMIT 5")
@@ -224,14 +224,14 @@ class ReActAgent:
                     f"- **Total Rows**: {total}\n"
                     f"- **DuckDB Query Time**: {preview.get('execution_time_ms', 0)}ms\n\n"
                     f"> [!TIP]\n"
-                    f"> To enable full autonomous ReAct reasoning with Gemini, set `GEMINI_API_KEY` in `agentic/.env`.\n"
+                    f"> To enable full autonomous ReAct reasoning with Gemini, set `GEMINI_API_KEY` in `server/agentic/.env`.\n"
                 )
             else:
                 md = (
                     "### Phase 0 ReAct Agent Ready\n\n"
                     "DuckDB and Python warm worker engines are initialized and operational.\n\n"
                     "> [!TIP]\n"
-                    f"> Add your Gemini API Key into `agentic/.env`:\n"
+                    f"> Add your Gemini API Key into `server/agentic/.env`:\n"
                     f"> ```env\n"
                     f"> GEMINI_API_KEY=your_key_here\n"
                     f"> ```\n"

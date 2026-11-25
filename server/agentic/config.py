@@ -4,15 +4,16 @@ from dotenv import load_dotenv
 
 # Resolution roots
 AGENTIC_ROOT = Path(__file__).resolve().parent
-PROJECT_ROOT = AGENTIC_ROOT.parent
+SERVER_ROOT = AGENTIC_ROOT.parent
+PROJECT_ROOT = SERVER_ROOT.parent
 
 # Load environment configuration in priority order:
-# 1. agentic/.env (local agentic workspace)
-# 2. backend/.env (project backend config)
+# 1. server/agentic/.env (local agentic workspace)
+# 2. server/backend/.env (project backend config)
 # 3. .env (repository root)
 for env_path in [
     AGENTIC_ROOT / ".env",
-    PROJECT_ROOT / "backend" / ".env",
+    SERVER_ROOT / "backend" / ".env",
     PROJECT_ROOT / ".env",
 ]:
     if env_path.is_file():
