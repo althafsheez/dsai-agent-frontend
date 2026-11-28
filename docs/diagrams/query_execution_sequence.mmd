@@ -1,0 +1,77 @@
+%% DSAI — analytical query lifecycle (proposed), including cancel and failure paths.
+%% Event envelope: {event_id, run_id, sequence, type, data, timestamp} (unchanged from API_CONTRACT.md).
+sequenceDiagram
+    autonumber
+    participant B as Browser (Next.js)
+    participant A as api role
+    participant PG as PostgreSQL
+    participant V as Valkey
+    participant Q as Dispatcher (Cloud Tasks)
+    participant W as agent-worker
+    participant M as Model gateway -> LLM
+    participant S as E2B sandbox
+    participant G as Object storage
+
+    Note over B: First Send only: POST /api/chats, then signed-URL uploads, then start run
+    B->>A: POST /api/chats/{id}/messages/stream {user_message_id, model_id, effort, client_request_id}
+    A->>A: verify JWT, load membership, check role >= contributor
+    A->>V: rate-limit check (user, workspace, model)
+    A->>PG: TX: validate message + ready attachments, uniqueness(client_request_id),<br/>"one active run per chat" constraint, insert agent_run(queued) + assistant message
+    A->>Q: create task name=run_id (dedupe), target=/internal/runs/{run_id}/execute
+    A-->>B: 200 text/event-stream (headers flushed immediately)
+    A->>V: XREAD BLOCK run:{run_id}:events from "0"
+
+    Q->>W: POST /internal/runs/{run_id}/execute (OIDC service identity)
+    W->>PG: UPDATE agent_runs SET status=running, lease_until=now()+30s<br/>WHERE id=run_id AND status=queued (claim: 0 rows means duplicate delivery, exit)
+    W->>V: XADD agent.started (seq 1)
+    V-->>A: event
+    A-->>B: id/event/data frame
+    W->>PG: resolve context: history window, dataset manifests, connector selection (authorized)
+
+    loop each agent step (bounded by max_steps, run deadline)
+        W->>V: check cancel / steer keys (safe checkpoint)
+        W->>M: stream generate(messages, tools, model, effort, deadline)
+        M-->>W: token deltas / tool call
+        W->>V: XADD message.delta (coalesced every ~50 ms)
+        V-->>A: events
+        A-->>B: frames
+        alt tool = execute_python
+            W->>S: create lazily (first use) and stage inputs via signed GET URLs
+            W->>V: XADD tool.started
+            W->>S: run_code(timeout)
+            S->>G: PUT outputs to quarantine/{run_id}/ (signed URLs)
+            S-->>W: stdout/stderr/result (bounded)
+            W->>PG: register outputs (dedupe run_id+path+sha256) -> dataset/artifact rows
+            W->>V: XADD tool.completed, dataset.created / artifact.created
+        else tool = query_database
+            W->>W: re-check connection access, parse SQL (read-only), statement timeout
+        end
+        W->>PG: batch insert execution_events + update assistant content (every ~250 ms or 50 events),<br/>renew lease, record usage (tokens, sandbox seconds)
+    end
+
+    W->>PG: TX: finalize run + messages + terminal event (agent.completed)
+    W->>V: XADD message.completed, agent.completed, then set TTL on stream
+    V-->>A: terminal event
+    A-->>B: final frames, then close stream
+    W->>S: kill sandbox (or pause, if retention policy allows)
+    W->>Q: if queued follow-up exists: enqueue next run (same chat order)
+
+    opt Client disconnects / navigates away
+        B->>A: POST /api/runs/{id}/cancel {reason: navigation} (fetch keepalive)
+        A->>V: SET run:{id}:cancel = navigation
+        W->>V: observes cancel at next checkpoint
+        W->>S: cancel running code (kill) if policy = interrupt
+        W->>PG: finalize status=interrupted, preserve partial content/events
+    end
+
+    opt Stream connection drops but user still on page (proxy timeout, deploy)
+        B->>A: GET /api/runs/{id}/events/stream with Last-Event-ID (only if product enables resume)
+        A->>V: XRANGE from last id (fallback: PostgreSQL events after sequence)
+        A-->>B: replay missing frames, then live tail
+    end
+
+    opt Failure paths
+        M-->>W: 429/5xx -> retry with jittered backoff inside step budget, then model fallback (same effort)
+        W-->>W: worker crash -> lease expires -> reconciler marks run interrupted (no silent re-execution of side effects)
+        Q-->>W: delivery retry after crash -> claim fails (status != queued) -> no duplicate run
+    end

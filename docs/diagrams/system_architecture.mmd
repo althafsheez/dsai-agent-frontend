@@ -1,0 +1,71 @@
+%% DSAI — proposed system architecture (2026-11-28)
+%% One Python codebase ("dsai-server") deployed as four process roles.
+%% Solid arrows = synchronous calls; dashed arrows = asynchronous / event paths.
+flowchart LR
+    subgraph Client["Browser"]
+        FE["Next.js 15 frontend<br/>TanStack Query + fetch-SSE parser<br/>(src/lib/api)"]
+    end
+
+    subgraph Edge["Edge"]
+        CDN["Frontend hosting<br/>(Vercel or Cloud Run)"]
+        LB["HTTPS load balancer<br/>Cloud Armor / WAF"]
+    end
+
+    IDP["Managed identity provider<br/>(OIDC, JWT issuance)"]
+
+    subgraph Core["dsai-server — modular monolith (one repo, one image)"]
+        direction TB
+        API["api role (Cloud Run service)<br/>REST + SSE endpoints<br/>authn/authz, validation, run acceptance,<br/>signed URLs, event fan-out to clients"]
+        AW["agent-worker role (Cloud Run service,<br/>invoked per run by the dispatcher)<br/>agent loop, model gateway, tool execution,<br/>sandbox lifecycle, event emission"]
+        DW["data-worker role (Cloud Run service,<br/>high-memory)<br/>upload validation, profiling, Parquet conversion,<br/>previews, derived datasets, dashboard queries"]
+        SCH["scheduler entrypoint<br/>(Cloud Scheduler -> /internal/tick)<br/>workflow schedules, retention, reconciliation"]
+    end
+
+    subgraph State["Managed state"]
+        PG[("PostgreSQL (Cloud SQL)<br/>system of record:<br/>users, workspaces, chats, messages,<br/>runs, events, resources, usage, audit")]
+        VK[("Valkey (Memorystore)<br/>ephemeral: run event streams,<br/>cancel/steer signals, rate limits, cache")]
+        GCS[("Object storage (GCS)<br/>raw uploads, canonical Parquet,<br/>artifacts, previews")]
+        Q["Dispatcher queue<br/>(Cloud Tasks; portable fallback:<br/>Postgres SKIP LOCKED poller)"]
+        SM["Secret Manager / KMS"]
+    end
+
+    subgraph External["External providers"]
+        LLM["LLM providers<br/>(Gemini first; gateway allows others)"]
+        E2B["E2B sandboxes<br/>(one per run, lazily created)"]
+        CONN["Customer data sources<br/>(PostgreSQL, Google Drive, ...)"]
+        WEB["Web search (Tavily)"]
+    end
+
+    subgraph Obs["Observability"]
+        OTEL["OpenTelemetry collector -> traces, metrics, logs<br/>(Cloud Trace/Monitoring/Logging or Grafana stack)"]
+    end
+
+    FE --> CDN
+    FE -- "REST + POST SSE (Bearer JWT)" --> LB --> API
+    FE -- "direct PUT via signed URL" --> GCS
+    FE -. "sign-in" .-> IDP
+    API -. "verify JWT (JWKS cached)" .-> IDP
+
+    API -- "transactions (pooled)" --> PG
+    API -- "XREAD / rate limit / cache" --> VK
+    API -- "sign URLs, HEAD" --> GCS
+    API -- "enqueue run / job (idempotent task name)" --> Q
+    Q -. "HTTP push, retries" .-> AW
+    Q -. "HTTP push, retries" .-> DW
+    SCH -- "enqueue due work" --> Q
+
+    AW -- "claim run (lease), batch-persist events" --> PG
+    AW -- "XADD events, read cancel/steer" --> VK
+    AW -- "stream generate / tools" --> LLM
+    AW -- "run code; stage inputs from signed URLs" --> E2B
+    E2B -. "upload outputs to quarantine prefix" .-> GCS
+    AW -- "read-only queries" --> CONN
+    AW --> WEB
+    AW -- "enqueue output registration" --> Q
+
+    DW -- "stream read / write Parquet" --> GCS
+    DW -- "metadata, previews, status" --> PG
+    DW -. "job progress events" .-> VK
+
+    API & AW & DW -. "credentials at startup" .-> SM
+    API & AW & DW -. "OTLP" .-> OTEL
